@@ -21,7 +21,7 @@ class S1Exact:
         path = repo_root / anchor.file_path
         if not path.exists():
             return Verdict(is_stale=True)
-        lines = path.read_text().splitlines()
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         current = "\n".join(lines[anchor.start_line - 1: anchor.end_line])
         stale = _sha(current) != memory.payloads[self.name]["hash"]
         return Verdict(is_stale=stale)

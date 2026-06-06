@@ -23,7 +23,7 @@ class S2Normalized:
         target = memory.payloads[self.name]["norm_hash"]
         if not path.exists():
             return Verdict(is_stale=True)
-        if _contains_block(path.read_text(), anchor.snippet, target):
+        if _contains_block(path.read_text(encoding="utf-8", errors="replace"), anchor.snippet, target):
             return Verdict(is_stale=False)
         return Verdict(is_stale=True)
 

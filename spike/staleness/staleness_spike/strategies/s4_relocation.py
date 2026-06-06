@@ -26,7 +26,7 @@ class S4Relocation:
         min_window = payload["min_window"]
         origin = memory.anchor.file_path
         for path in sorted(repo_root.rglob("*.py")):
-            hit = _find_window(path.read_text(), min_window, target)
+            hit = _find_window(path.read_text(encoding="utf-8", errors="replace"), min_window, target)
             if hit is not None:
                 rel = path.relative_to(repo_root).as_posix()
                 relocated = None if rel == origin else f"{rel}:{hit}"

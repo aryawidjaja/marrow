@@ -6,6 +6,6 @@ from staleness_spike.strategies.base import Strategy
 STRATEGIES: list[Strategy] = []
 
 
-def register(strategy: Strategy) -> Strategy:
-    STRATEGIES.append(strategy)
+def register(strategy: type[Strategy]) -> type[Strategy]:
+    STRATEGIES.append(strategy())  # store an instance; decorator still returns the class
     return strategy
