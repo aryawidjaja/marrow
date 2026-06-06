@@ -1,7 +1,5 @@
 # Project planning / internal notes — not part of the public project
 /docs/
-claude-research.md
-MARROW.md
 CLAUDE.md
 AGENTS.md
 .claude/
@@ -17,3 +15,6 @@ venv/
 # Spike outputs
 spike/staleness/results/
 spike/staleness/corpus/
+
+# Rust build artifacts
+/target/
