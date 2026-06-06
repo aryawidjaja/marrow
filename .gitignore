@@ -1,0 +1,19 @@
+# Project planning / internal notes — not part of the public project
+/docs/
+claude-research.md
+MARROW.md
+CLAUDE.md
+AGENTS.md
+.claude/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+
+# Spike outputs
+spike/staleness/results/
+spike/staleness/corpus/
