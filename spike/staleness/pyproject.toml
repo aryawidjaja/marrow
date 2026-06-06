@@ -1,0 +1,16 @@
+[project]
+name = "staleness-spike"
+version = "0.0.0"
+description = "Throwaway experiment: is code-citation staleness a trustworthy signal?"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.setuptools.packages.find]
+include = ["staleness_spike*"]
