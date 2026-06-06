@@ -6,5 +6,6 @@
 
 pub mod fingerprint;
 pub mod parser;
+pub mod relocation;
 pub mod symbols;
 pub mod types;
