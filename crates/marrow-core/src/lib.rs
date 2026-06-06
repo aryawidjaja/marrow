@@ -5,3 +5,5 @@
 //! relocation search and flagging stale only when both agree.
 
 pub mod parser;
+pub mod symbols;
+pub mod types;
