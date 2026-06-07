@@ -99,6 +99,7 @@ mod tests {
                     org_id: None,
                 },
                 refs: vec![],
+                code_anchors: vec![],
                 confidence: 1.0,
                 decay: None,
                 provenance: Provenance {

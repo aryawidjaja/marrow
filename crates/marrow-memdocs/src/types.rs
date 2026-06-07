@@ -58,6 +58,17 @@ pub struct Ref {
     pub anchor: Option<String>,
 }
 
+/// A code anchor carried by a memory, mirroring a `marrow_core::Anchor` so the store can
+/// run the full structural+relocation staleness check against live code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeAnchor {
+    pub file_path: String,
+    pub symbol: String,
+    pub snippet: String,
+    pub fingerprint: String,
+    pub norm: String,
+}
+
 /// Time-based decay configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Decay {
@@ -95,6 +106,8 @@ pub struct Frontmatter {
     pub scope: Scope,
     #[serde(default)]
     pub refs: Vec<Ref>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub code_anchors: Vec<CodeAnchor>,
     #[serde(default = "default_confidence")]
     pub confidence: f64,
     #[serde(skip_serializing_if = "Option::is_none", default)]
