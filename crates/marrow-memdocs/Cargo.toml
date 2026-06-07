@@ -1,0 +1,12 @@
+[package]
+name = "marrow-memdocs"
+version = "0.1.0"
+edition = "2021"
+description = "Markdown memory documents: typed frontmatter, base schemas, and validation for Marrow."
+license = "MIT"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+
+[dev-dependencies]
