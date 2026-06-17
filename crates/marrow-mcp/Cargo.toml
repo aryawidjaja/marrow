@@ -12,7 +12,6 @@ path = "src/main.rs"
 [dependencies]
 marrow-store = { path = "../marrow-store" }
 marrow-memdocs = { path = "../marrow-memdocs" }
-marrow-core = { path = "../marrow-core" }
 serde_json = "1"
 
 [dev-dependencies]

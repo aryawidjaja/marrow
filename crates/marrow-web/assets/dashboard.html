@@ -12,15 +12,15 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text);
     font: 14px/1.5 -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
-  header { display: flex; align-items: center; gap: 12px; padding: 14px 20px;
-    border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); }
+  header { display: flex; align-items: center; gap: 10px; padding: 12px 20px;
+    border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); flex-wrap: wrap; }
   header h1 { font-size: 18px; margin: 0; }
-  header .sub { color: var(--muted); font-size: 12px; }
   header .spacer { flex: 1; }
   button { background: var(--panel); color: var(--text); border: 1px solid var(--line);
     padding: 7px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; }
   button:hover { border-color: var(--accent); }
   button.primary { background: var(--accent); color: #0b0d11; border-color: var(--accent); font-weight: 600; }
+  button.on { border-color: var(--accent); color: var(--accent); }
   .pill { padding: 3px 9px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
   .pill.ok { color: var(--ok); border-color: var(--ok); }
   .pill.bad { color: var(--stale); border-color: var(--stale); }
@@ -28,10 +28,12 @@
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
   .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
     margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--line); }
-  .list { max-height: 70vh; overflow: auto; }
-  .row { padding: 12px 14px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .list { max-height: 72vh; overflow: auto; }
+  .row { padding: 12px 14px; border-bottom: 1px solid var(--line); cursor: pointer;
+    overflow: hidden; transition: max-height .35s ease, opacity .35s ease, padding .35s ease; max-height: 80px; }
   .row:hover { background: #1c2029; }
   .row.sel { background: #1e2530; }
+  .row.collapsing { max-height: 0; opacity: 0; padding-top: 0; padding-bottom: 0; }
   .row .top { display: flex; align-items: center; gap: 8px; }
   .row .topic { font-weight: 600; }
   .row .snippet { color: var(--muted); margin-top: 3px; font-size: 13px;
@@ -39,10 +41,16 @@
   .tag { font-size: 11px; padding: 1px 7px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); }
   .badge { font-size: 11px; padding: 1px 7px; border-radius: 6px; font-weight: 700; }
   .badge.stale { background: rgba(255,93,93,.15); color: var(--stale); border: 1px solid var(--stale); }
-  #detail { padding: 14px; white-space: pre-wrap; }
+  .badge.status { background: #20242e; color: var(--muted); border: 1px solid var(--line); }
+  #detail { padding: 14px; }
   #detail .meta { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
-  #detail .body { background: #12151c; border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
-  .events { max-height: 30vh; overflow: auto; font-size: 12px; }
+  #detail .body { background: #12151c; border: 1px solid var(--line); border-radius: 8px; padding: 12px; white-space: pre-wrap; }
+  .prov { margin-top: 12px; font-size: 12px; }
+  .prov h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 6px; }
+  .prov .line { color: var(--muted); padding: 2px 0; }
+  .prov .ev { padding: 4px 0; border-top: 1px dashed var(--line); }
+  .prov .ev.retrieve b { color: var(--accent); }
+  .events { max-height: 26vh; overflow: auto; font-size: 12px; }
   .events .ev { padding: 8px 14px; border-bottom: 1px solid var(--line); color: var(--muted); }
   .events .ev b { color: var(--text); }
   .empty { padding: 16px 14px; color: var(--muted); }
@@ -54,11 +62,13 @@
 <body>
 <header>
   <h1>Marrow 🦴</h1>
-  <span class="sub" id="store"></span>
-  <span class="spacer"></span>
   <span class="pill" id="audit">audit…</span>
-  <button id="refresh">Refresh</button>
+  <span class="spacer"></span>
+  <button id="filter">Showing: active</button>
+  <button id="seed">Seed demo</button>
+  <button id="break">Break code</button>
   <button class="primary" id="consolidate">Consolidate</button>
+  <button id="refresh">Refresh</button>
 </header>
 
 <main>
@@ -67,7 +77,7 @@
     <div class="list" id="list"><div class="empty">loading…</div></div>
   </section>
   <section class="panel">
-    <h2>Detail</h2>
+    <h2>Detail &amp; provenance</h2>
     <div id="detail"><div class="empty">select a memory</div></div>
     <h2>Recent activity</h2>
     <div class="events" id="events"></div>
@@ -78,13 +88,13 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-let state = { memories: [], stale: new Set(), selected: null };
+let state = { memories: [], stale: new Set(), selected: null, status: 'active' };
 
 async function getJSON(url, opts) { const r = await fetch(url, opts); return r.json(); }
 
 async function loadAll() {
   const [mem, stale, audit, hist] = await Promise.all([
-    getJSON('/api/memories?status=active'),
+    getJSON('/api/memories?status=' + state.status),
     getJSON('/api/stale'),
     getJSON('/api/audit'),
     getJSON('/api/history'),
@@ -104,17 +114,19 @@ function renderAudit(a) {
 
 function renderList() {
   const list = $('list');
-  if (!state.memories.length) { list.innerHTML = '<div class="empty">no active memories</div>'; return; }
+  if (!state.memories.length) { list.innerHTML = '<div class="empty">no memories — try “Seed demo”</div>'; return; }
   list.innerHTML = '';
   for (const m of state.memories) {
     const row = document.createElement('div');
     row.className = 'row' + (m.id === state.selected ? ' sel' : '');
+    row.dataset.id = m.id;
     const isStale = state.stale.has(m.id);
+    const statusBadge = m.status !== 'active' ? '<span class="badge status">' + esc(m.status) + '</span>' : '';
     row.innerHTML =
       '<div class="top">' +
         '<span class="topic">' + esc(m.topic || '—') + '</span>' +
         '<span class="tag">' + esc(m.kind) + '</span>' +
-        (isStale ? '<span class="badge stale">STALE</span>' : '') +
+        (isStale ? '<span class="badge stale">STALE</span>' : '') + statusBadge +
       '</div>' +
       '<div class="snippet">' + esc(m.snippet || '') + '</div>';
     row.onclick = () => selectMemory(m.id);
@@ -125,15 +137,25 @@ function renderList() {
 async function selectMemory(id) {
   state.selected = id;
   renderList();
-  const m = await getJSON('/api/memory/' + id);
-  const refs = (m.refs || []).map((r) => r.kind + ':' + r.value).join(', ') || '—';
-  const sup = (m.supersedes || []).join(', ') || '—';
+  const [m, p] = await Promise.all([getJSON('/api/memory/' + id), getJSON('/api/provenance/' + id)]);
   const by = (m.provenance || {}).written_by || '—';
+  const sup = (p.supersedes || []).map((r) => r.id + ' [' + r.kind + ']').join(', ') || '—';
+  const supBy = (p.superseded_by || []).map((r) => r.id + ' [' + r.kind + ']').join(', ') || '—';
+  const sources = (p.sources || []).join(', ') || '—';
+  const hist = (p.history || []).map((e) =>
+    '<div class="ev ' + esc(e.kind) + '"><b>' + esc(e.kind) + '</b> — ' + esc(e.summary) + '</div>'
+  ).join('') || '<div class="line">no events</div>';
   $('detail').innerHTML =
     '<div class="meta"><b>' + esc(m.type) + '</b> · ' + esc(m.topic || '—') +
-    ' · status: ' + esc(m.status) + ' · confidence: ' + m.confidence +
-    ' · by: ' + esc(by) + '<br>refs: ' + esc(refs) + ' · supersedes: ' + esc(sup) + '</div>' +
-    '<div class="body">' + esc((m.body || '').trim()) + '</div>';
+    ' · status: ' + esc(m.status) + ' · confidence: ' + m.confidence + ' · by: ' + esc(by) + '</div>' +
+    '<div class="body">' + esc((m.body || '').trim()) + '</div>' +
+    '<div class="prov">' +
+      '<h3>Provenance</h3>' +
+      '<div class="line">sources: ' + esc(sources) + '</div>' +
+      '<div class="line">supersedes: ' + esc(sup) + '</div>' +
+      '<div class="line">superseded by: ' + esc(supBy) + '</div>' +
+      '<h3 style="margin-top:10px">How it has been used</h3>' + hist +
+    '</div>';
 }
 
 function renderEvents(events) {
@@ -145,9 +167,29 @@ function renderEvents(events) {
 }
 
 async function consolidate() {
+  const before = new Set(state.memories.map((m) => m.id));
   const out = await getJSON('/api/consolidate?apply=true', { method: 'POST' });
+  const after = await getJSON('/api/memories?status=' + state.status);
+  const keep = new Set((after.memories || []).map((m) => m.id));
+  // Animate the rows that are about to disappear.
+  let animated = false;
+  before.forEach((id) => {
+    if (!keep.has(id)) {
+      const el = document.querySelector('.row[data-id="' + id + '"]');
+      if (el) { el.classList.add('collapsing'); animated = true; }
+    }
+  });
   toast('merged ' + out.merged + ', conflicts ' + out.conflicts_resolved + ', retired ' + out.deprecated);
-  await loadAll();
+  setTimeout(loadAll, animated ? 380 : 0);
+}
+
+async function post(url) { await fetch(url, { method: 'POST' }); await loadAll(); }
+
+function toggleFilter() {
+  state.status = state.status === 'active' ? 'all' : 'active';
+  $('filter').textContent = 'Showing: ' + state.status;
+  $('filter').className = state.status === 'all' ? 'on' : '';
+  loadAll();
 }
 
 function toast(msg) {
@@ -159,8 +201,11 @@ function esc(s) { return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<'
 
 $('refresh').onclick = loadAll;
 $('consolidate').onclick = consolidate;
+$('filter').onclick = toggleFilter;
+$('seed').onclick = () => post('/api/demo/seed');
+$('break').onclick = () => post('/api/demo/break');
 loadAll();
-setInterval(loadAll, 4000);   // live: edit code and watch STALE appear
+setInterval(loadAll, 4000);   // live: break the code and watch STALE appear
 </script>
 </body>
 </html>

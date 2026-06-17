@@ -134,3 +134,50 @@ fn consolidate_endpoint_merges_duplicates() {
     let v = get(&store, dir.path(), "/api/memories?status=active");
     assert_eq!(v["count"], 1);
 }
+
+#[test]
+fn provenance_endpoint_returns_trail() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::init(dir.path()).unwrap();
+    let mut a = mem(MemoryKind::Decision, "auth", "Use JWT.");
+    let old = store.write(&mut a).unwrap();
+    let mut b = mem(MemoryKind::Decision, "auth", "Use opaque tokens.");
+    let new = store.supersede(&old, &mut b).unwrap();
+
+    let v = get(&store, dir.path(), &format!("/api/provenance/{new}"));
+    assert_eq!(v["written_by"], "agent");
+    assert!(v["supersedes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|r| r["id"] == old));
+    assert!(!v["history"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn demo_seed_break_drives_the_full_story() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::init(dir.path()).unwrap();
+
+    let seeded = route(&store, dir.path(), "POST", "/api/demo/seed");
+    assert_eq!(seeded.status, 200);
+
+    // 3 memories seeded; nothing stale yet.
+    let mem_v = get(&store, dir.path(), "/api/memories?status=active");
+    assert_eq!(mem_v["count"], 3);
+    assert_eq!(get(&store, dir.path(), "/api/stale")["count"], 0);
+
+    // Break the demo code -> the anchored memory goes stale.
+    let broke = route(&store, dir.path(), "POST", "/api/demo/break");
+    assert_eq!(broke.status, 200);
+    assert_eq!(get(&store, dir.path(), "/api/stale")["count"], 1);
+
+    // Consolidate collapses the duplicate pair.
+    let applied = route(&store, dir.path(), "POST", "/api/consolidate?apply=true");
+    let av: serde_json::Value = serde_json::from_str(&applied.body).unwrap();
+    assert_eq!(av["merged"], 1);
+    assert_eq!(
+        get(&store, dir.path(), "/api/memories?status=active")["count"],
+        2
+    );
+}

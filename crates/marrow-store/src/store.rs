@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use marrow_episodic::{EpisodicLog, Event, NewEvent};
-use marrow_memdocs::{to_markdown, validate, Memory, Violation};
+use marrow_memdocs::{to_markdown, validate, CodeAnchor, Memory, Ref, RefKind, Violation};
 use rusqlite::Connection;
 use ulid::Ulid;
 
@@ -241,6 +241,32 @@ impl Store {
         );
         self.record(NewEvent::new("write", &fm.provenance.written_by, &summary).memory(&fm.id))?;
         Ok(memory.frontmatter.id.clone())
+    }
+
+    /// Write a memory anchored to a code symbol: seeds a structural fingerprint of the symbol
+    /// so the memory can be staleness-checked, then writes it. Shared by the CLI, MCP, and web.
+    pub fn write_anchored(
+        &self,
+        repo_root: &Path,
+        file: &str,
+        symbol: &str,
+        memory: &mut Memory,
+    ) -> Result<String, Error> {
+        let core = marrow_core::seed_anchor(repo_root, file, symbol)
+            .ok_or_else(|| Error::NotFound(format!("symbol {symbol} in {file}")))?;
+        memory.frontmatter.refs.push(Ref {
+            kind: RefKind::Symbol,
+            value: format!("{file}::{symbol}"),
+            anchor: Some(core.fingerprint.clone()),
+        });
+        memory.frontmatter.code_anchors.push(CodeAnchor {
+            file_path: core.file_path,
+            symbol: core.symbol,
+            snippet: core.snippet,
+            fingerprint: core.fingerprint,
+            norm: core.norm,
+        });
+        self.write(memory)
     }
 
     /// Embed a memory's topic+body and store the vector, if an embedder is configured.

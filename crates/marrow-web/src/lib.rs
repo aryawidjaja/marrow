@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use marrow_memdocs::{Frontmatter, Memory, MemoryKind, Provenance, Scope, Status};
 use marrow_store::Store;
 use serde_json::json;
 
@@ -30,10 +31,108 @@ pub fn route(store: &Store, root: &Path, method: &str, target: &str) -> Response
         ("GET", "/api/history") => history(store),
         ("GET", "/api/audit") => audit(store),
         ("POST", "/api/consolidate") => consolidate(store, root, &query),
+        ("POST", "/api/demo/seed") => demo_seed(store, root),
+        ("POST", "/api/demo/break") => demo_break(root),
         ("GET", p) if p.starts_with("/api/memory/") => {
             memory(store, p.trim_start_matches("/api/memory/"))
         }
+        ("GET", p) if p.starts_with("/api/provenance/") => {
+            provenance(store, p.trim_start_matches("/api/provenance/"))
+        }
         _ => not_found(),
+    }
+}
+
+fn provenance(store: &Store, id: &str) -> Response {
+    match store.provenance(id) {
+        Ok(Some(t)) => {
+            let mref = |r: &marrow_store::MemoryRef| json!({"id": r.id, "kind": r.kind, "topic": r.topic, "status": r.status});
+            json_ok(json!({
+                "id": t.id,
+                "written_by": t.written_by,
+                "sources": t.sources,
+                "supersedes": t.supersedes.iter().map(mref).collect::<Vec<_>>(),
+                "superseded_by": t.superseded_by.iter().map(mref).collect::<Vec<_>>(),
+                "history": t.events.iter().map(|e| json!({
+                    "seq": e.seq, "ts": e.ts, "kind": e.kind, "summary": e.summary
+                })).collect::<Vec<_>>(),
+            }))
+        }
+        Ok(None) => not_found(),
+        Err(e) => error(&e.to_string()),
+    }
+}
+
+/// The sample file the demo controls operate on. Only this file is ever touched.
+const DEMO_FILE: &str = "marrow_demo.rs";
+
+fn demo_memory(kind: MemoryKind, topic: &str, body: &str) -> Memory {
+    Memory {
+        frontmatter: Frontmatter {
+            id: String::new(),
+            kind,
+            status: Status::Active,
+            topic: Some(topic.into()),
+            scope: Scope {
+                user_id: None,
+                agent_id: None,
+                project_id: String::new(),
+                org_id: None,
+            },
+            refs: vec![],
+            code_anchors: vec![],
+            confidence: 1.0,
+            decay: None,
+            provenance: Provenance {
+                written_by: "demo".into(),
+                session_id: None,
+                sources: vec!["demo-seed".into()],
+            },
+            supersedes: vec![],
+            tags: vec![],
+            created_at: String::new(),
+            updated_at: String::new(),
+            hmac: None,
+        },
+        body: body.into(),
+    }
+}
+
+/// Seed a self-contained demo: a code file, a memory anchored to it, and a duplicate pair.
+fn demo_seed(store: &Store, root: &Path) -> Response {
+    let demo_path = root.join(DEMO_FILE);
+    let code = "pub fn demo_widget() -> u32 {\n    42\n}\n";
+    if let Err(e) = std::fs::write(&demo_path, code) {
+        return error(&e.to_string());
+    }
+    let mut anchored = demo_memory(
+        MemoryKind::Decision,
+        "demo-widget",
+        "The demo widget returns 42 from demo_widget().",
+    );
+    if let Err(e) = store.write_anchored(root, DEMO_FILE, "demo_widget", &mut anchored) {
+        return error(&e.to_string());
+    }
+    for topic in ["demo-cache", "demo-cache-copy"] {
+        let mut dup = demo_memory(
+            MemoryKind::Fact,
+            topic,
+            "The demo cache is cleared on every write.",
+        );
+        if let Err(e) = store.write(&mut dup) {
+            return error(&e.to_string());
+        }
+    }
+    json_ok(json!({ "seeded": true }))
+}
+
+/// Change the demo code so its anchored memory goes stale.
+fn demo_break(root: &Path) -> Response {
+    let demo_path = root.join(DEMO_FILE);
+    let code = "pub fn demo_widget() -> u32 {\n    let base = compute_base();\n    base * 7\n}\n";
+    match std::fs::write(&demo_path, code) {
+        Ok(()) => json_ok(json!({ "broke": true })),
+        Err(e) => error(&e.to_string()),
     }
 }
 

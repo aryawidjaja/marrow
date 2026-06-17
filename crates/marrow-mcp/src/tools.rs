@@ -2,10 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use marrow_core::seed_anchor;
-use marrow_memdocs::{
-    CodeAnchor, Frontmatter, Memory, MemoryKind, Provenance, Ref, RefKind, Scope, Status,
-};
+use marrow_memdocs::{Frontmatter, Memory, MemoryKind, Provenance, Scope, Status};
 use marrow_store::{Query, Store};
 use serde_json::{json, Value};
 
@@ -152,22 +149,10 @@ fn anchor(store: &Store, root: &Path, args: &Value) -> Result<String, String> {
         .and_then(Value::as_str)
         .map(PathBuf::from)
         .unwrap_or_else(|| root.to_path_buf());
-    let core = seed_anchor(&repo, &file, &symbol)
-        .ok_or_else(|| format!("symbol {symbol} not found in {file}"))?;
     let mut memory = memory_from(args)?;
-    memory.frontmatter.refs.push(Ref {
-        kind: RefKind::Symbol,
-        value: format!("{file}::{symbol}"),
-        anchor: Some(core.fingerprint.clone()),
-    });
-    memory.frontmatter.code_anchors.push(CodeAnchor {
-        file_path: core.file_path,
-        symbol: core.symbol,
-        snippet: core.snippet,
-        fingerprint: core.fingerprint,
-        norm: core.norm,
-    });
-    store.write(&mut memory).map_err(|e| e.to_string())
+    store
+        .write_anchored(&repo, &file, &symbol, &mut memory)
+        .map_err(|e| e.to_string())
 }
 
 fn read(store: &Store, args: &Value) -> Result<String, String> {

@@ -7,10 +7,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use marrow_core::seed_anchor;
-use marrow_memdocs::{
-    CodeAnchor, Frontmatter, Memory, MemoryKind, Provenance, Ref, RefKind, Scope, Status,
-};
+use marrow_memdocs::{Frontmatter, Memory, MemoryKind, Provenance, Scope, Status};
 use marrow_store::{Query, Store};
 
 /// Marrow: a markdown-native memory store for AI agents.
@@ -237,8 +234,6 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
         }
         Cmd::Anchor(args) => {
             let store = open(&cli.root)?;
-            let anchor = seed_anchor(&args.repo, &args.file, &args.symbol)
-                .ok_or_else(|| format!("symbol {} not found in {}", args.symbol, args.file))?;
             let mut memory = build_memory(
                 args.kind.into(),
                 args.topic,
@@ -247,19 +242,9 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
                 vec![],
                 args.body,
             );
-            memory.frontmatter.refs.push(Ref {
-                kind: RefKind::Symbol,
-                value: format!("{}::{}", args.file, args.symbol),
-                anchor: Some(anchor.fingerprint.clone()),
-            });
-            memory.frontmatter.code_anchors.push(CodeAnchor {
-                file_path: anchor.file_path,
-                symbol: anchor.symbol,
-                snippet: anchor.snippet,
-                fingerprint: anchor.fingerprint,
-                norm: anchor.norm,
-            });
-            let id = store.write(&mut memory).map_err(|e| e.to_string())?;
+            let id = store
+                .write_anchored(&args.repo, &args.file, &args.symbol, &mut memory)
+                .map_err(|e| e.to_string())?;
             writeln!(out, "{id}").ok();
             Ok(())
         }
