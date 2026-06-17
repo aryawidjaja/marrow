@@ -149,6 +149,9 @@ pub struct FilterArgs {
     /// Include expired memories.
     #[arg(long)]
     pub include_expired: bool,
+    /// Hybrid search weight: 0 = keyword only, 1 = semantic only.
+    #[arg(long)]
+    pub weight: Option<f64>,
 }
 
 impl FilterArgs {
@@ -163,6 +166,7 @@ impl FilterArgs {
             max_tokens: self.max_tokens,
             limit: self.limit,
             exclude_expired: !self.include_expired,
+            hybrid_weight: self.weight,
             ..Query::default()
         }
     }
@@ -305,7 +309,8 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
         Cmd::Doctor => {
             let store = open(&cli.root)?;
             let n = store.reindex().map_err(|e| e.to_string())?;
-            writeln!(out, "Reindexed {n} mem(s)").ok();
+            let embedded = store.reembed().map_err(|e| e.to_string())?;
+            writeln!(out, "Reindexed {n} mem(s); embedded {embedded}").ok();
             Ok(())
         }
         Cmd::Status => {

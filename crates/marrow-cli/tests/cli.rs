@@ -187,3 +187,16 @@ fn anchor_then_staleness_tracks_code_changes() {
     assert!(stale.contains("issue_token"));
     assert!(stale.contains(&id));
 }
+
+#[test]
+fn search_accepts_weight_flag() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(root, &["init"]);
+    ok(
+        root,
+        &["add", "--kind", "fact", "--topic", "x", "alpha beta"],
+    );
+    let hits = ok(root, &["search", "alpha", "--weight", "0"]);
+    assert!(hits.contains("1 result(s)"));
+}

@@ -78,7 +78,8 @@ fn filter_schema(with_text: bool) -> Value {
         "min_confidence": {"type": "number"},
         "max_tokens": {"type": "integer"},
         "limit": {"type": "integer"},
-        "include_expired": {"type": "boolean"}
+        "include_expired": {"type": "boolean"},
+        "weight": {"type": "number", "description": "hybrid search weight: 0 keyword, 1 semantic"}
     });
     let mut required = vec![];
     if with_text {
@@ -283,6 +284,7 @@ fn query_from(args: &Value) -> Query {
             .get("include_expired")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        hybrid_weight: args.get("weight").and_then(Value::as_f64),
         ..Query::default()
     }
 }
