@@ -47,6 +47,12 @@ Marrow keeps the markdown-first approach and closes those gaps.
   expire or decay over time.
 - **Provenance and integrity.** Each memory records who wrote it; optional HMAC signing makes
   tampering detectable.
+- **Tamper-evident audit trail.** Every write, supersede, and agent observation is recorded
+  in an append-only, hash-chained ledger. Edit any past entry and `marrow audit` reports the
+  break. Nothing is ever deleted from it.
+- **Consolidation.** A pass that keeps memory coherent: it flags stale anchors and expired
+  memories, and merges duplicate notes into one — distilling rather than dropping, with the
+  lineage preserved.
 
 ## Repository layout
 
@@ -54,7 +60,8 @@ Marrow keeps the markdown-first approach and closes those gaps.
 crates/
   marrow-core      Code-anchored staleness: structural fingerprint + relocation search
   marrow-memdocs   The memory document format: typed frontmatter, schemas, validation
-  marrow-store     Persistence, SQLite/FTS5 index, query, decay, scope, integrity
+  marrow-episodic  Append-only, hash-chained event ledger (episodic memory + audit trail)
+  marrow-store     Persistence, SQLite/FTS5 index, hybrid search, decay, scope, consolidation
   marrow-cli       The `marrow` command-line tool
   marrow-mcp       A Model Context Protocol server exposing the store to agents
 python/
@@ -108,6 +115,15 @@ Check which code-anchored memories have drifted from a repository:
 
 ```bash
 marrow list-stale --repo .
+```
+
+Review the tamper-evident history, or keep memory coherent:
+
+```bash
+marrow history                    # every write/supersede/observation
+marrow audit                      # verify the hash chain is intact
+marrow consolidate --repo .       # report stale, expired, and duplicate memories
+marrow consolidate --repo . --apply   # merge duplicates and retire expired
 ```
 
 If you ever lose or delete the index, rebuild it from the files:
@@ -192,10 +208,12 @@ Vectors live in the SQLite index and are rebuilt by `marrow doctor`.
 ## Status
 
 Working today: the staleness engine, the document format and validation, the store with its
-index, hybrid keyword+semantic search, decay, scope, supersession and integrity, the CLI, the
-MCP server, and the Anthropic memory-tool backend. Tested end to end.
+index, hybrid keyword+semantic search, decay, scope, supersession and integrity, the
+append-only audit ledger, the consolidation pass, the CLI, the MCP server, and the Anthropic
+memory-tool backend. Tested end to end.
 
-Planned: staleness for more languages and concurrent multi-writer support.
+Planned: staleness for more languages, richer consolidation (LLM-assisted distillation), and
+concurrent multi-writer support.
 
 ## License
 

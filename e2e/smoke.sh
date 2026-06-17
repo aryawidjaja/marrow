@@ -105,4 +105,25 @@ check "MCP advertises the anchor tool" "$session" "mem_anchor"
 check "MCP search returns the stored memory" "$session" "stored as markdown"
 check "MCP reports the stale anchor" "$session" "issue_token"
 
+echo "==> Audit ledger: tamper-evident history"
+m log --kind observe "noticed the auth change in review" > /dev/null
+check "history records writes and observations" "$(m history)" "observe"
+check "audit chain verifies clean" "$(m audit)" "audit ok"
+# Tamper with a recorded summary on disk; the hash chain must catch it.
+log_file="$proj/.marrow/episodic/log.jsonl"
+sed -i.bak 's/noticed/forged/' "$log_file" 2>/dev/null || sed -i 's/noticed/forged/' "$log_file"
+tampered_audit="$("$marrow" --root "$proj" audit 2>&1 || true)"
+check "tampering breaks the audit chain" "$tampered_audit" "broken"
+
+echo "==> Consolidation: detect and distill"
+proj2="$work/project2"
+mkdir -p "$proj2"
+n() { "$marrow" --root "$proj2" "$@"; }
+n init > /dev/null
+n add --kind fact --topic a "the cache is invalidated on write" > /dev/null
+n add --kind fact --topic b "the cache is invalidated on write" > /dev/null
+check "consolidation detects the duplicate" "$(n consolidate --repo "$proj2")" "duplicate memories: 1"
+check "applying consolidation merges it" "$(n consolidate --repo "$proj2" --apply)" "1 merged"
+check "no duplicates remain after merge" "$(n consolidate --repo "$proj2")" "duplicate memories: 0"
+
 printf '\nAll %d checks passed.\n' "$pass"
