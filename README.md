@@ -50,9 +50,11 @@ Marrow keeps the markdown-first approach and closes those gaps.
 - **Tamper-evident audit trail.** Every write, supersede, and agent observation is recorded
   in an append-only, hash-chained ledger. Edit any past entry and `marrow audit` reports the
   break. Nothing is ever deleted from it.
-- **Consolidation.** A pass that keeps memory coherent: it flags stale anchors and expired
-  memories, and merges duplicate notes into one — distilling rather than dropping, with the
-  lineage preserved.
+- **Consolidation that learns.** A pass that keeps memory coherent: it clusters related
+  memories by *meaning* (embedding similarity), then merges duplicates, resolves
+  contradictions, and retires expired notes — distilling rather than dropping, choosing the
+  survivor by salience and preserving lineage. Contradiction resolution can run against a
+  local or sovereign-hosted LLM (it never has to leave your infrastructure).
 
 ## Repository layout
 
@@ -204,6 +206,12 @@ Embeddings are pluggable via the `[embedding]` section of `.marrow/.marrow.toml`
   well.
 
 Vectors live in the SQLite index and are rebuilt by `marrow doctor`.
+
+Consolidation uses the same embeddings to find related memories, and a pluggable distiller to
+judge each cluster (merge / resolve-conflict / keep). The default is deterministic and offline;
+set `[consolidation] distiller = "http"` (build with `--features distill-http`) to point at any
+OpenAI-compatible chat endpoint — including a local or sovereign-hosted model — with the key in
+`MARROW_DISTILL_API_KEY`.
 
 ## Status
 
