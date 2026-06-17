@@ -8,6 +8,8 @@
 pub mod config;
 pub mod consolidate;
 pub mod convert;
+#[cfg(feature = "distill-http")]
+pub mod distill_http;
 pub mod embed;
 #[cfg(feature = "embed-fastembed")]
 pub mod embed_fastembed;
@@ -22,7 +24,8 @@ pub mod util;
 
 pub use config::Config;
 pub use consolidate::{
-    ConsolidationOutcome, ConsolidationReport, DupCluster, HeuristicSummarizer, Summarizer,
+    Cluster, ClusterAction, ConsolidationOutcome, ConsolidationReport, Distiller,
+    HeuristicDistiller, Verdict,
 };
 pub use embed::{EmbedError, Embedder, HashEmbedder};
 pub use query::Query;

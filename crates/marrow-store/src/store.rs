@@ -74,11 +74,11 @@ impl From<std::io::Error> for Error {
 pub struct Store {
     root: PathBuf,
     conn: Connection,
-    config: Config,
+    pub(crate) config: Config,
     key: Option<Vec<u8>>,
-    embedder: Option<Box<dyn Embedder>>,
+    pub(crate) embedder: Option<Box<dyn Embedder>>,
     episodic: RefCell<EpisodicLog>,
-    pub(crate) summarizer: Box<dyn crate::consolidate::Summarizer>,
+    pub(crate) distiller: Box<dyn crate::consolidate::Distiller>,
 }
 
 impl Store {
@@ -114,6 +114,7 @@ impl Store {
             None
         };
         let embedder = build_embedder(&config);
+        let distiller = crate::consolidate::build_distiller(&config);
         let episodic = EpisodicLog::open(&root).map_err(|e| Error::Io(e.to_string()))?;
         Ok(Store {
             root,
@@ -122,7 +123,7 @@ impl Store {
             key,
             embedder,
             episodic: RefCell::new(episodic),
-            summarizer: Box::new(crate::consolidate::HeuristicSummarizer),
+            distiller,
         })
     }
 
@@ -161,6 +162,11 @@ impl Store {
     /// Inject an embedder (used by tests and embedding integrations).
     pub fn set_embedder(&mut self, embedder: Box<dyn Embedder>) {
         self.embedder = Some(embedder);
+    }
+
+    /// Inject a distiller (used by tests and to plug in an LLM-backed consolidator).
+    pub fn set_distiller(&mut self, distiller: Box<dyn crate::consolidate::Distiller>) {
+        self.distiller = distiller;
     }
 
     fn memory_dir(&self) -> PathBuf {

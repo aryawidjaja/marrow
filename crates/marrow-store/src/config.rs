@@ -29,6 +29,29 @@ impl Default for EmbeddingConfig {
     }
 }
 
+/// Consolidation configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConsolidationConfig {
+    /// Cosine similarity at or above which two memories are considered related.
+    pub sim_threshold: f64,
+    /// Distiller backend: "heuristic" | "http".
+    pub distiller: String,
+    /// Chat-completions endpoint for the "http" distiller (point at a local/sovereign model).
+    pub distiller_url: String,
+    pub distiller_model: String,
+}
+
+impl Default for ConsolidationConfig {
+    fn default() -> Self {
+        ConsolidationConfig {
+            sim_threshold: 0.83,
+            distiller: "heuristic".to_string(),
+            distiller_url: "http://localhost:8080/v1/chat/completions".to_string(),
+            distiller_model: "local".to_string(),
+        }
+    }
+}
+
 /// Per-store configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
@@ -40,6 +63,9 @@ pub struct Config {
     /// Embedding backend for semantic search.
     #[serde(default)]
     pub embedding: EmbeddingConfig,
+    /// Consolidation behavior.
+    #[serde(default)]
+    pub consolidation: ConsolidationConfig,
 }
 
 impl Default for Config {
@@ -48,6 +74,7 @@ impl Default for Config {
             project_id: "default".to_string(),
             sign: false,
             embedding: EmbeddingConfig::default(),
+            consolidation: ConsolidationConfig::default(),
         }
     }
 }
@@ -77,6 +104,7 @@ mod tests {
                 provider: "http".into(),
                 ..EmbeddingConfig::default()
             },
+            consolidation: ConsolidationConfig::default(),
         };
         let parsed = Config::from_toml(&c.to_toml()).unwrap();
         assert_eq!(c, parsed);

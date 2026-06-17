@@ -442,8 +442,8 @@ fn consolidate_detects_without_changing() {
     store.write(&mut b).unwrap();
 
     let report = store.consolidate(dir.path()).unwrap();
-    assert_eq!(report.duplicates.len(), 1);
-    assert_eq!(report.duplicates[0].merge.len(), 1);
+    assert_eq!(report.clusters.len(), 1);
+    assert_eq!(report.clusters[0].others.len(), 1);
     // Read-only: both still active.
     assert_eq!(
         store.read(&a_id).unwrap().unwrap().frontmatter.status,
@@ -501,4 +501,91 @@ fn consolidate_apply_retires_expired() {
         store.read(&id).unwrap().unwrap().frontmatter.status,
         Status::Deprecated
     );
+}
+
+/// A distiller that always reports a conflict, with a fixed resolved body.
+struct ConflictDistiller;
+impl marrow_store::Distiller for ConflictDistiller {
+    fn distill(&self, _bodies: &[String]) -> Result<marrow_store::Verdict, String> {
+        Ok(marrow_store::Verdict {
+            action: marrow_store::ClusterAction::Conflict,
+            body: "resolved: the cache is invalidated on write".to_string(),
+            rationale: "kept the higher-confidence statement".to_string(),
+        })
+    }
+}
+
+#[test]
+fn semantic_clustering_groups_differently_worded_memories() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::init(dir.path()).unwrap();
+    store.set_embedder(Box::new(StubEmbedder)); // "red" -> same vector regardless of wording
+
+    // Same meaning, different words -> exact-match would miss this; semantic catches it.
+    let mut a = mem(
+        MemoryKind::Fact,
+        "alerts",
+        "a RED alert fires when the disk fills",
+    );
+    store.write(&mut a).unwrap();
+    let mut b = mem(
+        MemoryKind::Fact,
+        "alerts",
+        "disk exhaustion raises a RED warning",
+    );
+    store.write(&mut b).unwrap();
+
+    let report = store.consolidate(dir.path()).unwrap();
+    assert_eq!(
+        report.clusters.len(),
+        1,
+        "differently-worded memories should cluster"
+    );
+    assert_eq!(report.clusters[0].others.len(), 1);
+}
+
+#[test]
+fn salience_keeps_the_higher_confidence_memory() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::init(dir.path()).unwrap(); // no embedder -> exact-match cluster
+    let mut weak = mem(MemoryKind::Fact, "a", "the build runs on CI");
+    weak.frontmatter.confidence = 0.4;
+    let weak_id = store.write(&mut weak).unwrap();
+    let mut strong = mem(MemoryKind::Fact, "b", "the build runs on CI");
+    strong.frontmatter.confidence = 0.95;
+    let strong_id = store.write(&mut strong).unwrap();
+
+    store.consolidate_apply(dir.path()).unwrap();
+    // The higher-confidence memory survives; the weaker one is superseded.
+    assert_eq!(
+        store.read(&strong_id).unwrap().unwrap().frontmatter.status,
+        Status::Active
+    );
+    assert_eq!(
+        store.read(&weak_id).unwrap().unwrap().frontmatter.status,
+        Status::Superseded
+    );
+}
+
+#[test]
+fn conflict_resolution_records_an_audit_event() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::init(dir.path()).unwrap();
+    store.set_distiller(Box::new(ConflictDistiller));
+    // Two exact-duplicate bodies so they cluster without an embedder.
+    let mut a = mem(MemoryKind::Fact, "cache", "cache cleared on write");
+    store.write(&mut a).unwrap();
+    let mut b = mem(MemoryKind::Fact, "cache", "cache cleared on write");
+    store.write(&mut b).unwrap();
+
+    let outcome = store.consolidate_apply(dir.path()).unwrap();
+    assert_eq!(outcome.conflicts_resolved, 1);
+    let kinds: Vec<String> = store
+        .history()
+        .unwrap()
+        .into_iter()
+        .map(|e| e.kind)
+        .collect();
+    assert!(kinds.contains(&"conflict_resolved".to_string()));
+    assert_eq!(store.verify_log(), Ok(()));
 }

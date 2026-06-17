@@ -31,3 +31,4 @@ serde_json = "1"
 [features]
 embed-http = ["dep:ureq", "dep:serde_json"]
 embed-fastembed = ["dep:fastembed"]
+distill-http = ["dep:ureq", "dep:serde_json"]
