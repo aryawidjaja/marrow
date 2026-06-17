@@ -246,15 +246,21 @@ fn consolidate(store: &Store, root: &Path, args: &Value) -> Result<String, Strin
         .unwrap_or_else(|| root.to_path_buf());
     if args.get("apply").and_then(Value::as_bool).unwrap_or(false) {
         let o = store.consolidate_apply(&repo).map_err(|e| e.to_string())?;
-        Ok(json!({"applied": true, "deprecated": o.deprecated, "merged": o.merged}).to_string())
+        Ok(json!({
+            "applied": true,
+            "deprecated": o.deprecated,
+            "merged": o.merged,
+            "conflicts_resolved": o.conflicts_resolved,
+        })
+        .to_string())
     } else {
         let r = store.consolidate(&repo).map_err(|e| e.to_string())?;
-        let dup: usize = r.duplicates.iter().map(|c| c.merge.len()).sum();
+        let related: usize = r.clusters.iter().map(|c| c.others.len()).sum();
         Ok(json!({
             "stale": r.stale.len(),
             "expired": r.expired.len(),
-            "duplicate_memories": dup,
-            "clusters": r.duplicates.len(),
+            "related_memories": related,
+            "clusters": r.clusters.len(),
         })
         .to_string())
     }

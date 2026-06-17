@@ -122,8 +122,8 @@ n() { "$marrow" --root "$proj2" "$@"; }
 n init > /dev/null
 n add --kind fact --topic a "the cache is invalidated on write" > /dev/null
 n add --kind fact --topic b "the cache is invalidated on write" > /dev/null
-check "consolidation detects the duplicate" "$(n consolidate --repo "$proj2")" "duplicate memories: 1"
+check "consolidation detects the duplicate" "$(n consolidate --repo "$proj2")" "related memories: 1"
 check "applying consolidation merges it" "$(n consolidate --repo "$proj2" --apply)" "1 merged"
-check "no duplicates remain after merge" "$(n consolidate --repo "$proj2")" "duplicate memories: 0"
+check "no duplicates remain after merge" "$(n consolidate --repo "$proj2")" "related memories: 0"
 
 printf '\nAll %d checks passed.\n' "$pass"

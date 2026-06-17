@@ -235,10 +235,10 @@ fn consolidate_reports_and_applies() {
     );
 
     let report = ok(root, &["consolidate", "--repo", repo]);
-    assert!(report.contains("duplicate memories: 1"));
+    assert!(report.contains("related memories: 1"));
 
     let applied = ok(root, &["consolidate", "--repo", repo, "--apply"]);
     assert!(applied.contains("1 merged"));
     // After applying, no duplicates remain.
-    assert!(ok(root, &["consolidate", "--repo", repo]).contains("duplicate memories: 0"));
+    assert!(ok(root, &["consolidate", "--repo", repo]).contains("related memories: 0"));
 }

@@ -392,20 +392,20 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
                 let o = store.consolidate_apply(&repo).map_err(|e| e.to_string())?;
                 writeln!(
                     out,
-                    "applied: {} deprecated, {} merged",
-                    o.deprecated, o.merged
+                    "applied: {} deprecated, {} merged, {} conflicts resolved",
+                    o.deprecated, o.merged, o.conflicts_resolved
                 )
                 .ok();
             } else {
                 let r = store.consolidate(&repo).map_err(|e| e.to_string())?;
-                let dup: usize = r.duplicates.iter().map(|c| c.merge.len()).sum();
+                let related: usize = r.clusters.iter().map(|c| c.others.len()).sum();
                 writeln!(
                     out,
-                    "stale: {}, expired: {}, duplicate memories: {} (in {} cluster(s))",
+                    "stale: {}, expired: {}, related memories: {} (in {} cluster(s))",
                     r.stale.len(),
                     r.expired.len(),
-                    dup,
-                    r.duplicates.len(),
+                    related,
+                    r.clusters.len(),
                 )
                 .ok();
             }
