@@ -7,6 +7,8 @@
 
 pub mod config;
 pub mod embed;
+#[cfg(feature = "embed-http")]
+pub mod embed_http;
 pub mod convert;
 pub mod index;
 pub mod integrity;
