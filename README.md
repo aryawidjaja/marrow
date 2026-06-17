@@ -50,6 +50,8 @@ Marrow keeps the markdown-first approach and closes those gaps.
 - **Tamper-evident audit trail.** Every write, supersede, and agent observation is recorded
   in an append-only, hash-chained ledger. Edit any past entry and `marrow audit` reports the
   break. Nothing is ever deleted from it.
+- **Decision provenance.** Recall records which memories it returned, so an answer can be traced
+  back through the memories that produced it to their sources and the events that created them.
 - **Consolidation that learns.** A pass that keeps memory coherent: it clusters related
   memories by *meaning* (embedding similarity), then merges duplicates, resolves
   contradictions, and retires expired notes — distilling rather than dropping, choosing the
@@ -67,6 +69,7 @@ crates/
   marrow-cli       The `marrow` command-line tool
   marrow-mcp       A Model Context Protocol server exposing the store to agents
   marrow-web       A local dashboard (`marrow-serve`) to watch memories and consolidation
+  marrow-bench     Reproducible benchmarks (consolidation quality, token-efficiency)
 python/
   marrow-anthropic A backend for Anthropic's memory tool (memory_20250818)
 ```
@@ -225,8 +228,9 @@ OpenAI-compatible chat endpoint — including a local or sovereign-hosted model 
 
 Working today: the staleness engine, the document format and validation, the store with its
 index, hybrid keyword+semantic search, decay, scope, supersession and integrity, the
-append-only audit ledger, the consolidation pass, the CLI, the MCP server, and the Anthropic
-memory-tool backend. Tested end to end.
+append-only audit ledger, decision provenance, the consolidation pass, the CLI, the MCP server,
+the local dashboard, the reproducible benchmarks, and the Anthropic memory-tool backend. Tested
+end to end.
 
 Planned: staleness for more languages, richer consolidation (LLM-assisted distillation), and
 concurrent multi-writer support.
