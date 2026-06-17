@@ -6,6 +6,7 @@
 //! staleness-checked against live code via marrow-core's S3∧S4 hybrid.
 
 pub mod config;
+pub mod consolidate;
 pub mod convert;
 pub mod embed;
 #[cfg(feature = "embed-fastembed")]
@@ -20,6 +21,9 @@ pub mod store;
 pub mod util;
 
 pub use config::Config;
+pub use consolidate::{
+    ConsolidationOutcome, ConsolidationReport, DupCluster, HeuristicSummarizer, Summarizer,
+};
 pub use embed::{EmbedError, Embedder, HashEmbedder};
 pub use query::Query;
 pub use staleness::StaleHit;

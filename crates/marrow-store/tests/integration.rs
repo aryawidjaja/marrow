@@ -431,3 +431,74 @@ fn tampering_with_the_log_is_detected() {
 
     assert!(store.verify_log().is_err());
 }
+
+#[test]
+fn consolidate_detects_without_changing() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::init(dir.path()).unwrap();
+    let mut a = mem(MemoryKind::Fact, "a", "the disk is full");
+    let a_id = store.write(&mut a).unwrap();
+    let mut b = mem(MemoryKind::Fact, "b", "the disk is full");
+    store.write(&mut b).unwrap();
+
+    let report = store.consolidate(dir.path()).unwrap();
+    assert_eq!(report.duplicates.len(), 1);
+    assert_eq!(report.duplicates[0].merge.len(), 1);
+    // Read-only: both still active.
+    assert_eq!(
+        store.read(&a_id).unwrap().unwrap().frontmatter.status,
+        Status::Active
+    );
+}
+
+#[test]
+fn consolidate_apply_merges_duplicates() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::init(dir.path()).unwrap();
+    let mut a = mem(MemoryKind::Fact, "a", "the disk is full");
+    let a_id = store.write(&mut a).unwrap();
+    let mut b = mem(MemoryKind::Fact, "b", "the disk is full");
+    let b_id = store.write(&mut b).unwrap();
+
+    let outcome = store.consolidate_apply(dir.path()).unwrap();
+    assert_eq!(outcome.merged, 1);
+
+    // The newer one (b) is kept active and now supersedes the older (a).
+    let kept = store.read(&b_id).unwrap().unwrap();
+    assert_eq!(kept.frontmatter.status, Status::Active);
+    assert!(kept.frontmatter.supersedes.contains(&a_id));
+    assert_eq!(
+        store.read(&a_id).unwrap().unwrap().frontmatter.status,
+        Status::Superseded
+    );
+
+    // Only one active fact with that body remains.
+    let active = store
+        .query(&Query {
+            kind: Some(MemoryKind::Fact),
+            status: Some(Status::Active),
+            project_id: Some("demo".into()),
+            ..Query::default()
+        })
+        .unwrap();
+    assert_eq!(active.len(), 1);
+}
+
+#[test]
+fn consolidate_apply_retires_expired() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::init(dir.path()).unwrap();
+    let mut m = mem(MemoryKind::Fact, "temp", "ephemeral note");
+    m.frontmatter.decay = Some(Decay {
+        half_life: None,
+        expires_at: Some("2000-01-01T00:00:00Z".into()),
+    });
+    let id = store.write(&mut m).unwrap();
+
+    let outcome = store.consolidate_apply(dir.path()).unwrap();
+    assert_eq!(outcome.deprecated, 1);
+    assert_eq!(
+        store.read(&id).unwrap().unwrap().frontmatter.status,
+        Status::Deprecated
+    );
+}

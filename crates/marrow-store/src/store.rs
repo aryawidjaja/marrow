@@ -78,6 +78,7 @@ pub struct Store {
     key: Option<Vec<u8>>,
     embedder: Option<Box<dyn Embedder>>,
     episodic: RefCell<EpisodicLog>,
+    pub(crate) summarizer: Box<dyn crate::consolidate::Summarizer>,
 }
 
 impl Store {
@@ -121,6 +122,7 @@ impl Store {
             key,
             embedder,
             episodic: RefCell::new(episodic),
+            summarizer: Box::new(crate::consolidate::HeuristicSummarizer),
         })
     }
 
