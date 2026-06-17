@@ -1,0 +1,216 @@
+//! A Model Context Protocol server (spec 2025-06-18) over stdio for the Marrow store.
+//!
+//! Messages are newline-delimited JSON-RPC 2.0. [`handle`] processes one request and
+//! returns the response to send (or `None` for notifications), so the protocol logic is
+//! tested directly without spawning a process. [`serve`] is the stdio loop.
+
+use std::io::{BufRead, Write};
+use std::path::Path;
+
+use serde_json::{json, Value};
+
+pub mod tools;
+
+const PROTOCOL_VERSION: &str = "2025-06-18";
+const SERVER_NAME: &str = "marrow-mcp";
+const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Handle one JSON-RPC message. Returns the response, or `None` for notifications.
+pub fn handle(root: &Path, req: &Value) -> Option<Value> {
+    let id = req.get("id").cloned();
+    let method = req.get("method").and_then(Value::as_str).unwrap_or("");
+
+    match method {
+        "initialize" => Some(success(
+            id,
+            json!({
+                "protocolVersion": PROTOCOL_VERSION,
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION}
+            }),
+        )),
+        "notifications/initialized" => None,
+        "ping" => Some(success(id, json!({}))),
+        "tools/list" => Some(success(id, json!({"tools": tools::definitions()}))),
+        "tools/call" => Some(handle_call(root, id, req.get("params"))),
+        _ if id.is_none() => None, // unknown notification
+        _ => Some(error(id, -32601, &format!("method not found: {method}"))),
+    }
+}
+
+fn handle_call(root: &Path, id: Option<Value>, params: Option<&Value>) -> Value {
+    let name = params
+        .and_then(|p| p.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let args = params
+        .and_then(|p| p.get("arguments"))
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let result = match tools::call(root, name, &args) {
+        Ok(text) => tool_result(&text, false),
+        Err(text) => tool_result(&text, true),
+    };
+    success(id, result)
+}
+
+/// Read newline-delimited JSON-RPC from `input`, writing responses to `output`.
+pub fn serve(root: &Path, input: impl BufRead, mut output: impl Write) -> std::io::Result<()> {
+    for line in input.lines() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let Ok(req) = serde_json::from_str::<Value>(&line) else {
+            let resp = error(None, -32700, "parse error");
+            writeln!(output, "{resp}")?;
+            output.flush()?;
+            continue;
+        };
+        if let Some(resp) = handle(root, &req) {
+            writeln!(output, "{resp}")?;
+            output.flush()?;
+        }
+    }
+    Ok(())
+}
+
+fn success(id: Option<Value>, result: Value) -> Value {
+    json!({"jsonrpc": "2.0", "id": id, "result": result})
+}
+
+fn error(id: Option<Value>, code: i64, message: &str) -> Value {
+    json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
+}
+
+fn tool_result(text: &str, is_error: bool) -> Value {
+    json!({"content": [{"type": "text", "text": text}], "isError": is_error})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use marrow_store::Store;
+
+    fn store_root() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        Store::init(dir.path()).unwrap();
+        dir
+    }
+
+    fn call(root: &Path, name: &str, args: Value) -> Value {
+        let req = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":args}});
+        handle(root, &req).unwrap()
+    }
+
+    fn result_text(resp: &Value) -> String {
+        resp["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    #[test]
+    fn initialize_reports_protocol_and_server() {
+        let dir = store_root();
+        let req = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}});
+        let resp = handle(dir.path(), &req).unwrap();
+        assert_eq!(resp["result"]["protocolVersion"], "2025-06-18");
+        assert_eq!(resp["result"]["serverInfo"]["name"], "marrow-mcp");
+        assert!(resp["result"]["capabilities"]["tools"].is_object());
+    }
+
+    #[test]
+    fn initialized_notification_has_no_response() {
+        let dir = store_root();
+        let req = json!({"jsonrpc":"2.0","method":"notifications/initialized"});
+        assert!(handle(dir.path(), &req).is_none());
+    }
+
+    #[test]
+    fn tools_list_advertises_the_catalog() {
+        let dir = store_root();
+        let req = json!({"jsonrpc":"2.0","id":1,"method":"tools/list"});
+        let resp = handle(dir.path(), &req).unwrap();
+        let names: Vec<&str> = resp["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert!(names.contains(&"mem_write"));
+        assert!(names.contains(&"mem_query"));
+        assert!(names.contains(&"mem_list_stale"));
+    }
+
+    #[test]
+    fn write_then_query_round_trips() {
+        let dir = store_root();
+        let id = result_text(&call(
+            dir.path(),
+            "mem_write",
+            json!({"kind":"decision","topic":"auth","body":"Use JWT for sessions."}),
+        ));
+        assert!(!id.trim().is_empty());
+
+        let resp = call(dir.path(), "mem_query", json!({"kind":"decision"}));
+        let text = result_text(&resp);
+        assert!(text.contains(&id.trim().to_string()));
+        assert!(text.contains("Use JWT"));
+        assert_eq!(resp["result"]["isError"], false);
+    }
+
+    #[test]
+    fn invalid_write_is_a_tool_error() {
+        let dir = store_root();
+        // A decision with no topic violates the schema.
+        let resp = call(
+            dir.path(),
+            "mem_write",
+            json!({"kind":"decision","body":"no topic"}),
+        );
+        assert_eq!(resp["result"]["isError"], true);
+        assert!(result_text(&resp).contains("topic"));
+    }
+
+    #[test]
+    fn search_finds_body_text() {
+        let dir = store_root();
+        call(
+            dir.path(),
+            "mem_write",
+            json!({"kind":"fact","topic":"net","body":"rate limits use a token bucket"}),
+        );
+        let resp = call(dir.path(), "mem_search", json!({"text":"token bucket"}));
+        assert!(result_text(&resp).contains("token bucket"));
+    }
+
+    #[test]
+    fn unknown_method_returns_protocol_error() {
+        let dir = store_root();
+        let req = json!({"jsonrpc":"2.0","id":9,"method":"does/not/exist"});
+        let resp = handle(dir.path(), &req).unwrap();
+        assert_eq!(resp["error"]["code"], -32601);
+    }
+
+    #[test]
+    fn serve_processes_a_session() {
+        let dir = store_root();
+        let input = concat!(
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+            "\n",
+            r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+            "\n",
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+            "\n",
+        );
+        let mut out = Vec::new();
+        serve(dir.path(), std::io::Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        // initialize -> 1 response; initialized -> none; tools/list -> 1 response.
+        assert_eq!(lines.len(), 2, "got: {text}");
+        assert!(lines[0].contains("protocolVersion"));
+        assert!(lines[1].contains("mem_write"));
+    }
+}

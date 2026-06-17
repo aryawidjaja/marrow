@@ -511,6 +511,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "marrow-mcp"
+version = "0.1.0"
+dependencies = [
+ "marrow-memdocs",
+ "marrow-store",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "marrow-memdocs"
 version = "0.1.0"
 dependencies = [
