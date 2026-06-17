@@ -40,8 +40,9 @@ Marrow keeps the markdown-first approach and closes those gaps.
   one of five base schemas: `fact`, `decision`, `entity`, `session`, `skill`.
 - **Validated writes.** Bad writes are rejected with the specific reasons, so an agent can
   fix and retry. At most one active decision is allowed per topic per project.
-- **Structured query and full-text search**, both with an optional token budget so a query
-  returns only what fits.
+- **Hybrid search.** Structured queries plus a single search that fuses keyword matching
+  (SQLite FTS5) with semantic vector similarity, tunable from pure keyword to pure semantic.
+  An optional token budget caps how much a search returns.
 - **Lifecycle and decay.** Memories can supersede one another, carry a confidence score, and
   expire or decay over time.
 - **Provenance and integrity.** Each memory records who wrote it; optional HMAC signing makes
@@ -75,7 +76,8 @@ Create a store and add a memory:
 marrow init
 marrow add --kind decision --topic auth "We use short-lived JWTs for sessions."
 marrow query --kind decision
-marrow search JWT
+marrow search JWT                 # hybrid keyword + semantic
+marrow search "token expiry" --weight 1   # 0 = keyword only, 1 = semantic only
 ```
 
 Memories are written as markdown you can read and edit by hand:
@@ -170,14 +172,30 @@ grammars.
 - **The store is a library.** `marrow-store` is a normal Rust crate; the CLI and MCP server
   are thin layers over it, and you can embed it directly.
 
+## Search and embeddings
+
+Search is hybrid by default: keyword (FTS5) results and semantic (vector cosine) results are
+fused with reciprocal rank fusion, weighted by `--weight`. With no embedding backend
+configured it is exactly keyword search, so nothing extra is required to get started.
+
+Embeddings are pluggable via the `[embedding]` section of `.marrow/.marrow.toml`:
+
+- `provider = "hash"` — a built-in, dependency-free lexical embedder (good for tests/demos).
+- `provider = "http"` (build with `--features embed-http`) — any OpenAI-compatible embedding
+  endpoint; the API key comes from `MARROW_EMBED_API_KEY`.
+- `provider = "fastembed"` (build with `--features embed-fastembed`) — a local ONNX model,
+  fully offline. The default is multilingual, so non-English text (including Arabic) embeds
+  well.
+
+Vectors live in the SQLite index and are rebuilt by `marrow doctor`.
+
 ## Status
 
 Working today: the staleness engine, the document format and validation, the store with its
-index, decay, scope, supersession and integrity, the CLI, the MCP server, and the Anthropic
-memory-tool backend. Tested end to end.
+index, hybrid keyword+semantic search, decay, scope, supersession and integrity, the CLI, the
+MCP server, and the Anthropic memory-tool backend. Tested end to end.
 
-Planned: staleness for more languages, semantic (vector) search alongside the existing
-keyword search, and concurrent multi-writer support.
+Planned: staleness for more languages and concurrent multi-writer support.
 
 ## License
 
