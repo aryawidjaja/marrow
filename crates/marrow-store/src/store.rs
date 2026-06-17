@@ -1,8 +1,10 @@
 //! The memory store: markdown files as the source of truth, SQLite as a derived index.
 
+use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use marrow_episodic::{EpisodicLog, Event, NewEvent};
 use marrow_memdocs::{to_markdown, validate, Memory, Violation};
 use rusqlite::Connection;
 use ulid::Ulid;
@@ -75,6 +77,7 @@ pub struct Store {
     config: Config,
     key: Option<Vec<u8>>,
     embedder: Option<Box<dyn Embedder>>,
+    episodic: RefCell<EpisodicLog>,
 }
 
 impl Store {
@@ -110,13 +113,42 @@ impl Store {
             None
         };
         let embedder = build_embedder(&config);
+        let episodic = EpisodicLog::open(&root).map_err(|e| Error::Io(e.to_string()))?;
         Ok(Store {
             root,
             conn,
             config,
             key,
             embedder,
+            episodic: RefCell::new(episodic),
         })
+    }
+
+    /// Append an event to the episodic / audit ledger.
+    fn record(&self, ev: NewEvent) -> Result<(), Error> {
+        self.episodic
+            .borrow_mut()
+            .append(ev)
+            .map_err(|e| Error::Io(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Record an arbitrary agent-authored episodic event (e.g. an observation or correction).
+    pub fn log_event(&self, kind: &str, actor: &str, summary: &str) -> Result<(), Error> {
+        self.record(NewEvent::new(kind, actor, summary))
+    }
+
+    /// The full episodic / audit history, oldest first.
+    pub fn history(&self) -> Result<Vec<Event>, Error> {
+        self.episodic
+            .borrow()
+            .read_all()
+            .map_err(|e| Error::Io(e.to_string()))
+    }
+
+    /// Verify the audit chain. `Ok(())` if intact, else the `seq` of the first broken entry.
+    pub fn verify_log(&self) -> Result<(), u64> {
+        self.episodic.borrow().verify()
     }
 
     /// Override the signing key (mainly for tests and embedding).
@@ -176,6 +208,14 @@ impl Store {
 
         index::upsert(&self.conn, &self.row_of(memory, &rel))?;
         self.embed_memory(memory)?;
+
+        let fm = &memory.frontmatter;
+        let summary = format!(
+            "wrote {} '{}'",
+            kind_str(fm.kind),
+            fm.topic.as_deref().unwrap_or(&fm.id)
+        );
+        self.record(NewEvent::new("write", &fm.provenance.written_by, &summary).memory(&fm.id))?;
         Ok(memory.frontmatter.id.clone())
     }
 
@@ -328,7 +368,17 @@ impl Store {
         if !new.frontmatter.supersedes.iter().any(|s| s == old_id) {
             new.frontmatter.supersedes.push(old_id.to_string());
         }
-        self.write(new)
+        let actor = new.frontmatter.provenance.written_by.clone();
+        let new_id = self.write(new)?;
+        self.record(
+            NewEvent::new(
+                "supersede",
+                &actor,
+                &format!("superseded {old_id} with {new_id}"),
+            )
+            .memory(&new_id),
+        )?;
+        Ok(new_id)
     }
 
     /// Every code anchor across all memories that no longer matches the live repo.

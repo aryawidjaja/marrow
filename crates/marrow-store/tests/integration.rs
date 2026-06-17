@@ -381,3 +381,53 @@ fn reembed_backfills_vectors() {
     };
     assert_eq!(store.search("crimson", &sem).unwrap().len(), 1);
 }
+
+#[test]
+fn writes_are_recorded_in_the_audit_log_and_chain_verifies() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::init(dir.path()).unwrap();
+    let mut a = mem(MemoryKind::Fact, "auth", "rotate keys every 90 days");
+    let id = store.write(&mut a).unwrap();
+
+    let history = store.history().unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].kind, "write");
+    assert_eq!(history[0].memory_id.as_deref(), Some(id.as_str()));
+    assert_eq!(store.verify_log(), Ok(()));
+}
+
+#[test]
+fn supersede_records_write_and_supersede_events() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::init(dir.path()).unwrap();
+    let mut old = mem(MemoryKind::Decision, "auth", "use JWT");
+    let old_id = store.write(&mut old).unwrap();
+    let mut new = mem(MemoryKind::Decision, "auth", "use opaque tokens");
+    store.supersede(&old_id, &mut new).unwrap();
+
+    let kinds: Vec<String> = store
+        .history()
+        .unwrap()
+        .into_iter()
+        .map(|e| e.kind)
+        .collect();
+    // write(old) + write(old as superseded) + write(new) + supersede
+    assert!(kinds.contains(&"supersede".to_string()));
+    assert!(kinds.iter().filter(|k| *k == "write").count() >= 2);
+    assert_eq!(store.verify_log(), Ok(()));
+}
+
+#[test]
+fn tampering_with_the_log_is_detected() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::init(dir.path()).unwrap();
+    let mut a = mem(MemoryKind::Fact, "auth", "a sensitive fact");
+    store.write(&mut a).unwrap(); // recorded actor is "agent-1"
+
+    // Rewrite history: swap the recorded actor. The hash chain must catch it.
+    let log_path = dir.path().join(".marrow/episodic/log.jsonl");
+    let content = std::fs::read_to_string(&log_path).unwrap();
+    std::fs::write(&log_path, content.replace("agent-1", "intruder")).unwrap();
+
+    assert!(store.verify_log().is_err());
+}

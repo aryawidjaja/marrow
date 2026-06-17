@@ -8,6 +8,7 @@ license = "MIT"
 [dependencies]
 marrow-memdocs = { path = "../marrow-memdocs" }
 marrow-core = { path = "../marrow-core" }
+marrow-episodic = { path = "../marrow-episodic" }
 serde = { version = "1", features = ["derive"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 ulid = "1"
