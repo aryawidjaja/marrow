@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 marrow-store = { path = "../marrow-store" }
 marrow-memdocs = { path = "../marrow-memdocs" }
+marrow-core = { path = "../marrow-core" }
 clap = { version = "4", features = ["derive"] }
 
 [dev-dependencies]

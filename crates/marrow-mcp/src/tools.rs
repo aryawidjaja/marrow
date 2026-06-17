@@ -2,7 +2,10 @@
 
 use std::path::{Path, PathBuf};
 
-use marrow_memdocs::{Frontmatter, Memory, MemoryKind, Provenance, Scope, Status};
+use marrow_core::seed_anchor;
+use marrow_memdocs::{
+    CodeAnchor, Frontmatter, Memory, MemoryKind, Provenance, Ref, RefKind, Scope, Status,
+};
 use marrow_store::{Query, Store};
 use serde_json::{json, Value};
 
@@ -20,6 +23,20 @@ pub fn definitions() -> Value {
                 "tags": {"type": "array", "items": {"type": "string"}}
             },
             "required": ["kind","body"]
+        })),
+        tool("mem_anchor", "Write a memory anchored to a code symbol so it can be checked for staleness.", json!({
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string", "enum": ["fact","decision","entity","session","skill"]},
+                "body": {"type": "string"},
+                "file": {"type": "string", "description": "file containing the symbol, relative to repo"},
+                "symbol": {"type": "string", "description": "qualified symbol name, e.g. Foo::bar"},
+                "repo": {"type": "string", "description": "repo root (defaults to the store root)"},
+                "topic": {"type": "string"},
+                "project": {"type": "string"},
+                "by": {"type": "string"}
+            },
+            "required": ["kind","body","file","symbol"]
         })),
         tool("mem_read", "Read a single memory by id, returned as markdown.", json!({
             "type": "object",
@@ -76,6 +93,7 @@ pub fn call(root: &Path, name: &str, args: &Value) -> Result<String, String> {
     let store = Store::open(root).map_err(|e| e.to_string())?;
     match name {
         "mem_write" => write(&store, args),
+        "mem_anchor" => anchor(&store, root, args),
         "mem_read" => read(&store, args),
         "mem_query" => query(&store, args),
         "mem_search" => search(&store, args),
@@ -89,6 +107,32 @@ pub fn call(root: &Path, name: &str, args: &Value) -> Result<String, String> {
 
 fn write(store: &Store, args: &Value) -> Result<String, String> {
     let mut memory = memory_from(args)?;
+    store.write(&mut memory).map_err(|e| e.to_string())
+}
+
+fn anchor(store: &Store, root: &Path, args: &Value) -> Result<String, String> {
+    let file = str_arg(args, "file")?;
+    let symbol = str_arg(args, "symbol")?;
+    let repo = args
+        .get("repo")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| root.to_path_buf());
+    let core = seed_anchor(&repo, &file, &symbol)
+        .ok_or_else(|| format!("symbol {symbol} not found in {file}"))?;
+    let mut memory = memory_from(args)?;
+    memory.frontmatter.refs.push(Ref {
+        kind: RefKind::Symbol,
+        value: format!("{file}::{symbol}"),
+        anchor: Some(core.fingerprint.clone()),
+    });
+    memory.frontmatter.code_anchors.push(CodeAnchor {
+        file_path: core.file_path,
+        symbol: core.symbol,
+        snippet: core.snippet,
+        fingerprint: core.fingerprint,
+        norm: core.norm,
+    });
     store.write(&mut memory).map_err(|e| e.to_string())
 }
 

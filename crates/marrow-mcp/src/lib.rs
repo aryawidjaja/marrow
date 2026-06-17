@@ -186,6 +186,36 @@ mod tests {
     }
 
     #[test]
+    fn anchor_tool_tracks_code_staleness() {
+        let dir = store_root();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(
+            dir.path().join("src/auth.rs"),
+            "pub fn issue_token(u: &str) -> String { format!(\"jwt:{u}\") }\n",
+        )
+        .unwrap();
+
+        let resp = call(
+            dir.path(),
+            "mem_anchor",
+            json!({"kind":"decision","topic":"auth","file":"src/auth.rs","symbol":"issue_token","body":"Issues a JWT."}),
+        );
+        assert_eq!(resp["result"]["isError"], false);
+
+        let fresh = call(dir.path(), "mem_list_stale", json!({}));
+        assert!(result_text(&fresh).contains("\"count\":0"));
+
+        std::fs::write(
+            dir.path().join("src/auth.rs"),
+            "pub fn issue_token(u: &str) -> String { format!(\"opaque:{u}:v2\") }\n",
+        )
+        .unwrap();
+        let stale = call(dir.path(), "mem_list_stale", json!({}));
+        assert!(result_text(&stale).contains("\"count\":1"));
+        assert!(result_text(&stale).contains("issue_token"));
+    }
+
+    #[test]
     fn unknown_method_returns_protocol_error() {
         let dir = store_root();
         let req = json!({"jsonrpc":"2.0","id":9,"method":"does/not/exist"});

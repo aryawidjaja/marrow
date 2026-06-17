@@ -138,3 +138,52 @@ fn list_stale_reports_changed_code() {
     let out = ok(root, &["list-stale", "--repo", root.to_str().unwrap()]);
     assert!(out.contains("0 stale anchor(s)"));
 }
+
+#[test]
+fn anchor_then_staleness_tracks_code_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let repo = root.to_str().unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("src/auth.rs"),
+        "pub fn issue_token(user: &str) -> String { format!(\"jwt:{user}\") }\n",
+    )
+    .unwrap();
+
+    ok(root, &["init"]);
+    let id = ok(
+        root,
+        &[
+            "anchor",
+            "--kind",
+            "decision",
+            "--topic",
+            "auth",
+            "--repo",
+            repo,
+            "--file",
+            "src/auth.rs",
+            "--symbol",
+            "issue_token",
+            "Auth issues a signed JWT string.",
+        ],
+    )
+    .trim()
+    .to_string();
+    assert!(!id.is_empty());
+
+    // Fresh anchor: nothing stale.
+    assert!(ok(root, &["list-stale", "--repo", repo]).contains("0 stale anchor(s)"));
+
+    // Change the function's behavior; the anchored memory must be flagged.
+    std::fs::write(
+        root.join("src/auth.rs"),
+        "pub fn issue_token(user: &str) -> String { format!(\"opaque:{user}:v2\") }\n",
+    )
+    .unwrap();
+    let stale = ok(root, &["list-stale", "--repo", repo]);
+    assert!(stale.contains("1 stale anchor(s)"), "got: {stale}");
+    assert!(stale.contains("issue_token"));
+    assert!(stale.contains(&id));
+}
