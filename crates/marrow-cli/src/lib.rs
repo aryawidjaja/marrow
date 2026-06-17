@@ -82,6 +82,16 @@ pub enum Cmd {
         #[arg(long)]
         apply: bool,
     },
+    /// Recall memories for a query and record the retrieval (so answers stay traceable).
+    Recall {
+        text: String,
+        #[command(flatten)]
+        filter: FilterArgs,
+        #[arg(long, default_value = "cli")]
+        by: String,
+    },
+    /// Show a memory's provenance: who wrote it, its lineage, and how it's been used.
+    Provenance { id: String },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -410,6 +420,44 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
                 .ok();
             }
             Ok(())
+        }
+        Cmd::Recall { text, filter, by } => {
+            let store = open(&cli.root)?;
+            let hits = store
+                .recall(&text, &filter.to_query(), &by)
+                .map_err(|e| e.to_string())?;
+            print_memories(&hits, out);
+            Ok(())
+        }
+        Cmd::Provenance { id } => {
+            let store = open(&cli.root)?;
+            match store.provenance(&id).map_err(|e| e.to_string())? {
+                Some(t) => {
+                    writeln!(out, "memory {} — written by {}", t.id, t.written_by).ok();
+                    if !t.sources.is_empty() {
+                        writeln!(out, "  sources: {}", t.sources.join(", ")).ok();
+                    }
+                    for r in &t.supersedes {
+                        writeln!(
+                            out,
+                            "  supersedes {} [{}] {}",
+                            r.id,
+                            r.kind,
+                            r.topic.as_deref().unwrap_or("-")
+                        )
+                        .ok();
+                    }
+                    for r in &t.superseded_by {
+                        writeln!(out, "  superseded by {} [{}]", r.id, r.kind).ok();
+                    }
+                    writeln!(out, "  history:").ok();
+                    for e in &t.events {
+                        writeln!(out, "    #{} {} {} — {}", e.seq, e.ts, e.kind, e.summary).ok();
+                    }
+                    Ok(())
+                }
+                None => Err(format!("no memory with id {id}")),
+            }
         }
     }
 }

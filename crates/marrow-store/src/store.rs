@@ -141,6 +141,22 @@ impl Store {
         self.record(NewEvent::new(kind, actor, summary))
     }
 
+    /// Record a retrieval: which memory ids were recalled for a query. This is what makes an
+    /// answer traceable back to the knowledge that produced it.
+    pub fn log_retrieval(&self, actor: &str, query: &str, ids: &[String]) -> Result<(), Error> {
+        let mut ev = NewEvent::new(
+            "retrieve",
+            actor,
+            &format!(
+                "recalled '{query}' → {} memor{}",
+                ids.len(),
+                if ids.len() == 1 { "y" } else { "ies" }
+            ),
+        );
+        ev.data = serde_json::json!({ "query": query, "ids": ids });
+        self.record(ev)
+    }
+
     /// The full episodic / audit history, oldest first.
     pub fn history(&self) -> Result<Vec<Event>, Error> {
         self.episodic

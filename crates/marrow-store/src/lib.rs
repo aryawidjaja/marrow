@@ -17,6 +17,7 @@ pub mod embed_fastembed;
 pub mod embed_http;
 pub mod index;
 pub mod integrity;
+pub mod provenance;
 pub mod query;
 pub mod staleness;
 pub mod store;
@@ -28,6 +29,7 @@ pub use consolidate::{
     HeuristicDistiller, Verdict,
 };
 pub use embed::{EmbedError, Embedder, HashEmbedder};
+pub use provenance::{MemoryRef, ProvenanceTrail};
 pub use query::Query;
 pub use staleness::StaleHit;
 pub use store::{Error, Store};

@@ -242,3 +242,30 @@ fn consolidate_reports_and_applies() {
     // After applying, no duplicates remain.
     assert!(ok(root, &["consolidate", "--repo", repo]).contains("related memories: 0"));
 }
+
+#[test]
+fn recall_and_provenance_trace_usage() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(root, &["init"]);
+    let id = ok(
+        root,
+        &[
+            "add",
+            "--kind",
+            "fact",
+            "--topic",
+            "limits",
+            "rate limit is 100 per minute",
+        ],
+    )
+    .trim()
+    .to_string();
+    // recall records a retrieval
+    let hits = ok(root, &["recall", "rate limit", "--by", "agent"]);
+    assert!(hits.contains(&id));
+    // provenance shows the write and the retrieval
+    let prov = ok(root, &["provenance", &id]);
+    assert!(prov.contains("written by"));
+    assert!(prov.contains("retrieve"));
+}

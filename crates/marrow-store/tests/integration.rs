@@ -589,3 +589,44 @@ fn conflict_resolution_records_an_audit_event() {
     assert!(kinds.contains(&"conflict_resolved".to_string()));
     assert_eq!(store.verify_log(), Ok(()));
 }
+
+#[test]
+fn provenance_traces_lineage_and_events() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::init(dir.path()).unwrap();
+    let mut old = mem(MemoryKind::Decision, "auth", "Use JWT.");
+    let old_id = store.write(&mut old).unwrap();
+    let mut new = mem(MemoryKind::Decision, "auth", "Use opaque tokens.");
+    let new_id = store.supersede(&old_id, &mut new).unwrap();
+
+    let new_trail = store.provenance(&new_id).unwrap().unwrap();
+    assert!(new_trail.supersedes.iter().any(|r| r.id == old_id));
+    assert_eq!(new_trail.written_by, "agent-1");
+    assert!(!new_trail.events.is_empty());
+
+    let old_trail = store.provenance(&old_id).unwrap().unwrap();
+    assert!(old_trail.superseded_by.iter().any(|r| r.id == new_id));
+}
+
+#[test]
+fn recall_logs_a_traceable_retrieval() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::init(dir.path()).unwrap();
+    let mut m = mem(MemoryKind::Fact, "limits", "rate limit is 100 per minute");
+    let id = store.write(&mut m).unwrap();
+
+    let q = Query::for_project("demo");
+    let hits = store.recall("rate limit", &q, "agent-7").unwrap();
+    assert_eq!(hits.len(), 1);
+
+    // The retrieval is recorded, and shows up in the memory's provenance trail.
+    let kinds: Vec<String> = store
+        .history()
+        .unwrap()
+        .into_iter()
+        .map(|e| e.kind)
+        .collect();
+    assert!(kinds.contains(&"retrieve".to_string()));
+    let trail = store.provenance(&id).unwrap().unwrap();
+    assert!(trail.events.iter().any(|e| e.kind == "retrieve"));
+}

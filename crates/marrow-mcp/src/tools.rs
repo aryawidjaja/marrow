@@ -44,7 +44,13 @@ pub fn definitions() -> Value {
             "required": ["id"]
         })),
         tool("mem_query", "Structured query over memories with an optional token budget.", filter_schema(false)),
-        tool("mem_search", "Full-text search over memory bodies.", filter_schema(true)),
+        tool("mem_search", "Hybrid keyword+semantic search over memories.", filter_schema(true)),
+        tool("mem_recall", "Like search, but records the retrieval so the answer it informs stays traceable.", filter_schema(true)),
+        tool("mem_provenance", "Trace a memory's origin, lineage, and how it has been used.", json!({
+            "type": "object",
+            "properties": {"id": {"type": "string"}},
+            "required": ["id"]
+        })),
         tool("mem_supersede", "Replace an existing memory with a new one, recording the lineage.", json!({
             "type": "object",
             "properties": {
@@ -119,6 +125,8 @@ pub fn call(root: &Path, name: &str, args: &Value) -> Result<String, String> {
         "mem_read" => read(&store, args),
         "mem_query" => query(&store, args),
         "mem_search" => search(&store, args),
+        "mem_recall" => recall(&store, args),
+        "mem_provenance" => provenance(&store, args),
         "mem_supersede" => supersede(&store, args),
         "mem_list_stale" => list_stale(&store, root, args),
         "mem_validate" => validate(&store),
@@ -181,6 +189,36 @@ fn search(store: &Store, args: &Value) -> Result<String, String> {
         .search(&text, &query_from(args))
         .map_err(|e| e.to_string())?;
     Ok(summaries(&hits))
+}
+
+fn recall(store: &Store, args: &Value) -> Result<String, String> {
+    let text = str_arg(args, "text")?;
+    let by = opt_arg(args, "by").unwrap_or_else(|| "mcp".into());
+    let hits = store
+        .recall(&text, &query_from(args), &by)
+        .map_err(|e| e.to_string())?;
+    Ok(summaries(&hits))
+}
+
+fn provenance(store: &Store, args: &Value) -> Result<String, String> {
+    let id = str_arg(args, "id")?;
+    match store.provenance(&id).map_err(|e| e.to_string())? {
+        Some(t) => {
+            let mem_ref = |r: &marrow_store::MemoryRef| json!({"id": r.id, "kind": r.kind, "topic": r.topic, "status": r.status});
+            Ok(json!({
+                "id": t.id,
+                "written_by": t.written_by,
+                "sources": t.sources,
+                "supersedes": t.supersedes.iter().map(mem_ref).collect::<Vec<_>>(),
+                "superseded_by": t.superseded_by.iter().map(mem_ref).collect::<Vec<_>>(),
+                "history": t.events.iter().map(|e| json!({
+                    "seq": e.seq, "ts": e.ts, "kind": e.kind, "summary": e.summary
+                })).collect::<Vec<_>>(),
+            })
+            .to_string())
+        }
+        None => Err(format!("no memory with id {id}")),
+    }
 }
 
 fn supersede(store: &Store, args: &Value) -> Result<String, String> {

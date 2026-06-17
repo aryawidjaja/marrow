@@ -258,3 +258,44 @@ mod tests {
         assert!(lines[1].contains("mem_write"));
     }
 }
+
+#[cfg(test)]
+mod provenance_tests {
+    use super::*;
+    use marrow_store::Store;
+    use serde_json::json;
+
+    fn store_root() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        Store::init(dir.path()).unwrap();
+        dir
+    }
+    fn call(root: &Path, name: &str, args: Value) -> Value {
+        let req = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":args}});
+        handle(root, &req).unwrap()
+    }
+    fn text(resp: &Value) -> String {
+        resp["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    #[test]
+    fn recall_then_provenance_shows_retrieval() {
+        let dir = store_root();
+        let id = text(&call(
+            dir.path(),
+            "mem_write",
+            json!({"kind":"fact","topic":"x","body":"the cache ttl is 60s"}),
+        ));
+        call(
+            dir.path(),
+            "mem_recall",
+            json!({"text":"cache ttl","by":"agent"}),
+        );
+        let prov = call(dir.path(), "mem_provenance", json!({"id": id.trim()}));
+        assert!(text(&prov).contains("\"kind\":\"retrieve\""));
+        assert!(text(&prov).contains("written_by"));
+    }
+}
