@@ -1,4 +1,4 @@
-# Marrow
+# Marrow 🦴
 
 Marrow is a memory store for AI agents that keeps everything in plain markdown files while
 giving you the things a real database provides: schemas, validation, structured queries,
@@ -222,6 +222,12 @@ memory-tool backend. Tested end to end.
 
 Planned: staleness for more languages, richer consolidation (LLM-assisted distillation), and
 concurrent multi-writer support.
+
+## The name
+
+Marrow is the essential core a body grows from — "the marrow of the matter" is the part that
+actually matters. It's also, biologically, where the immune system's memory begins. That's the
+idea here: the quiet, foundational layer an agent's knowledge is built on and remembered from.
 
 ## License
 
