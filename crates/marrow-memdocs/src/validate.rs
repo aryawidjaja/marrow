@@ -28,10 +28,16 @@ pub fn validate(memory: &Memory) -> Result<(), Vec<Violation>> {
         v.push(viol("id", "must not be empty"));
     }
     if fm.scope.project_id.trim().is_empty() {
-        v.push(viol("scope.project_id", "is required and must not be empty"));
+        v.push(viol(
+            "scope.project_id",
+            "is required and must not be empty",
+        ));
     }
     if fm.provenance.written_by.trim().is_empty() {
-        v.push(viol("provenance.written_by", "is required and must not be empty"));
+        v.push(viol(
+            "provenance.written_by",
+            "is required and must not be empty",
+        ));
     }
     if !(0.0..=1.0).contains(&fm.confidence) {
         v.push(viol("confidence", "must be between 0.0 and 1.0"));
@@ -134,7 +140,10 @@ mod tests {
     fn out_of_range_confidence_fails() {
         let mut m = base(MemoryKind::Fact);
         m.frontmatter.confidence = 1.5;
-        assert!(validate(&m).unwrap_err().iter().any(|e| e.field == "confidence"));
+        assert!(validate(&m)
+            .unwrap_err()
+            .iter()
+            .any(|e| e.field == "confidence"));
     }
 
     #[test]
@@ -155,6 +164,9 @@ mod tests {
     fn missing_written_by_fails() {
         let mut m = base(MemoryKind::Fact);
         m.frontmatter.provenance.written_by = "".into();
-        assert!(validate(&m).unwrap_err().iter().any(|e| e.field == "provenance.written_by"));
+        assert!(validate(&m)
+            .unwrap_err()
+            .iter()
+            .any(|e| e.field == "provenance.written_by"));
     }
 }

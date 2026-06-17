@@ -6,12 +6,12 @@
 //! staleness-checked against live code via marrow-core's S3∧S4 hybrid.
 
 pub mod config;
+pub mod convert;
 pub mod embed;
-#[cfg(feature = "embed-http")]
-pub mod embed_http;
 #[cfg(feature = "embed-fastembed")]
 pub mod embed_fastembed;
-pub mod convert;
+#[cfg(feature = "embed-http")]
+pub mod embed_http;
 pub mod index;
 pub mod integrity;
 pub mod query;
@@ -20,7 +20,7 @@ pub mod store;
 pub mod util;
 
 pub use config::Config;
-pub use embed::{Embedder, EmbedError, HashEmbedder};
+pub use embed::{EmbedError, Embedder, HashEmbedder};
 pub use query::Query;
 pub use staleness::StaleHit;
 pub use store::{Error, Store};

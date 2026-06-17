@@ -253,7 +253,9 @@ impl Store {
             .map(|r| r.id)
             .collect();
 
-        let w = q.hybrid_weight.unwrap_or(self.config.embedding.default_weight);
+        let w = q
+            .hybrid_weight
+            .unwrap_or(self.config.embedding.default_weight);
         let semantic = match (&self.embedder, w > 0.0) {
             (Some(embedder), true) => self.semantic_ranking(text, q, embedder.as_ref(), &now)?,
             _ => Vec::new(),
@@ -279,7 +281,9 @@ impl Store {
             .into_iter()
             .map(|r| r.id)
             .collect();
-        let qvec = embedder.embed_one(text).map_err(|e| Error::Db(e.to_string()))?;
+        let qvec = embedder
+            .embed_one(text)
+            .map_err(|e| Error::Db(e.to_string()))?;
         let mut scored: Vec<(String, f32)> = index::vectors_for(&self.conn, &candidates)?
             .into_iter()
             .map(|(id, v)| (id, cosine(&qvec, &v)))

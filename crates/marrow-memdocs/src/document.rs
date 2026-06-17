@@ -16,8 +16,12 @@ pub enum ParseError {
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ParseError::MissingFrontmatter => write!(f, "document does not begin with '---' frontmatter"),
-            ParseError::UnterminatedFrontmatter => write!(f, "frontmatter '---' fence is not closed"),
+            ParseError::MissingFrontmatter => {
+                write!(f, "document does not begin with '---' frontmatter")
+            }
+            ParseError::UnterminatedFrontmatter => {
+                write!(f, "frontmatter '---' fence is not closed")
+            }
             ParseError::Yaml(m) => write!(f, "invalid frontmatter: {m}"),
         }
     }
@@ -109,7 +113,10 @@ updated_at: 2026-06-06T00:00:00Z\n\
 
     #[test]
     fn unterminated_frontmatter_errors() {
-        assert_eq!(parse("---\nid: x\n"), Err(ParseError::UnterminatedFrontmatter));
+        assert_eq!(
+            parse("---\nid: x\n"),
+            Err(ParseError::UnterminatedFrontmatter)
+        );
     }
 
     #[test]

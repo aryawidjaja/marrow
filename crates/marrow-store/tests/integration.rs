@@ -311,9 +311,17 @@ fn semantic_search_surfaces_a_keyword_miss() {
     let mut store = Store::init(dir.path()).unwrap();
     store.set_embedder(Box::new(StubEmbedder));
 
-    let mut a = mem(MemoryKind::Fact, "alerts", "RED alert when the disk fills up");
+    let mut a = mem(
+        MemoryKind::Fact,
+        "alerts",
+        "RED alert when the disk fills up",
+    );
     let id = store.write(&mut a).unwrap();
-    let mut b = mem(MemoryKind::Fact, "fields", "GREEN pastures and rolling hills");
+    let mut b = mem(
+        MemoryKind::Fact,
+        "fields",
+        "GREEN pastures and rolling hills",
+    );
     store.write(&mut b).unwrap();
 
     // "crimson" shares no term with any body, so keyword search finds nothing...
