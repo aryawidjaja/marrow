@@ -1605,6 +1605,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "670fdfda89751bc4a84ac13eaa63e205cf0fd22b4c9a5fbfa085b63c1f1d3a30"
 
 [[package]]
+name = "marrow-bench"
+version = "0.1.0"
+dependencies = [
+ "marrow-memdocs",
+ "marrow-store",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "marrow-cli"
 version = "0.1.0"
 dependencies = [

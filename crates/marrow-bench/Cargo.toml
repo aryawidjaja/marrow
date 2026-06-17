@@ -1,0 +1,16 @@
+[package]
+name = "marrow-bench"
+version = "0.1.0"
+edition = "2021"
+description = "Reproducible benchmarks for Marrow: consolidation quality and retrieval token-efficiency."
+license = "MIT"
+
+[[bin]]
+name = "marrow-bench"
+path = "src/main.rs"
+
+[dependencies]
+marrow-store = { path = "../marrow-store" }
+marrow-memdocs = { path = "../marrow-memdocs" }
+serde_json = "1"
+tempfile = "3"

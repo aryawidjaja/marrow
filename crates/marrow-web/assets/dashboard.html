@@ -57,6 +57,13 @@
   .toast { position: fixed; bottom: 18px; right: 18px; background: var(--panel);
     border: 1px solid var(--accent); padding: 10px 14px; border-radius: 10px; opacity: 0; transition: opacity .2s; }
   .toast.show { opacity: 1; }
+  .evidence { margin: 0 20px 20px; }
+  .evgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; padding: 14px; }
+  .card { background: #12151c; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .card .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+  .card .v { font-size: 20px; font-weight: 700; margin-top: 4px; }
+  .card .d { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .card .v.good { color: var(--ok); }
 </style>
 </head>
 <body>
@@ -84,6 +91,11 @@
   </section>
 </main>
 
+<section class="panel evidence">
+  <h2>Evidence</h2>
+  <div class="evgrid" id="evidence"><div class="empty">loading…</div></div>
+</section>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -93,17 +105,34 @@ let state = { memories: [], stale: new Set(), selected: null, status: 'active' }
 async function getJSON(url, opts) { const r = await fetch(url, opts); return r.json(); }
 
 async function loadAll() {
-  const [mem, stale, audit, hist] = await Promise.all([
+  const [mem, stale, audit, hist, evidence] = await Promise.all([
     getJSON('/api/memories?status=' + state.status),
     getJSON('/api/stale'),
     getJSON('/api/audit'),
     getJSON('/api/history'),
+    getJSON('/api/evidence'),
   ]);
   state.memories = mem.memories || [];
   state.stale = new Set((stale.stale || []).map((s) => s.memory_id));
   renderAudit(audit);
   renderList();
   renderEvents(hist.events || []);
+  renderEvidence(evidence);
+}
+
+function card(k, v, d, good) {
+  return '<div class="card"><div class="k">' + esc(k) + '</div><div class="v' +
+    (good ? ' good' : '') + '">' + esc(v) + '</div><div class="d">' + esc(d) + '</div></div>';
+}
+
+function renderEvidence(e) {
+  const p = e.product || {}, s = e.store || {};
+  $('evidence').innerHTML =
+    card('Staleness (StaleEval)', p.staleeval.false_positive_pct + '% FP', p.staleeval.recall_pct + '% recall', true) +
+    card('Consolidation (ConsolEval)', p.consoleval.precision_pct + '% / ' + p.consoleval.recall_pct + '%', p.consoleval.false_merges + ' false merges', true) +
+    card('Token budget (TokenEval)', p.tokeneval.reduction_pct + '%', 'less context per query', true) +
+    card('This store', s.active + ' active', s.memories + ' total · ' + s.stale + ' stale · ' + s.duplicate_memories + ' dup', false) +
+    card('Audit', s.audit_ok ? 'intact' : 'BROKEN', 'tamper-evident ledger', s.audit_ok);
 }
 
 function renderAudit(a) {

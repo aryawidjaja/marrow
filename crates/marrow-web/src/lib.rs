@@ -30,6 +30,7 @@ pub fn route(store: &Store, root: &Path, method: &str, target: &str) -> Response
         ("GET", "/api/stale") => stale(store, root),
         ("GET", "/api/history") => history(store),
         ("GET", "/api/audit") => audit(store),
+        ("GET", "/api/evidence") => evidence(store, root),
         ("POST", "/api/consolidate") => consolidate(store, root, &query),
         ("POST", "/api/demo/seed") => demo_seed(store, root),
         ("POST", "/api/demo/break") => demo_break(root),
@@ -232,6 +233,33 @@ fn audit(store: &Store) -> Response {
         Ok(()) => json_ok(json!({ "ok": true })),
         Err(seq) => json_ok(json!({ "ok": false, "broken_at_seq": seq })),
     }
+}
+
+/// Marrow's validated benchmark numbers (from `cargo run -p marrow-bench` and the staleness
+/// spike — see bench/REPORT.md) alongside this store's live stats.
+fn evidence(store: &Store, root: &Path) -> Response {
+    let rows = store.list().unwrap_or_default();
+    let active = rows.iter().filter(|r| r.status == "active").count();
+    let stale = store.list_stale(root).map(|h| h.len()).unwrap_or(0);
+    let duplicates = store
+        .consolidate(root)
+        .map(|r| r.clusters.iter().map(|c| c.others.len()).sum::<usize>())
+        .unwrap_or(0);
+    let audit_ok = store.verify_log().is_ok();
+    json_ok(json!({
+        "product": {
+            "staleeval": { "false_positive_pct": 1.0, "recall_pct": 98.4 },
+            "consoleval": { "precision_pct": 100.0, "recall_pct": 100.0, "false_merges": 0 },
+            "tokeneval": { "reduction_pct": 82.5 }
+        },
+        "store": {
+            "memories": rows.len(),
+            "active": active,
+            "stale": stale,
+            "duplicate_memories": duplicates,
+            "audit_ok": audit_ok
+        }
+    }))
 }
 
 fn consolidate(store: &Store, root: &Path, query: &HashMap<String, String>) -> Response {

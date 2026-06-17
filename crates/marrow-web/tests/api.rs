@@ -181,3 +181,17 @@ fn demo_seed_break_drives_the_full_story() {
         2
     );
 }
+
+#[test]
+fn evidence_endpoint_reports_product_and_store() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::init(dir.path()).unwrap();
+    let mut a = mem(MemoryKind::Fact, "x", "a fact");
+    store.write(&mut a).unwrap();
+
+    let v = get(&store, dir.path(), "/api/evidence");
+    assert_eq!(v["product"]["consoleval"]["precision_pct"], 100.0);
+    assert_eq!(v["product"]["tokeneval"]["reduction_pct"], 82.5);
+    assert!(v["store"]["memories"].as_u64().unwrap() >= 1);
+    assert_eq!(v["store"]["audit_ok"], true);
+}
