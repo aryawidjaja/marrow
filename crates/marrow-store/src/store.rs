@@ -283,8 +283,10 @@ impl Store {
         let mut scored: Vec<(String, f32)> = index::vectors_for(&self.conn, &candidates)?
             .into_iter()
             .map(|(id, v)| (id, cosine(&qvec, &v)))
+            .filter(|(_, s)| *s > 0.0)
             .collect();
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored.truncate(SEMANTIC_TOP_K);
         Ok(scored.into_iter().map(|(id, _)| id).collect())
     }
 
@@ -412,6 +414,10 @@ impl Store {
 }
 
 /// Write `text` to `path` atomically (temp file in the same dir, then rename).
+/// Upper bound on semantic candidates fed into fusion, so a `w=1` search never returns the
+/// whole store.
+const SEMANTIC_TOP_K: usize = 64;
+
 /// The text embedded for a memory: its topic and body.
 fn embed_text(memory: &Memory) -> String {
     format!(

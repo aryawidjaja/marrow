@@ -278,3 +278,98 @@ fn reindex_rebuilds_from_files() {
         "memory is findable after reindex"
     );
 }
+
+/// A deterministic embedder with a tiny synonym map, so semantic search can be tested
+/// independently of keyword overlap. "red"/"crimson" -> [1,0,0]; "green" -> [0,1,0];
+/// anything else -> [0,0,1].
+struct StubEmbedder;
+
+impl marrow_store::Embedder for StubEmbedder {
+    fn dim(&self) -> usize {
+        3
+    }
+    fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, marrow_store::EmbedError> {
+        Ok(texts
+            .iter()
+            .map(|t| {
+                let t = t.to_lowercase();
+                if t.contains("red") || t.contains("crimson") {
+                    vec![1.0, 0.0, 0.0]
+                } else if t.contains("green") {
+                    vec![0.0, 1.0, 0.0]
+                } else {
+                    vec![0.0, 0.0, 1.0]
+                }
+            })
+            .collect())
+    }
+}
+
+#[test]
+fn semantic_search_surfaces_a_keyword_miss() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::init(dir.path()).unwrap();
+    store.set_embedder(Box::new(StubEmbedder));
+
+    let mut a = mem(MemoryKind::Fact, "alerts", "RED alert when the disk fills up");
+    let id = store.write(&mut a).unwrap();
+    let mut b = mem(MemoryKind::Fact, "fields", "GREEN pastures and rolling hills");
+    store.write(&mut b).unwrap();
+
+    // "crimson" shares no term with any body, so keyword search finds nothing...
+    let kw = Query {
+        project_id: Some("demo".into()),
+        hybrid_weight: Some(0.0),
+        ..Query::default()
+    };
+    assert!(store.search("crimson", &kw).unwrap().is_empty());
+
+    // ...but semantically it maps to the RED memory, and only that one.
+    let sem = Query {
+        project_id: Some("demo".into()),
+        hybrid_weight: Some(1.0),
+        ..Query::default()
+    };
+    let hits = store.search("crimson", &sem).unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].frontmatter.id, id);
+}
+
+#[test]
+fn weight_zero_is_keyword_only_even_with_embedder() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::init(dir.path()).unwrap();
+    store.set_embedder(Box::new(StubEmbedder));
+    let mut a = mem(MemoryKind::Fact, "x", "alpha beta gamma");
+    store.write(&mut a).unwrap();
+
+    let kw = Query {
+        project_id: Some("demo".into()),
+        hybrid_weight: Some(0.0),
+        ..Query::default()
+    };
+    assert_eq!(store.search("alpha", &kw).unwrap().len(), 1);
+    // A semantic-only synonym query returns nothing at w=0.
+    assert!(store.search("crimson", &kw).unwrap().is_empty());
+}
+
+#[test]
+fn reembed_backfills_vectors() {
+    let dir = tempfile::tempdir().unwrap();
+    // Written with no embedder configured -> no vectors stored.
+    let store = Store::init(dir.path()).unwrap();
+    let mut m = mem(MemoryKind::Fact, "zone", "the RED zone is off limits");
+    store.write(&mut m).unwrap();
+
+    // Reopen, attach an embedder, and backfill.
+    let mut store = Store::open(dir.path()).unwrap();
+    store.set_embedder(Box::new(StubEmbedder));
+    assert!(store.reembed().unwrap() >= 1);
+
+    let sem = Query {
+        project_id: Some("demo".into()),
+        hybrid_weight: Some(1.0),
+        ..Query::default()
+    };
+    assert_eq!(store.search("crimson", &sem).unwrap().len(), 1);
+}
