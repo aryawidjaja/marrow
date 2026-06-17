@@ -49,8 +49,51 @@ pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
         );
         CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
             id UNINDEXED, topic, body, tags
+        );
+        CREATE TABLE IF NOT EXISTS embeddings (
+            id TEXT PRIMARY KEY,
+            dim INTEGER NOT NULL,
+            vec BLOB NOT NULL
         );",
     )
+}
+
+/// Store (or replace) a memory's embedding as a little-endian f32 blob.
+pub fn upsert_vector(conn: &Connection, id: &str, vec: &[f32]) -> rusqlite::Result<()> {
+    let mut bytes = Vec::with_capacity(vec.len() * 4);
+    for x in vec {
+        bytes.extend_from_slice(&x.to_le_bytes());
+    }
+    conn.execute(
+        "INSERT OR REPLACE INTO embeddings (id, dim, vec) VALUES (?1, ?2, ?3)",
+        params![id, vec.len() as i64, bytes],
+    )?;
+    Ok(())
+}
+
+/// Load embeddings for the given ids (skipping any with a corrupt/short blob).
+pub fn vectors_for(conn: &Connection, ids: &[String]) -> rusqlite::Result<Vec<(String, Vec<f32>)>> {
+    let mut out = Vec::new();
+    let mut stmt = conn.prepare("SELECT dim, vec FROM embeddings WHERE id = ?1")?;
+    for id in ids {
+        let row = stmt
+            .query_row([id], |r| {
+                let dim: i64 = r.get(0)?;
+                let blob: Vec<u8> = r.get(1)?;
+                Ok((dim as usize, blob))
+            })
+            .ok();
+        if let Some((dim, blob)) = row {
+            if blob.len() == dim * 4 {
+                let v = blob
+                    .chunks_exact(4)
+                    .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                    .collect();
+                out.push((id.clone(), v));
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// Insert or replace a row in both the table and the FTS index.
@@ -90,6 +133,7 @@ pub fn upsert(conn: &Connection, row: &IndexRow) -> rusqlite::Result<()> {
 pub fn delete(conn: &Connection, id: &str) -> rusqlite::Result<()> {
     conn.execute("DELETE FROM memories WHERE id = ?1", params![id])?;
     conn.execute("DELETE FROM memories_fts WHERE id = ?1", params![id])?;
+    conn.execute("DELETE FROM embeddings WHERE id = ?1", params![id])?;
     Ok(())
 }
 
@@ -109,7 +153,7 @@ pub fn path_of(conn: &Connection, id: &str) -> rusqlite::Result<Option<String>> 
 
 /// Remove every row (used before a full reindex).
 pub fn clear(conn: &Connection) -> rusqlite::Result<()> {
-    conn.execute_batch("DELETE FROM memories; DELETE FROM memories_fts;")
+    conn.execute_batch("DELETE FROM memories; DELETE FROM memories_fts; DELETE FROM embeddings;")
 }
 
 /// Build the shared WHERE clause and bound parameters from a [`Query`].
@@ -181,6 +225,17 @@ fn row_from(r: &rusqlite::Row) -> rusqlite::Result<IndexRow> {
         path: r.get(13)?,
         body: r.get(14)?,
     })
+}
+
+/// Fetch one indexed row by id (used to load rows in a fused result order).
+pub fn query_one(conn: &Connection, id: &str) -> rusqlite::Result<Option<IndexRow>> {
+    let sql = format!("SELECT {COLS} FROM memories WHERE id = ?1");
+    conn.query_row(&sql, [id], row_from)
+        .map(Some)
+        .or_else(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+            other => Err(other),
+        })
 }
 
 /// Structured query.
