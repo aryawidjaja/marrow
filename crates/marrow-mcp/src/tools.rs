@@ -67,6 +67,13 @@ pub fn definitions() -> Value {
             "properties": {"limit": {"type": "integer"}}
         })),
         tool("mem_audit", "Verify the audit chain is intact and tamper-free.", json!({"type": "object", "properties": {}})),
+        tool("mem_consolidate", "Detect (or with apply=true, perform) consolidation: stale anchors, expired memories, and duplicate clusters.", json!({
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "repo root for staleness (defaults to store root)"},
+                "apply": {"type": "boolean", "description": "merge duplicates and retire expired instead of only reporting"}
+            }
+        })),
         tool("mem_log", "Append an agent-authored event (observation, correction, note).", json!({
             "type": "object",
             "properties": {
@@ -119,6 +126,7 @@ pub fn call(root: &Path, name: &str, args: &Value) -> Result<String, String> {
         "mem_history" => history(&store, args),
         "mem_audit" => audit(&store),
         "mem_log" => log_event(&store, args),
+        "mem_consolidate" => consolidate(&store, root, args),
         other => Err(format!("unknown tool: {other}")),
     }
 }
@@ -228,6 +236,28 @@ fn history(store: &Store, args: &Value) -> Result<String, String> {
         })
         .collect();
     Ok(json!({"events": items, "total": events.len()}).to_string())
+}
+
+fn consolidate(store: &Store, root: &Path, args: &Value) -> Result<String, String> {
+    let repo = args
+        .get("repo")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| root.to_path_buf());
+    if args.get("apply").and_then(Value::as_bool).unwrap_or(false) {
+        let o = store.consolidate_apply(&repo).map_err(|e| e.to_string())?;
+        Ok(json!({"applied": true, "deprecated": o.deprecated, "merged": o.merged}).to_string())
+    } else {
+        let r = store.consolidate(&repo).map_err(|e| e.to_string())?;
+        let dup: usize = r.duplicates.iter().map(|c| c.merge.len()).sum();
+        Ok(json!({
+            "stale": r.stale.len(),
+            "expired": r.expired.len(),
+            "duplicate_memories": dup,
+            "clusters": r.duplicates.len(),
+        })
+        .to_string())
+    }
 }
 
 fn audit(store: &Store) -> Result<String, String> {

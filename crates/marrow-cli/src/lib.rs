@@ -73,6 +73,15 @@ pub enum Cmd {
         by: String,
         summary: String,
     },
+    /// Detect (or with --apply, perform) consolidation: stale, expired, and duplicates.
+    Consolidate {
+        /// Repo root to check code anchors against.
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        /// Apply changes (merge duplicates, retire expired) instead of only reporting.
+        #[arg(long)]
+        apply: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -375,6 +384,31 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
                 .log_event(&kind, &by, &summary)
                 .map_err(|e| e.to_string())?;
             writeln!(out, "logged").ok();
+            Ok(())
+        }
+        Cmd::Consolidate { repo, apply } => {
+            let store = open(&cli.root)?;
+            if apply {
+                let o = store.consolidate_apply(&repo).map_err(|e| e.to_string())?;
+                writeln!(
+                    out,
+                    "applied: {} deprecated, {} merged",
+                    o.deprecated, o.merged
+                )
+                .ok();
+            } else {
+                let r = store.consolidate(&repo).map_err(|e| e.to_string())?;
+                let dup: usize = r.duplicates.iter().map(|c| c.merge.len()).sum();
+                writeln!(
+                    out,
+                    "stale: {}, expired: {}, duplicate memories: {} (in {} cluster(s))",
+                    r.stale.len(),
+                    r.expired.len(),
+                    dup,
+                    r.duplicates.len(),
+                )
+                .ok();
+            }
             Ok(())
         }
     }

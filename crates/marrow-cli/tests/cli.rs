@@ -218,3 +218,27 @@ fn history_and_audit_track_writes() {
     assert!(audit.contains("audit ok"));
     assert!(audit.contains("chain intact"));
 }
+
+#[test]
+fn consolidate_reports_and_applies() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let repo = root.to_str().unwrap();
+    ok(root, &["init"]);
+    ok(
+        root,
+        &["add", "--kind", "fact", "--topic", "a", "the disk is full"],
+    );
+    ok(
+        root,
+        &["add", "--kind", "fact", "--topic", "b", "the disk is full"],
+    );
+
+    let report = ok(root, &["consolidate", "--repo", repo]);
+    assert!(report.contains("duplicate memories: 1"));
+
+    let applied = ok(root, &["consolidate", "--repo", repo, "--apply"]);
+    assert!(applied.contains("1 merged"));
+    // After applying, no duplicates remain.
+    assert!(ok(root, &["consolidate", "--repo", repo]).contains("duplicate memories: 0"));
+}
