@@ -1,0 +1,18 @@
+[package]
+name = "marrow-cli"
+version = "0.1.0"
+edition = "2021"
+description = "Command-line interface for the Marrow memory store."
+license = "MIT"
+
+[[bin]]
+name = "marrow"
+path = "src/main.rs"
+
+[dependencies]
+marrow-store = { path = "../marrow-store" }
+marrow-memdocs = { path = "../marrow-memdocs" }
+clap = { version = "4", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "3"
