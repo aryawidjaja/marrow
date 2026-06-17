@@ -56,6 +56,23 @@ pub enum Cmd {
     Doctor,
     /// Summary counts for the store.
     Status,
+    /// Print the episodic / audit history.
+    History {
+        /// Show only the most recent N events.
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+    /// Verify the audit chain is intact.
+    Audit,
+    /// Append an agent-authored event (observation, correction, note) to the ledger.
+    Log {
+        /// Event kind, e.g. "observe" or "correct".
+        #[arg(long, default_value = "observe")]
+        kind: String,
+        #[arg(long, default_value = "cli")]
+        by: String,
+        summary: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -323,6 +340,41 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
                     writeln!(out, "  {kind}: {n}").ok();
                 }
             }
+            Ok(())
+        }
+        Cmd::History { limit } => {
+            let store = open(&cli.root)?;
+            let events = store.history().map_err(|e| e.to_string())?;
+            let start = limit.map(|n| events.len().saturating_sub(n)).unwrap_or(0);
+            for e in &events[start..] {
+                let mem = e.memory_id.as_deref().unwrap_or("-");
+                writeln!(
+                    out,
+                    "{}  {}  {}  {}  {} [{mem}]",
+                    e.seq, e.ts, e.kind, e.actor, e.summary
+                )
+                .ok();
+            }
+            writeln!(out, "{} event(s)", events.len()).ok();
+            Ok(())
+        }
+        Cmd::Audit => {
+            let store = open(&cli.root)?;
+            match store.verify_log() {
+                Ok(()) => {
+                    let n = store.history().map_err(|e| e.to_string())?.len();
+                    writeln!(out, "audit ok: {n} event(s), chain intact").ok();
+                    Ok(())
+                }
+                Err(seq) => Err(format!("audit chain broken at seq {seq}")),
+            }
+        }
+        Cmd::Log { kind, by, summary } => {
+            let store = open(&cli.root)?;
+            store
+                .log_event(&kind, &by, &summary)
+                .map_err(|e| e.to_string())?;
+            writeln!(out, "logged").ok();
             Ok(())
         }
     }

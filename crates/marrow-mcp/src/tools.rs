@@ -62,6 +62,20 @@ pub fn definitions() -> Value {
         })),
         tool("mem_validate", "Validate every stored memory against its schema.", json!({"type": "object", "properties": {}})),
         tool("mem_status", "Summary counts of stored memories by kind.", json!({"type": "object", "properties": {}})),
+        tool("mem_history", "Read the episodic / audit history (most recent last).", json!({
+            "type": "object",
+            "properties": {"limit": {"type": "integer"}}
+        })),
+        tool("mem_audit", "Verify the audit chain is intact and tamper-free.", json!({"type": "object", "properties": {}})),
+        tool("mem_log", "Append an agent-authored event (observation, correction, note).", json!({
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string"},
+                "summary": {"type": "string"},
+                "by": {"type": "string"}
+            },
+            "required": ["summary"]
+        })),
     ])
 }
 
@@ -102,6 +116,9 @@ pub fn call(root: &Path, name: &str, args: &Value) -> Result<String, String> {
         "mem_list_stale" => list_stale(&store, root, args),
         "mem_validate" => validate(&store),
         "mem_status" => status(&store),
+        "mem_history" => history(&store, args),
+        "mem_audit" => audit(&store),
+        "mem_log" => log_event(&store, args),
         other => Err(format!("unknown tool: {other}")),
     }
 }
@@ -192,6 +209,42 @@ fn validate(store: &Store) -> Result<String, String> {
         }
     }
     Ok(json!({"problems": problems, "count": problems.len()}).to_string())
+}
+
+fn history(store: &Store, args: &Value) -> Result<String, String> {
+    let events = store.history().map_err(|e| e.to_string())?;
+    let limit = args
+        .get("limit")
+        .and_then(Value::as_u64)
+        .map(|n| n as usize);
+    let start = limit.map(|n| events.len().saturating_sub(n)).unwrap_or(0);
+    let items: Vec<Value> = events[start..]
+        .iter()
+        .map(|e| {
+            json!({
+                "seq": e.seq, "ts": e.ts, "kind": e.kind, "actor": e.actor,
+                "memory_id": e.memory_id, "summary": e.summary,
+            })
+        })
+        .collect();
+    Ok(json!({"events": items, "total": events.len()}).to_string())
+}
+
+fn audit(store: &Store) -> Result<String, String> {
+    match store.verify_log() {
+        Ok(()) => Ok(json!({"ok": true}).to_string()),
+        Err(seq) => Ok(json!({"ok": false, "broken_at_seq": seq}).to_string()),
+    }
+}
+
+fn log_event(store: &Store, args: &Value) -> Result<String, String> {
+    let summary = str_arg(args, "summary")?;
+    let kind = opt_arg(args, "kind").unwrap_or_else(|| "observe".into());
+    let by = opt_arg(args, "by").unwrap_or_else(|| "mcp".into());
+    store
+        .log_event(&kind, &by, &summary)
+        .map_err(|e| e.to_string())?;
+    Ok("logged".to_string())
 }
 
 fn status(store: &Store) -> Result<String, String> {

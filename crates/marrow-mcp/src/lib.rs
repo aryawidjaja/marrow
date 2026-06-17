@@ -186,6 +186,20 @@ mod tests {
     }
 
     #[test]
+    fn history_and_audit_tools_work() {
+        let dir = store_root();
+        call(
+            dir.path(),
+            "mem_write",
+            json!({"kind":"fact","topic":"x","body":"a recorded fact"}),
+        );
+        let hist = call(dir.path(), "mem_history", json!({}));
+        assert!(result_text(&hist).contains("\"kind\":\"write\""));
+        let audit = call(dir.path(), "mem_audit", json!({}));
+        assert!(result_text(&audit).contains("\"ok\":true"));
+    }
+
+    #[test]
     fn anchor_tool_tracks_code_staleness() {
         let dir = store_root();
         std::fs::create_dir_all(dir.path().join("src")).unwrap();

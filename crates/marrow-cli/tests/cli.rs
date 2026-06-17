@@ -200,3 +200,21 @@ fn search_accepts_weight_flag() {
     let hits = ok(root, &["search", "alpha", "--weight", "0"]);
     assert!(hits.contains("1 result(s)"));
 }
+
+#[test]
+fn history_and_audit_track_writes() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(root, &["init"]);
+    ok(root, &["add", "--kind", "fact", "--topic", "x", "a fact"]);
+    ok(root, &["log", "--kind", "observe", "saw something"]);
+
+    let hist = ok(root, &["history"]);
+    assert!(hist.contains("write"));
+    assert!(hist.contains("observe"));
+    assert!(hist.contains("2 event(s)"));
+
+    let audit = ok(root, &["audit"]);
+    assert!(audit.contains("audit ok"));
+    assert!(audit.contains("chain intact"));
+}
