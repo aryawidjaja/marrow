@@ -66,6 +66,7 @@ crates/
   marrow-store     Persistence, SQLite/FTS5 index, hybrid search, decay, scope, consolidation
   marrow-cli       The `marrow` command-line tool
   marrow-mcp       A Model Context Protocol server exposing the store to agents
+  marrow-web       A local dashboard (`marrow-serve`) to watch memories and consolidation
 python/
   marrow-anthropic A backend for Anthropic's memory tool (memory_20250818)
 ```
@@ -132,6 +133,13 @@ If you ever lose or delete the index, rebuild it from the files:
 
 ```bash
 marrow doctor
+```
+
+Or watch it in a browser — a small local dashboard that lists memories, flags stale ones in
+red as the code changes, and collapses duplicates when you click Consolidate:
+
+```bash
+marrow-serve --root . --port 8088   # then open http://127.0.0.1:8088
 ```
 
 ## Use it from an agent (MCP)

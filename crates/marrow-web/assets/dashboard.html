@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Marrow</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36; --text: #e6e9ef;
+    --muted: #9aa3b2; --accent: #6ea8fe; --stale: #ff5d5d; --ok: #46d39a; --warn: #c9a227;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 20px;
+    border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); }
+  header h1 { font-size: 18px; margin: 0; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  header .spacer { flex: 1; }
+  button { background: var(--panel); color: var(--text); border: 1px solid var(--line);
+    padding: 7px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #0b0d11; border-color: var(--accent); font-weight: 600; }
+  .pill { padding: 3px 9px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
+  .pill.ok { color: var(--ok); border-color: var(--ok); }
+  .pill.bad { color: var(--stale); border-color: var(--stale); }
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px 20px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+    margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .list { max-height: 70vh; overflow: auto; }
+  .row { padding: 12px 14px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .row:hover { background: #1c2029; }
+  .row.sel { background: #1e2530; }
+  .row .top { display: flex; align-items: center; gap: 8px; }
+  .row .topic { font-weight: 600; }
+  .row .snippet { color: var(--muted); margin-top: 3px; font-size: 13px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tag { font-size: 11px; padding: 1px 7px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); }
+  .badge { font-size: 11px; padding: 1px 7px; border-radius: 6px; font-weight: 700; }
+  .badge.stale { background: rgba(255,93,93,.15); color: var(--stale); border: 1px solid var(--stale); }
+  #detail { padding: 14px; white-space: pre-wrap; }
+  #detail .meta { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+  #detail .body { background: #12151c; border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  .events { max-height: 30vh; overflow: auto; font-size: 12px; }
+  .events .ev { padding: 8px 14px; border-bottom: 1px solid var(--line); color: var(--muted); }
+  .events .ev b { color: var(--text); }
+  .empty { padding: 16px 14px; color: var(--muted); }
+  .toast { position: fixed; bottom: 18px; right: 18px; background: var(--panel);
+    border: 1px solid var(--accent); padding: 10px 14px; border-radius: 10px; opacity: 0; transition: opacity .2s; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Marrow 🦴</h1>
+  <span class="sub" id="store"></span>
+  <span class="spacer"></span>
+  <span class="pill" id="audit">audit…</span>
+  <button id="refresh">Refresh</button>
+  <button class="primary" id="consolidate">Consolidate</button>
+</header>
+
+<main>
+  <section class="panel">
+    <h2>Memories</h2>
+    <div class="list" id="list"><div class="empty">loading…</div></div>
+  </section>
+  <section class="panel">
+    <h2>Detail</h2>
+    <div id="detail"><div class="empty">select a memory</div></div>
+    <h2>Recent activity</h2>
+    <div class="events" id="events"></div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let state = { memories: [], stale: new Set(), selected: null };
+
+async function getJSON(url, opts) { const r = await fetch(url, opts); return r.json(); }
+
+async function loadAll() {
+  const [mem, stale, audit, hist] = await Promise.all([
+    getJSON('/api/memories?status=active'),
+    getJSON('/api/stale'),
+    getJSON('/api/audit'),
+    getJSON('/api/history'),
+  ]);
+  state.memories = mem.memories || [];
+  state.stale = new Set((stale.stale || []).map((s) => s.memory_id));
+  renderAudit(audit);
+  renderList();
+  renderEvents(hist.events || []);
+}
+
+function renderAudit(a) {
+  const el = $('audit');
+  if (a.ok) { el.textContent = 'audit ✓ chain intact'; el.className = 'pill ok'; }
+  else { el.textContent = 'audit ✗ broken at #' + a.broken_at_seq; el.className = 'pill bad'; }
+}
+
+function renderList() {
+  const list = $('list');
+  if (!state.memories.length) { list.innerHTML = '<div class="empty">no active memories</div>'; return; }
+  list.innerHTML = '';
+  for (const m of state.memories) {
+    const row = document.createElement('div');
+    row.className = 'row' + (m.id === state.selected ? ' sel' : '');
+    const isStale = state.stale.has(m.id);
+    row.innerHTML =
+      '<div class="top">' +
+        '<span class="topic">' + esc(m.topic || '—') + '</span>' +
+        '<span class="tag">' + esc(m.kind) + '</span>' +
+        (isStale ? '<span class="badge stale">STALE</span>' : '') +
+      '</div>' +
+      '<div class="snippet">' + esc(m.snippet || '') + '</div>';
+    row.onclick = () => selectMemory(m.id);
+    list.appendChild(row);
+  }
+}
+
+async function selectMemory(id) {
+  state.selected = id;
+  renderList();
+  const m = await getJSON('/api/memory/' + id);
+  const refs = (m.refs || []).map((r) => r.kind + ':' + r.value).join(', ') || '—';
+  const sup = (m.supersedes || []).join(', ') || '—';
+  const by = (m.provenance || {}).written_by || '—';
+  $('detail').innerHTML =
+    '<div class="meta"><b>' + esc(m.type) + '</b> · ' + esc(m.topic || '—') +
+    ' · status: ' + esc(m.status) + ' · confidence: ' + m.confidence +
+    ' · by: ' + esc(by) + '<br>refs: ' + esc(refs) + ' · supersedes: ' + esc(sup) + '</div>' +
+    '<div class="body">' + esc((m.body || '').trim()) + '</div>';
+}
+
+function renderEvents(events) {
+  const recent = events.slice(-12).reverse();
+  $('events').innerHTML = recent.map((e) =>
+    '<div class="ev"><b>' + esc(e.kind) + '</b> — ' + esc(e.summary) +
+    ' <span style="float:right">#' + e.seq + '</span></div>'
+  ).join('') || '<div class="empty">no events</div>';
+}
+
+async function consolidate() {
+  const out = await getJSON('/api/consolidate?apply=true', { method: 'POST' });
+  toast('merged ' + out.merged + ', conflicts ' + out.conflicts_resolved + ', retired ' + out.deprecated);
+  await loadAll();
+}
+
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.className = 'toast show';
+  setTimeout(() => (t.className = 'toast'), 2500);
+}
+
+function esc(s) { return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+
+$('refresh').onclick = loadAll;
+$('consolidate').onclick = consolidate;
+loadAll();
+setInterval(loadAll, 4000);   // live: edit code and watch STALE appear
+</script>
+</body>
+</html>

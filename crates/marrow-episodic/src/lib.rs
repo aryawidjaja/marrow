@@ -130,7 +130,10 @@ impl EpisodicLog {
             content_hash: content_hash.clone(),
             prev_hash: self.last_hash.clone(),
         };
-        let mut file = OpenOptions::new().create(true).append(true).open(&self.path)?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)?;
         let line = serde_json::to_string(&event).map_err(|e| Error::Parse(e.to_string()))?;
         writeln!(file, "{line}")?;
         self.last_seq = seq;
@@ -231,8 +234,12 @@ mod tests {
     fn append_chains_and_increments_seq() {
         let dir = tempfile::tempdir().unwrap();
         let mut log = EpisodicLog::open(dir.path()).unwrap();
-        let a = log.append(NewEvent::new("write", "agent", "stored fact")).unwrap();
-        let b = log.append(NewEvent::new("write", "agent", "stored decision")).unwrap();
+        let a = log
+            .append(NewEvent::new("write", "agent", "stored fact"))
+            .unwrap();
+        let b = log
+            .append(NewEvent::new("write", "agent", "stored decision"))
+            .unwrap();
         assert_eq!(a.seq, 1);
         assert_eq!(b.seq, 2);
         assert_eq!(a.prev_hash, "");
@@ -244,7 +251,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut log = EpisodicLog::open(dir.path()).unwrap();
         for i in 0..5 {
-            log.append(NewEvent::new("observe", "agent", &format!("event {i}"))).unwrap();
+            log.append(NewEvent::new("observe", "agent", &format!("event {i}")))
+                .unwrap();
         }
         assert_eq!(log.verify(), Ok(()));
     }
@@ -253,8 +261,10 @@ mod tests {
     fn verify_detects_tampering() {
         let dir = tempfile::tempdir().unwrap();
         let mut log = EpisodicLog::open(dir.path()).unwrap();
-        log.append(NewEvent::new("write", "agent", "original")).unwrap();
-        log.append(NewEvent::new("write", "agent", "second")).unwrap();
+        log.append(NewEvent::new("write", "agent", "original"))
+            .unwrap();
+        log.append(NewEvent::new("write", "agent", "second"))
+            .unwrap();
 
         // Tamper with the first line's summary directly on disk.
         let path = dir.path().join(".marrow/episodic/log.jsonl");
@@ -270,10 +280,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         {
             let mut log = EpisodicLog::open(dir.path()).unwrap();
-            log.append(NewEvent::new("write", "agent", "first")).unwrap();
+            log.append(NewEvent::new("write", "agent", "first"))
+                .unwrap();
         }
         let mut log = EpisodicLog::open(dir.path()).unwrap();
-        let next = log.append(NewEvent::new("write", "agent", "second")).unwrap();
+        let next = log
+            .append(NewEvent::new("write", "agent", "second"))
+            .unwrap();
         assert_eq!(next.seq, 2);
         assert_eq!(log.read_all().unwrap().len(), 2);
         assert_eq!(log.verify(), Ok(()));
