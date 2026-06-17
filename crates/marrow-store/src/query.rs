@@ -20,6 +20,8 @@ pub struct Query {
     pub limit: Option<usize>,
     /// Stop accumulating results once the estimated token total would exceed this.
     pub max_tokens: Option<usize>,
+    /// Hybrid search weight: 0 = keyword only, 1 = semantic only. None uses the store default.
+    pub hybrid_weight: Option<f64>,
 }
 
 impl Query {

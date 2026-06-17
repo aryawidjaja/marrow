@@ -9,6 +9,7 @@ use ulid::Ulid;
 
 use crate::config::Config;
 use crate::convert::{kind_str, status_str};
+use crate::embed::{cosine, rrf, Embedder, HashEmbedder};
 use crate::index::{self, IndexRow};
 use crate::query::{estimate_tokens, Query};
 use crate::staleness::{check_memory, StaleHit};
@@ -73,6 +74,7 @@ pub struct Store {
     conn: Connection,
     config: Config,
     key: Option<Vec<u8>>,
+    embedder: Option<Box<dyn Embedder>>,
 }
 
 impl Store {
@@ -107,17 +109,24 @@ impl Store {
         } else {
             None
         };
+        let embedder = build_embedder(&config);
         Ok(Store {
             root,
             conn,
             config,
             key,
+            embedder,
         })
     }
 
     /// Override the signing key (mainly for tests and embedding).
     pub fn set_key(&mut self, key: impl Into<Vec<u8>>) {
         self.key = Some(key.into());
+    }
+
+    /// Inject an embedder (used by tests and embedding integrations).
+    pub fn set_embedder(&mut self, embedder: Box<dyn Embedder>) {
+        self.embedder = Some(embedder);
     }
 
     fn memory_dir(&self) -> PathBuf {
@@ -166,7 +175,19 @@ impl Store {
         atomic_write(&abs, &to_markdown(memory))?;
 
         index::upsert(&self.conn, &self.row_of(memory, &rel))?;
+        self.embed_memory(memory)?;
         Ok(memory.frontmatter.id.clone())
+    }
+
+    /// Embed a memory's topic+body and store the vector, if an embedder is configured.
+    fn embed_memory(&self, memory: &Memory) -> Result<(), Error> {
+        if let Some(embedder) = &self.embedder {
+            let text = embed_text(memory);
+            if let Ok(vec) = embedder.embed_one(&text) {
+                index::upsert_vector(&self.conn, &memory.frontmatter.id, &vec)?;
+            }
+        }
+        Ok(())
     }
 
     /// At most one active decision may exist per (topic, project).
@@ -223,10 +244,48 @@ impl Store {
         self.load_budgeted(rows, q.max_tokens)
     }
 
-    /// Full-text search with the same structured filters and token budget.
+    /// Hybrid search: keyword (FTS5/BM25) fused with semantic (vector cosine) via weighted
+    /// RRF. `hybrid_weight` of 0 (or no embedder) is exactly keyword search.
     pub fn search(&self, text: &str, q: &Query) -> Result<Vec<Memory>, Error> {
-        let rows = index::search(&self.conn, text, q, &util::now_rfc3339())?;
+        let now = util::now_rfc3339();
+        let keyword: Vec<String> = index::search(&self.conn, text, q, &now)?
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+
+        let w = q.hybrid_weight.unwrap_or(self.config.embedding.default_weight);
+        let semantic = match (&self.embedder, w > 0.0) {
+            (Some(embedder), true) => self.semantic_ranking(text, q, embedder.as_ref(), &now)?,
+            _ => Vec::new(),
+        };
+
+        let fused = rrf(&keyword, &semantic, w);
+        let rows: Vec<IndexRow> = fused
+            .into_iter()
+            .filter_map(|id| index::query_one(&self.conn, &id).ok().flatten())
+            .collect();
         self.load_budgeted(rows, q.max_tokens)
+    }
+
+    /// Rank the filtered candidate set by cosine similarity to the query embedding.
+    fn semantic_ranking(
+        &self,
+        text: &str,
+        q: &Query,
+        embedder: &dyn Embedder,
+        now: &str,
+    ) -> Result<Vec<String>, Error> {
+        let candidates: Vec<String> = index::query(&self.conn, q, now)?
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+        let qvec = embedder.embed_one(text).map_err(|e| Error::Db(e.to_string()))?;
+        let mut scored: Vec<(String, f32)> = index::vectors_for(&self.conn, &candidates)?
+            .into_iter()
+            .map(|(id, v)| (id, cosine(&qvec, &v)))
+            .collect();
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        Ok(scored.into_iter().map(|(id, _)| id).collect())
     }
 
     fn load_budgeted(
@@ -299,9 +358,25 @@ impl Store {
                 .to_string_lossy()
                 .replace('\\', "/");
             index::upsert(&self.conn, &self.row_of(&memory, &rel))?;
+            self.embed_memory(&memory)?;
             count += 1;
         }
         Ok(count)
+    }
+
+    /// Recompute and store embeddings for every memory. Returns the count embedded.
+    pub fn reembed(&self) -> Result<usize, Error> {
+        if self.embedder.is_none() {
+            return Ok(0);
+        }
+        let mut n = 0;
+        for row in self.list()? {
+            if let Some(memory) = self.read(&row.id)? {
+                self.embed_memory(&memory)?;
+                n += 1;
+            }
+        }
+        Ok(n)
     }
 
     fn row_of(&self, memory: &Memory, rel: &str) -> IndexRow {
@@ -337,6 +412,30 @@ impl Store {
 }
 
 /// Write `text` to `path` atomically (temp file in the same dir, then rename).
+/// The text embedded for a memory: its topic and body.
+fn embed_text(memory: &Memory) -> String {
+    format!(
+        "{}\n{}",
+        memory.frontmatter.topic.clone().unwrap_or_default(),
+        memory.body
+    )
+}
+
+/// Construct the embedder named by config, if its backend is available.
+fn build_embedder(config: &Config) -> Option<Box<dyn Embedder>> {
+    match config.embedding.provider.as_str() {
+        "hash" => Some(Box::new(HashEmbedder::new(config.embedding.dim))),
+        #[cfg(feature = "embed-http")]
+        "http" => Some(Box::new(crate::embed_http::HttpEmbedder::from_config(
+            &config.embedding,
+        ))),
+        #[cfg(feature = "embed-fastembed")]
+        "fastembed" => crate::embed_fastembed::FastEmbedder::from_config(&config.embedding)
+            .map(|e| Box::new(e) as Box<dyn Embedder>),
+        _ => None,
+    }
+}
+
 fn atomic_write(path: &Path, text: &str) -> std::io::Result<()> {
     let tmp = path.with_file_name(format!(
         ".{}.tmp",
