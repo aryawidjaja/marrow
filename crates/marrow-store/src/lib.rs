@@ -9,6 +9,8 @@ pub mod config;
 pub mod embed;
 #[cfg(feature = "embed-http")]
 pub mod embed_http;
+#[cfg(feature = "embed-fastembed")]
+pub mod embed_fastembed;
 pub mod convert;
 pub mod index;
 pub mod integrity;
