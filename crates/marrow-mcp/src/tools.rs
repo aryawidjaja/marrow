@@ -96,7 +96,7 @@ pub fn definitions() -> Value {
                 "topic": {"type": "string"},
                 "feature": {"type": "string"},
                 "project": {"type": "string"},
-                "ttl_secs": {"type": "integer", "description": "lease length in seconds (default 3600)"},
+                "ttl_secs": {"type": "integer", "description": "lease length in seconds (default 900; renews on progress)"},
                 "by": {"type": "string"}
             },
             "required": ["session","intent"]
@@ -370,7 +370,7 @@ fn claim(store: &Store, args: &Value) -> Result<String, String> {
     let session = str_arg(args, "session")?;
     let intent = str_arg(args, "intent")?;
     let by = opt_arg(args, "by").unwrap_or_else(|| "mcp".into());
-    let ttl = args.get("ttl_secs").and_then(Value::as_i64).unwrap_or(3600);
+    let ttl = args.get("ttl_secs").and_then(Value::as_i64).unwrap_or(900);
     let c = store
         .claim(&session, &by, scope_from(args), &intent, ttl)
         .map_err(|e| e.to_string())?;

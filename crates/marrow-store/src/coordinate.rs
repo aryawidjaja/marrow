@@ -250,7 +250,7 @@ impl Store {
         };
         for c in self.active_claims()? {
             if c.session_id == session_id && c.scope.overlaps(&touched) {
-                let ttl = if c.ttl_secs > 0 { c.ttl_secs } else { 3600 };
+                let ttl = if c.ttl_secs > 0 { c.ttl_secs } else { 900 };
                 self.log_data(
                     "renew",
                     actor,
