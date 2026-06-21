@@ -53,6 +53,33 @@ else
   echo "  • .claude/settings.json exists — wrote .claude/settings.marrow.json; merge its \"hooks\" block in"
 fi
 
+# 5) Drop a tiny, idempotent agent-guidance block into CLAUDE.md so the user authors NOTHING.
+# The hooks already handle warm-start, collision-avoidance, and activity automatically; this only
+# nudges the agent to save durable *decisions* (a judgment call a hook can't make).
+guidance() {
+  cat <<'MD'
+<!-- marrow:begin (managed by Marrow — installed by integrations/claude-code/install.sh) -->
+## Marrow shared memory
+
+This project has a Marrow shared brain connected over MCP. Hooks already bootstrap context at
+session start, prevent file collisions before edits, and record your activity — automatically.
+You only need to do one thing: **when you reach a durable decision, fact, or gotcha, save it with
+the `mem_write` tool** (kind `decision`/`fact`, a short topic, project `default`), so the next
+session inherits it. Use `mem_recall` before answering questions about past decisions, and don't
+re-save anything already in Marrow.
+<!-- marrow:end -->
+MD
+}
+if [ ! -f CLAUDE.md ]; then
+  guidance > CLAUDE.md
+  echo "  ✓ wrote CLAUDE.md (agent guidance)"
+elif grep -q "marrow:begin" CLAUDE.md; then
+  echo "  • CLAUDE.md already has the Marrow block — left as-is"
+else
+  { printf '\n'; guidance; } >> CLAUDE.md
+  echo "  ✓ appended the Marrow block to your existing CLAUDE.md"
+fi
+
 cat <<'EOF'
 
 Done. Open Claude Code in this project — each session will now:

@@ -34,14 +34,14 @@ Every hook fails open — if anything goes wrong it exits 0 and never blocks you
 | Hook | Event | Effect |
 |------|-------|--------|
 | `marrow-bootstrap.sh` | `SessionStart` | Injects a warm-start briefing (active claims + relevant memories) so the session doesn't cold-start. Fires once per session. |
+| `marrow-guard.sh` | `PreToolUse` (Edit/Write) | **Before** an edit: blocks it if another session has claimed that file (tells the agent to coordinate), otherwise auto-claims the file for this session. Collision-avoidance with no prompting. |
 | `marrow-progress.sh` | `PostToolUse` (Edit/Write) | Records each file edit as a `progress` event other sessions can see live. |
 
-This is what makes memory truly automatic and *unobtrusive*: the user never has to say "remember
-this," and nothing pops up. The SessionStart hook reads the shared brain, `PostToolUse` records
-file activity, and durable **decisions are saved in-flow** by the agent as it works (per the
-project's `CLAUDE.md`). The agent can also call the MCP tools (`mem_write`, `mem_claim`, …) directly
-any time.
+This is what makes the shared brain truly automatic and *unobtrusive* — **the user authors nothing
+and says nothing.** The hooks handle warm-start, collision-avoidance, and activity. The only
+judgment a hook can't make — *which* decisions are worth keeping — is nudged by a tiny block the
+installer drops into `CLAUDE.md` for you (it asks the agent to `mem_write` durable decisions
+in-flow). The agent can also call the MCP tools (`mem_write`, `mem_claim`, …) directly any time.
 
 (There is intentionally **no `Stop` hook**: Claude Code fires `Stop` after every agent turn, not at
-session end, so anything it did would be noise or an interruption. Decision capture happens in-flow
-instead.)
+session end, so anything it did would be noise or an interruption.)
