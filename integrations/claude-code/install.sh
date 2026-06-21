@@ -27,12 +27,15 @@ echo "Setting up Marrow in: $target"
 # 1) The store
 [ -d .marrow ] || { marrow init >/dev/null && echo "  ✓ created .marrow store"; }
 
-# 2) Connect Marrow over MCP
+# 2) Connect Marrow over MCP. Use the ABSOLUTE path to marrow-mcp: Claude Code spawns MCP
+# servers in a shell that may not have ~/.cargo/bin on PATH, so a bare "marrow-mcp" can fail
+# to connect.
+mcp_bin="$(command -v marrow-mcp)"
 if [ ! -f .mcp.json ]; then
-  printf '%s\n' '{ "mcpServers": { "marrow": { "command": "marrow-mcp", "args": ["--root", "."] } } }' > .mcp.json
-  echo "  ✓ wrote .mcp.json (MCP connection)"
+  printf '{ "mcpServers": { "marrow": { "command": "%s", "args": ["--root", "."] } } }\n' "$mcp_bin" > .mcp.json
+  echo "  ✓ wrote .mcp.json (MCP connection -> $mcp_bin)"
 else
-  echo "  • .mcp.json already exists — left as-is"
+  echo "  • .mcp.json already exists — left as-is (ensure it points to: $mcp_bin)"
 fi
 
 # 3) Auto-capture hooks

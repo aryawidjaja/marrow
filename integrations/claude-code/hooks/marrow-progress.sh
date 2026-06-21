@@ -4,7 +4,10 @@
 set -u
 root="${CLAUDE_PROJECT_DIR:-.}"
 
-command -v marrow >/dev/null 2>&1 || exit 0
+marrow="$(command -v marrow || true)"
+[ -z "$marrow" ] && [ -x "$HOME/.cargo/bin/marrow" ] && marrow="$HOME/.cargo/bin/marrow"
+[ -z "$marrow" ] && [ -x "$root/target/release/marrow" ] && marrow="$root/target/release/marrow"
+[ -z "$marrow" ] && exit 0
 command -v jq >/dev/null 2>&1 || exit 0
 [ -d "$root/.marrow" ] || exit 0
 
@@ -13,6 +16,6 @@ file="$(printf '%s' "$input" | jq -r '.tool_input.file_path // .tool_input.path 
 session="$(printf '%s' "$input" | jq -r '.session_id // "claude-code"')"
 [ -n "$file" ] || exit 0
 
-marrow --root "$root" progress "edited $file" --session "$session" --file "$file" --by claude-code \
+"$marrow" --root "$root" progress "edited $file" --session "$session" --file "$file" --by claude-code \
   >/dev/null 2>&1 || true
 exit 0

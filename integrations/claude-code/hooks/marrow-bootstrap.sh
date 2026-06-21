@@ -4,10 +4,15 @@
 set -u
 root="${CLAUDE_PROJECT_DIR:-.}"
 
-command -v marrow >/dev/null 2>&1 || exit 0
+# Locate the marrow binary. Hooks run in a non-login shell that may NOT have ~/.cargo/bin on
+# PATH, so check the usual install locations explicitly.
+marrow="$(command -v marrow || true)"
+[ -z "$marrow" ] && [ -x "$HOME/.cargo/bin/marrow" ] && marrow="$HOME/.cargo/bin/marrow"
+[ -z "$marrow" ] && [ -x "$root/target/release/marrow" ] && marrow="$root/target/release/marrow"
+[ -z "$marrow" ] && exit 0
 [ -d "$root/.marrow" ] || exit 0
 
-brief="$(marrow --root "$root" bootstrap "resume work on this project" --by claude-code 2>/dev/null)" || exit 0
+brief="$("$marrow" --root "$root" bootstrap "resume work on this project" --by claude-code 2>/dev/null)" || exit 0
 [ -n "$brief" ] || exit 0
 
 if command -v jq >/dev/null 2>&1; then
