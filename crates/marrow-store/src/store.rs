@@ -463,6 +463,12 @@ impl Store {
 
     /// Rebuild the index from the markdown files on disk. Returns the count indexed.
     pub fn reindex(&self) -> Result<usize, Error> {
+        // Recreate the FTS table from scratch so `doctor` also picks up schema/tokenizer
+        // changes (e.g. switching on the porter stemmer) on stores built by older versions.
+        self.conn
+            .execute_batch("DROP TABLE IF EXISTS memories_fts;")
+            .map_err(|e| Error::Db(e.to_string()))?;
+        index::init_schema(&self.conn)?;
         index::clear(&self.conn)?;
         let mut count = 0;
         for path in markdown_files(&self.memory_dir()) {

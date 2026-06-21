@@ -48,7 +48,8 @@ pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
             body TEXT NOT NULL DEFAULT ''
         );
         CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
-            id UNINDEXED, topic, body, tags
+            id UNINDEXED, topic, body, tags,
+            tokenize = 'porter unicode61'
         );
         CREATE TABLE IF NOT EXISTS embeddings (
             id TEXT PRIMARY KEY,

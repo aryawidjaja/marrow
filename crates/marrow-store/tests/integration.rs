@@ -630,3 +630,33 @@ fn recall_logs_a_traceable_retrieval() {
     let trail = store.provenance(&id).unwrap().unwrap();
     assert!(trail.events.iter().any(|e| e.kind == "retrieve"));
 }
+
+#[test]
+fn search_matches_word_stems() {
+    // A user searching the singular "JWT" should find a memory that stored the plural "JWTs".
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::init(dir.path()).unwrap();
+    let mut m = mem(
+        MemoryKind::Fact,
+        "auth",
+        "We use short-lived JWTs for sessions.",
+    );
+    store.write(&mut m).unwrap();
+
+    let hits = store.search("JWT", &Query::for_project("demo")).unwrap();
+    assert_eq!(
+        hits.len(),
+        1,
+        "singular query must match the plural in the body (porter stemming)"
+    );
+
+    // And the reverse: a plural query matches a singular body word.
+    let hits2 = store
+        .search("session", &Query::for_project("demo"))
+        .unwrap();
+    assert_eq!(
+        hits2.len(),
+        1,
+        "stemming should match 'session' against 'sessions'"
+    );
+}
