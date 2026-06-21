@@ -7,10 +7,10 @@ This file is written so an AI agent can install and use Marrow on the user's beh
 ## Install
 
 ```bash
-# From the Marrow repo (Rust toolchain required):
-cargo install --path crates/marrow-cli    # the `marrow` command
-cargo install --path crates/marrow-mcp     # the `marrow-mcp` server
-# or: cargo build --release  -> binaries in target/release/ (marrow, marrow-mcp, marrow-serve)
+# With Rust (no clone needed):
+cargo install --git https://github.com/aryawidjaja/marrow marrow-cli marrow-mcp
+# Or without Rust (prebuilt binaries):
+#   curl -fsSL https://raw.githubusercontent.com/aryawidjaja/marrow/main/install.sh | sh
 
 marrow init                                # creates .marrow/ in the current project
 ```
