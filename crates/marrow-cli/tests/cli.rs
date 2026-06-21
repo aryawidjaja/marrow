@@ -336,6 +336,14 @@ fn setup_scaffolds_hooks_settings_and_guidance() {
 }
 
 #[test]
+fn bare_invocation_shows_getting_started() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = ok(dir.path(), &[]);
+    assert!(out.contains("shared memory for AI agents"));
+    assert!(out.contains("marrow setup"));
+}
+
+#[test]
 fn ingest_lists_docs_with_distill_instructions() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();

@@ -20,7 +20,7 @@ pub struct Cli {
     #[arg(long, default_value = ".", global = true)]
     pub root: PathBuf,
     #[command(subcommand)]
-    pub cmd: Cmd,
+    pub cmd: Option<Cmd>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -294,7 +294,10 @@ impl FilterArgs {
 
 /// Run a parsed CLI command, writing user output to `out`.
 pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
-    match cli.cmd {
+    let Some(cmd) = cli.cmd else {
+        return welcome(out);
+    };
+    match cmd {
         Cmd::Init => {
             Store::init(&cli.root).map_err(|e| e.to_string())?;
             writeln!(
@@ -654,6 +657,25 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
 
 fn first_line(body: &str) -> &str {
     body.trim().lines().next().unwrap_or("")
+}
+
+/// Shown when `marrow` is run with no subcommand — the getting-started nudge a freshly installed
+/// package should give (cargo has no post-install hook, so the binary points the way itself).
+fn welcome(out: &mut impl Write) -> Result<(), String> {
+    writeln!(
+        out,
+        "Marrow {} — shared memory for AI agents.\n\n\
+         Get started:\n  \
+         marrow setup            wire this project into Claude Code (add --global for every project)\n  \
+         marrow ingest           seed memory from an existing repo's docs\n  \
+         marrow --help           all commands\n\n\
+         After `marrow setup`, restart Claude Code — then sessions warm-start, avoid collisions, and\n\
+         you can capture anytime with /marrow-save (or just \"save this to marrow\").\n\n\
+         Docs: https://github.com/aryawidjaja/marrow",
+        env!("CARGO_PKG_VERSION"),
+    )
+    .ok();
+    Ok(())
 }
 
 /// The onboarding instruction an agent acts on: the project's knowledge docs plus a directive to

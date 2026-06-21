@@ -168,9 +168,17 @@ check "MCP mem_ingest returns the docs" "$onboard_session" "README.md"
 
 echo "==> Setup: scaffolds hooks, slash command, guidance"
 proj5="$work/project5"
-mkdir -p "$proj5"
+mkdir -p "$proj5/.claude"
+# Pre-existing settings.json with the user's own config — setup must MERGE, not clobber.
+printf '{"model":"opus"}' > "$proj5/.claude/settings.json"
 setup_out="$("$marrow" --root "$proj5" setup 2>&1 || true)"
 check "setup reports the slash command" "$setup_out" "marrow-save.md"
 check "setup wrote the /marrow-save command" "$(cat "$proj5/.claude/commands/marrow-save.md")" "mem_write"
+merged="$(cat "$proj5/.claude/settings.json")"
+check "setup merged hooks into existing settings.json" "$merged" "marrow-bootstrap.sh"
+check "setup preserved the user's existing settings" "$merged" '"model"'
+
+echo "==> Bare invocation: getting-started banner"
+check "marrow with no args points to setup" "$("$marrow")" "marrow setup"
 
 printf '\nAll %d checks passed.\n' "$pass"

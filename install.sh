@@ -49,4 +49,13 @@ case ":$PATH:" in
   *":$bindir:"*) ;;
   *) echo "Add it to your PATH:  export PATH=\"$bindir:\$PATH\"" ;;
 esac
-echo "Done. Run 'marrow --version' to check, then 'marrow init' in a project."
+cat <<'NEXT'
+
+Next steps:
+  cd your-project
+  marrow setup            # wire this project into Claude Code (add --global for every project)
+  # then restart Claude Code
+
+Onboarding an existing repo? Run `marrow ingest` (or ask your agent to "seed marrow from this
+repo's docs"). Capture a session anytime with /marrow-save. Docs: https://github.com/aryawidjaja/marrow
+NEXT
