@@ -19,14 +19,19 @@ Verify: `marrow status` should print `total: 0`.
 
 ## Connect Marrow to this agent (MCP)
 
-Add Marrow as an MCP server in the host's config, pointing `--root` at the project:
+Best default — register it once for EVERY project (Claude Code):
+```
+claude mcp add marrow -s user -- marrow-mcp --root .
+```
+`-s user` makes Marrow's tools available in all your projects; `--root .` gives each project its
+own memory under `.marrow/` (created on first use). Restart the session to pick it up.
 
-- Claude Code — add to `.mcp.json`:
+Per-project instead (or for Cursor / Codex):
+- Claude Code / Cursor — `.mcp.json` (or `.cursor/mcp.json`):
   `{"mcpServers":{"marrow":{"command":"marrow-mcp","args":["--root","."]}}}`
-- Cursor — same JSON in `.cursor/mcp.json`.
 - Codex (TOML): `[mcp_servers.marrow]` with `command = "marrow-mcp"`, `args = ["--root","."]`.
 
-After adding it, the agent gains the `mem_*` tools below.
+After connecting, the agent gains the `mem_*` tools below.
 
 ## How an agent should use Marrow (the loop)
 

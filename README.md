@@ -43,16 +43,21 @@ Each puts `marrow` and `marrow-mcp` on your PATH (add `marrow-web` for the dashb
 
 ## Use it with your agent
 
+Register Marrow once, for every project (Claude Code):
 ```bash
-cd your-project
-marrow init
-printf '{ "mcpServers": { "marrow": { "command": "marrow-mcp", "args": ["--root", "."] } } }\n' > .mcp.json
+claude mcp add marrow -s user -- marrow-mcp --root .
 ```
-Open Claude Code (or Cursor / Codex — same config) and it connects automatically, gaining the
-`mem_*` tools: `mem_write` / `mem_recall` / `mem_search` for memory, and `mem_bootstrap` /
-`mem_claim` / `mem_activity` for the shared brain. For hands-free auto-capture and warm-start hooks,
-see [integrations/](integrations/README.md); to have an agent set it all up itself, point it at
-[`llms.txt`](llms.txt).
+Now open Claude Code in any project and it connects automatically, gaining the `mem_*` tools:
+`mem_write` / `mem_recall` / `mem_search` for memory, and `mem_bootstrap` / `mem_claim` /
+`mem_activity` for the shared brain. Each project keeps its own memory under `.marrow/` (created on
+first use). For Cursor / Codex, or to scope it to one project, put the same server in the project's
+MCP config (`.mcp.json`). For hands-free auto-capture and warm-start hooks, see
+[integrations/](integrations/README.md); to have an agent set it all up, point it at [`llms.txt`](llms.txt).
+
+> **One brain across projects, or a team?** Point sessions at a shared store
+> (`--root ~/marrow-shared` instead of `.`) — memories are scoped per project, so an agent can
+> recall across them when it wants to. That shared/team brain is the direction the served and
+> enterprise editions build on.
 
 ## What it does
 
