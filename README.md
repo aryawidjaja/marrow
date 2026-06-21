@@ -57,6 +57,12 @@ Marrow keeps the markdown-first approach and closes those gaps.
   contradictions, and retires expired notes — distilling rather than dropping, choosing the
   survivor by salience and preserving lineage. Contradiction resolution can run against a
   local or sovereign-hosted LLM (it never has to leave your infrastructure).
+- **A shared brain for many agents.** One store, many sessions. Agents can warm-start from
+  what others have done (`bootstrap`), register advisory **work-claims** so parallel sessions
+  don't collide on the same files (`claim`/`claims`), and stream what they're doing to a
+  real-time activity log (`progress`/`activity`). Every claim and step rides the same
+  tamper-evident ledger, so coordination is auditable too. It works across tools — anything
+  that speaks MCP shares the same brain.
 
 ## Repository layout
 
@@ -132,6 +138,17 @@ marrow consolidate --repo .       # report stale, expired, and duplicate memorie
 marrow consolidate --repo . --apply   # merge duplicates and retire expired
 ```
 
+Coordinate many agent sessions through one shared brain:
+
+```bash
+marrow bootstrap "add OAuth login"          # warm-start: who's doing what + relevant memory
+marrow claims --file src/auth.rs            # is anyone already working here?
+marrow claim "refactor auth" --file src/auth.rs --session $SID   # stake out the work
+marrow progress "added token issuer" --file src/auth.rs --session $SID
+marrow activity                             # the live cross-session stream
+marrow release <claim-id>                   # done
+```
+
 If you ever lose or delete the index, rebuild it from the files:
 
 ```bash
@@ -147,9 +164,12 @@ marrow-serve --root . --port 8088   # then open http://127.0.0.1:8088
 
 ## Use it from an agent (MCP)
 
-`marrow-mcp` speaks the Model Context Protocol over stdio and exposes the store as tools
-(`mem_write`, `mem_read`, `mem_query`, `mem_search`, `mem_supersede`, `mem_list_stale`,
-`mem_validate`, `mem_status`). Point an MCP-capable client at it:
+`marrow-mcp` speaks the Model Context Protocol over stdio and exposes the whole store as tools —
+the knowledge plane (`mem_write`, `mem_anchor`, `mem_read`, `mem_query`, `mem_search`,
+`mem_recall`, `mem_provenance`, `mem_supersede`, `mem_list_stale`, `mem_validate`, `mem_status`,
+`mem_history`, `mem_audit`, `mem_consolidate`, `mem_log`) and the shared-brain coordination plane
+(`mem_bootstrap`, `mem_claim`, `mem_claims`, `mem_release`, `mem_progress`, `mem_activity`).
+Point an MCP-capable client at it:
 
 ```json
 {
@@ -161,6 +181,10 @@ marrow-serve --root . --port 8088   # then open http://127.0.0.1:8088
   }
 }
 ```
+
+The same config works for Claude Code, Cursor, and Codex. For ready-to-paste snippets, a
+recommended agent workflow, and optional auto-capture hooks, see
+[integrations/](integrations/README.md).
 
 ## Use it as an Anthropic memory-tool backend
 
@@ -228,7 +252,8 @@ OpenAI-compatible chat endpoint — including a local or sovereign-hosted model 
 
 Working today: the staleness engine, the document format and validation, the store with its
 index, hybrid keyword+semantic search, decay, scope, supersession and integrity, the
-append-only audit ledger, decision provenance, the consolidation pass, the CLI, the MCP server,
+append-only audit ledger, decision provenance, the consolidation pass, the shared-brain
+coordination plane (work-claims, activity stream, session bootstrap), the CLI, the MCP server,
 the local dashboard, the reproducible benchmarks, and the Anthropic memory-tool backend. Tested
 end to end.
 
