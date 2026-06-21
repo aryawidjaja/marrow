@@ -60,6 +60,49 @@ fn home_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+/// Merge Marrow's hook groups into an existing `settings.json`, preserving the user's other hooks
+/// and config. Idempotent — re-running drops any prior Marrow hook groups before re-adding, so the
+/// hooks never pile up. Returns `None` if either side isn't a JSON object we can merge.
+fn merge_hooks_into(existing: &str, marrow: &str) -> Option<String> {
+    use serde_json::{json, Value};
+
+    let mut root: Value = serde_json::from_str(existing).ok()?;
+    let add: Value = serde_json::from_str(marrow).ok()?;
+    let add_hooks = add.get("hooks")?.as_object()?;
+
+    let obj = root.as_object_mut()?;
+    let hooks = obj
+        .entry("hooks")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()?;
+
+    for (event, groups) in add_hooks {
+        let arr = hooks
+            .entry(event.clone())
+            .or_insert_with(|| json!([]))
+            .as_array_mut()?;
+        arr.retain(|g| !is_marrow_group(g));
+        if let Some(gs) = groups.as_array() {
+            arr.extend(gs.iter().cloned());
+        }
+    }
+    serde_json::to_string_pretty(&root).ok()
+}
+
+/// A hook group is "ours" if any of its commands references a Marrow hook script.
+fn is_marrow_group(group: &serde_json::Value) -> bool {
+    group
+        .get("hooks")
+        .and_then(|h| h.as_array())
+        .is_some_and(|hs| {
+            hs.iter().any(|h| {
+                h.get("command")
+                    .and_then(|c| c.as_str())
+                    .is_some_and(|c| c.contains("marrow-"))
+            })
+        })
+}
+
 /// Run `marrow setup`. Without `global`, it wires this project's `.claude`; with `global`, it wires
 /// the user-level `~/.claude` so every project is hands-free.
 pub fn run(root: &Path, global: bool, out: &mut impl Write) -> Result<(), String> {
@@ -93,7 +136,12 @@ pub fn run(root: &Path, global: bool, out: &mut impl Write) -> Result<(), String
 
     writeln!(
         out,
-        "\nDone. Restart Claude Code — it will warm-start, avoid collisions, and capture decisions automatically."
+        "\nDone. Next:\n  \
+         1. Restart Claude Code so it loads the hooks, the MCP tools, and /marrow-save.\n  \
+         2. Sessions now warm-start, avoid collisions, and you can capture anytime —\n     \
+         type /marrow-save (or just say \"save this to marrow\").\n  \
+         3. New repo with existing docs? The first session will offer to run `marrow ingest`\n     \
+         to seed memory — or just ask the agent to \"seed marrow from this repo's docs\"."
     )
     .ok();
     Ok(())
@@ -132,18 +180,34 @@ fn install(
     )
     .ok();
 
-    // 3) Register the hooks in settings.json without clobbering an existing one.
+    // 3) Register the hooks in settings.json, merging into an existing file rather than clobbering
+    //    it (so the hooks actually activate on a machine that already has Claude Code settings).
     let settings = base.join("settings.json");
-    if settings.exists() {
-        fs::write(base.join("settings.marrow.json"), SETTINGS).map_err(|e| e.to_string())?;
-        writeln!(
-            out,
-            "  settings    -> {label}/settings.json exists; wrote settings.marrow.json (merge its \"hooks\" block)"
-        )
-        .ok();
-    } else {
-        fs::write(&settings, SETTINGS).map_err(|e| e.to_string())?;
-        writeln!(out, "  settings    -> {label}/settings.json").ok();
+    match fs::read_to_string(&settings) {
+        Ok(existing) => match merge_hooks_into(&existing, SETTINGS) {
+            Some(merged) => {
+                fs::write(&settings, merged).map_err(|e| e.to_string())?;
+                writeln!(
+                    out,
+                    "  settings    -> merged Marrow hooks into {label}/settings.json"
+                )
+                .ok();
+            }
+            None => {
+                // Existing file isn't valid JSON we can merge — leave it untouched, drop a sidecar.
+                fs::write(base.join("settings.marrow.json"), SETTINGS)
+                    .map_err(|e| e.to_string())?;
+                writeln!(
+                    out,
+                    "  settings    -> couldn't parse {label}/settings.json; wrote settings.marrow.json (merge its \"hooks\" block manually)"
+                )
+                .ok();
+            }
+        },
+        Err(_) => {
+            fs::write(&settings, SETTINGS).map_err(|e| e.to_string())?;
+            writeln!(out, "  settings    -> {label}/settings.json").ok();
+        }
     }
 
     // 4) Drop the /marrow-save slash command.
@@ -241,6 +305,56 @@ mod tests {
         install(&base, &claude_md, Some(dir.path()), "", ".claude", &mut out).unwrap();
         let body = fs::read_to_string(&claude_md).unwrap();
         assert_eq!(body.matches("marrow:begin").count(), 1);
+    }
+
+    #[test]
+    fn merge_preserves_user_hooks_and_is_idempotent() {
+        let existing = r#"{
+          "model": "opus",
+          "hooks": {
+            "SessionStart": [
+              { "hooks": [ { "type": "command", "command": "echo hi" } ] }
+            ]
+          }
+        }"#;
+
+        let merged = merge_hooks_into(existing, SETTINGS).unwrap();
+        // The user's own SessionStart hook survives.
+        assert!(merged.contains("echo hi"));
+        // The user's other settings survive.
+        assert!(merged.contains("\"model\""));
+        // Marrow's hooks are added across all three events.
+        assert!(merged.contains("marrow-bootstrap.sh"));
+        assert!(merged.contains("marrow-guard.sh"));
+        assert!(merged.contains("marrow-progress.sh"));
+
+        // Idempotent: merging again doesn't duplicate Marrow's hooks.
+        let twice = merge_hooks_into(&merged, SETTINGS).unwrap();
+        assert_eq!(twice.matches("marrow-bootstrap.sh").count(), 1);
+        assert!(twice.contains("echo hi"));
+    }
+
+    #[test]
+    fn merge_into_an_existing_settings_file_activates_hooks() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join(".claude");
+        fs::create_dir_all(&base).unwrap();
+        fs::write(base.join("settings.json"), r#"{"model":"opus"}"#).unwrap();
+        let claude_md = dir.path().join("CLAUDE.md");
+        let mut out = Vec::new();
+
+        install(&base, &claude_md, Some(dir.path()), "", ".claude", &mut out).unwrap();
+
+        let settings = fs::read_to_string(base.join("settings.json")).unwrap();
+        assert!(settings.contains("marrow-bootstrap.sh"));
+        assert!(settings.contains("\"model\""));
+        // No sidecar needed when we can merge.
+        assert!(!base.join("settings.marrow.json").exists());
+    }
+
+    #[test]
+    fn merge_returns_none_for_unparseable_settings() {
+        assert!(merge_hooks_into("not json {", SETTINGS).is_none());
     }
 
     #[test]
