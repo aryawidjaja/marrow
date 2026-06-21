@@ -1,5 +1,7 @@
 # Marrow 🦴
 
+*A cure for amnesiac AI agents — persistent, shared memory so they stop forgetting and stop colliding.*
+
 Marrow is a memory store for AI agents that keeps everything in plain markdown files while
 giving you the things a real database provides: schemas, validation, structured queries,
 full-text search, provenance, decay, and — the part most file-based memory gets wrong —
