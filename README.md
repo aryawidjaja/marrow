@@ -80,7 +80,10 @@ marrow audit                              # verify the ledger
 marrow-serve --root . --port 8088         # local dashboard
 ```
 
-Memories are markdown you can read and edit by hand:
+That `marrow add` doesn't write to an opaque database — it saves a plain markdown file under
+`.marrow/memory/` that you (and git) can read and edit by hand. The YAML frontmatter is the
+metadata; the text below it is the memory:
+
 ```markdown
 ---
 type: decision
@@ -89,6 +92,9 @@ confidence: 1.0
 ---
 We use short-lived JWTs for sessions.
 ```
+
+(That's `.marrow/memory/decision/<id>.md` — the SQLite index is just a rebuildable cache over
+these files.)
 
 ## How it works
 
