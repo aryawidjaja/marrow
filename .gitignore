@@ -26,3 +26,6 @@ bench/results/
 
 # Dashboard demo artifact (written by marrow-serve Seed/Break demo)
 marrow_demo.rs
+
+# Local-only efficiency A/B harness (needs the claude CLI + quota)
+bench/ab_efficiency.sh
