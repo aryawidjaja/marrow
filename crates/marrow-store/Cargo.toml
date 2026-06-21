@@ -1,6 +1,6 @@
 [package]
 name = "marrow-store"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "Marrow memory store: markdown persistence, SQLite/FTS5 index, staleness, decay, scope, and integrity."
 license = "AGPL-3.0-only"
