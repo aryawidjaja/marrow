@@ -47,3 +47,9 @@ print(store.view("/memories/notes.txt"))
 
 Every path is resolved and confined to the base directory. Attempts to escape `/memories`
 (`../`, absolute paths elsewhere) are rejected rather than followed.
+
+## License
+
+Apache-2.0 (see [LICENSE](LICENSE)). This backend is meant to be embedded in your own
+application, so it carries a permissive license. The rest of Marrow (the engine under
+`crates/`) is AGPL-3.0-only; see [COMMERCIAL.md](../../COMMERCIAL.md).

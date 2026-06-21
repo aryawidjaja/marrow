@@ -279,4 +279,8 @@ idea here: the quiet, foundational layer an agent's knowledge is built on and re
 
 ## License
 
-MIT.
+Open source and dual-licensed. The engine and tools (`crates/`) are **AGPL-3.0-only**; the
+embeddable Anthropic memory-tool backend (`python/marrow-anthropic`) is **Apache-2.0**. Using
+Marrow from your agent over MCP or the CLI does **not** make your code a derivative work — it's
+a separate process. A commercial license (which also lifts AGPL obligations) is available for
+organizations that need it. See [COMMERCIAL.md](COMMERCIAL.md).

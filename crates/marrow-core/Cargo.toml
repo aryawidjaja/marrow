@@ -3,7 +3,7 @@ name = "marrow-core"
 version = "0.1.0"
 edition = "2021"
 description = "Markdown-native memory primitives for AI agents: code-anchored staleness detection."
-license = "MIT"
+license = "AGPL-3.0-only"
 
 [dependencies]
 sha2 = "0.11.0"

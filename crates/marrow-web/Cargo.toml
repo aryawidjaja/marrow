@@ -3,7 +3,7 @@ name = "marrow-web"
 version = "0.1.0"
 edition = "2021"
 description = "A local dashboard for the Marrow memory store: see staleness and consolidation as they happen."
-license = "MIT"
+license = "AGPL-3.0-only"
 
 [[bin]]
 name = "marrow-serve"
