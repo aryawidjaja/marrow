@@ -84,30 +84,34 @@ python/
 
 ## Get started in 3 steps (Claude Code)
 
-**1. Install the binaries.**
+**1. Install Marrow.** No clone needed.
+
+With Rust:
 ```bash
-git clone https://github.com/aryawidjaja/marrow && cd marrow
-cargo install --path crates/marrow-cli      # the `marrow` command
-cargo install --path crates/marrow-mcp       # the MCP server agents connect to
+cargo install --git https://github.com/aryawidjaja/marrow marrow-cli marrow-mcp
 ```
-If `marrow` isn't found afterward, add Cargo's bin dir to your shell PATH (the installer prints
-this too):
+Or without Rust (prebuilt binaries):
 ```bash
-echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
+curl -fsSL https://raw.githubusercontent.com/aryawidjaja/marrow/main/install.sh | sh
+```
+Either way you get `marrow` and `marrow-mcp` on your PATH. (With `cargo install`, that's
+`~/.cargo/bin` — add it to your shell if needed: `export PATH="$HOME/.cargo/bin:$PATH"`. The
+prebuilt installer uses `~/.local/bin`. Add `marrow-web` to the cargo line for the optional
+dashboard.)
+
+**2. Set it up in your project.** Two small commands, no clone:
+```bash
+cd your-project
+marrow init
+printf '{ "mcpServers": { "marrow": { "command": "marrow-mcp", "args": ["--root", "."] } } }\n' > .mcp.json
 ```
 
-**2. Set it up in your project (one command).** From the project where you use Claude Code:
-```bash
-bash /path/to/marrow/integrations/claude-code/install.sh .
-```
-This creates the memory store, connects Marrow over MCP, and installs the auto-capture hooks.
+**3. Open Claude Code in that project.** It connects to Marrow automatically — ask it to remember
+decisions and recall them, and it will across sessions.
 
-**3. Open Claude Code in that project.** That's it. Every session now **starts warm** (it
-auto-loads what past sessions did and decided), records its progress, and shares one brain with
-your other sessions — no prompting required. Run two sessions at once and they won't collide.
-
-> Prefer to do it by hand, or use Cursor/Codex/another agent? See
-> [integrations/](integrations/README.md) for copy-paste config, and [`llms.txt`](llms.txt) — a
+> **Want it fully hands-free** (warm-start, collision-avoidance, and auto-capture with zero
+> prompting) plus Cursor/Codex configs? That's one more step — see
+> [integrations/](integrations/README.md). Or point any agent at [`llms.txt`](llms.txt) — a
 > machine-readable guide so you can just tell your agent *"read llms.txt and set up Marrow here."*
 
 ## Quick start
