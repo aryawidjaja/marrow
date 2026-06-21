@@ -278,6 +278,26 @@ set `[consolidation] distiller = "http"` (build with `--features distill-http`) 
 OpenAI-compatible chat endpoint — including a local or sovereign-hosted model — with the key in
 `MARROW_DISTILL_API_KEY`.
 
+## Benchmarks
+
+The claims here are measured. Full method and honest caveats are in [bench/REPORT.md](bench/REPORT.md).
+
+**Does it actually save tokens?** In an end-to-end A/B — the same "understand this codebase"
+question run through Claude Code against this repo, once with Marrow and once without — a warm
+Marrow session answered with **~72% fewer tokens** and finished **~57% faster** than a cold session
+that had to read files (5-run average; warm stays roughly flat while cold scales with the codebase):
+
+| | Cold (reads files) | Warm (Marrow) | Saved |
+|---|---|---|---|
+| Tokens | ~134k | ~38k | **~72%** |
+| Time | ~26s | ~11s | **~57%** |
+
+The engine benchmarks (reproducible offline with `cargo run -p marrow-bench`):
+
+- **Staleness** — ~1% false-positive at ~98% recall.
+- **Consolidation** — 100% clustering precision, 0 false merges.
+- **Retrieval budget** — ~82% fewer tokens for a broad query.
+
 ## Status
 
 Working today: the staleness engine, the document format and validation, the store with its
