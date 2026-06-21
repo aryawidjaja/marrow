@@ -157,6 +157,20 @@ impl Store {
         self.record(ev)
     }
 
+    /// Append an event carrying a structured payload. Used by the coordination plane
+    /// (claims, activity) so events round-trip through the same tamper-evident ledger.
+    pub(crate) fn log_data(
+        &self,
+        kind: &str,
+        actor: &str,
+        summary: &str,
+        data: serde_json::Value,
+    ) -> Result<(), Error> {
+        let mut ev = NewEvent::new(kind, actor, summary);
+        ev.data = data;
+        self.record(ev)
+    }
+
     /// The full episodic / audit history, oldest first.
     pub fn history(&self) -> Result<Vec<Event>, Error> {
         self.episodic

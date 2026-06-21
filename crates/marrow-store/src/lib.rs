@@ -8,6 +8,7 @@
 pub mod config;
 pub mod consolidate;
 pub mod convert;
+pub mod coordinate;
 #[cfg(feature = "distill-http")]
 pub mod distill_http;
 pub mod embed;
@@ -28,6 +29,7 @@ pub use consolidate::{
     Cluster, ClusterAction, ConsolidationOutcome, ConsolidationReport, Distiller,
     HeuristicDistiller, Verdict,
 };
+pub use coordinate::{Briefing, Claim, ClaimScope};
 pub use embed::{EmbedError, Embedder, HashEmbedder};
 pub use provenance::{MemoryRef, ProvenanceTrail};
 pub use query::Query;
