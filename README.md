@@ -27,13 +27,19 @@ precision / 0 false merges, ~82% retrieval-budget token cut — reproduce offlin
 
 ## Install
 
+Homebrew (macOS / Linux):
 ```bash
-cargo install --git https://github.com/aryawidjaja/marrow marrow-cli marrow-mcp
+brew install aryawidjaja/marrow/marrow
 ```
-Or, without Rust, grab prebuilt binaries:
+Prebuilt binaries, no Rust:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/aryawidjaja/marrow/main/install.sh | sh
 ```
+From source with Rust:
+```bash
+cargo install --git https://github.com/aryawidjaja/marrow marrow-cli marrow-mcp
+```
+Each puts `marrow` and `marrow-mcp` on your PATH (add `marrow-web` for the dashboard).
 
 ## Use it with your agent
 
