@@ -2,9 +2,15 @@
 # PreToolUse hook (Edit|Write|MultiEdit): make collision-avoidance automatic.
 #
 # Before the agent edits a file, this:
-#   1. checks Marrow for an active work-claim on that file held by ANOTHER session — if found,
-#      it blocks the edit and tells the agent to coordinate or pick different work;
-#   2. otherwise auto-claims the file for THIS session so other sessions see what it's doing.
+#   1. blocks the edit ONLY if the file is auto-claimed by a DIFFERENT session (a real
+#      cross-session collision), then tells the agent to coordinate or pick different work;
+#   2. otherwise auto-claims the file for THIS session.
+#
+# Auto-claims are tagged `[autoclaim]` and keyed to the real Claude Code session id, so the guard
+# recognizes its own claims and never blocks an owner. Advisory *manual* claims (made via mem_claim
+# with arbitrary labels) are intentionally IGNORED here — they can't be attributed to a session, so
+# enforcing them would block the owner's own edits. Agents still see manual claims via the warm-start
+# briefing / mem_claims and respect them by judgment.
 #
 # The user never has to say "claim this" and the agent never has to remember to — coordination
 # just happens. Fails OPEN: any problem and the edit is allowed (never blocks real work by mistake).
@@ -28,17 +34,16 @@ case "$file" in "$root"/*) rel="${file#"$root"/}";; *) rel="$file";; esac
 
 claims="$("$marrow" --root "$root" claims --file "$rel" 2>/dev/null || true)"
 
-# Claim lines look like: "<id>  [<session>]  <intent>". A conflict is any such line from a
-# DIFFERENT session.
-others="$(printf '%s' "$claims" | grep '\[' | grep -vF "[$session]" || true)"
+# Claim lines look like: "<id>  [<session>]  <intent>". Only the guard's own auto-claims
+# (intent tagged "[autoclaim]") from a DIFFERENT session count as a hard collision.
+others="$(printf '%s' "$claims" | grep -F '[autoclaim]' | grep -vF "[$session]" || true)"
 if [ -n "$others" ]; then
-  intent="$(printf '%s' "$others" | head -1 | sed -E 's/^[^[]*\[[^]]*\][[:space:]]*//')"
-  printf 'Marrow: another agent session has an active claim on %s (intent: %s). Do NOT edit it in parallel — coordinate, pick different work, or wait for the claim to expire/release.\n' "$rel" "$intent" >&2
+  printf 'Marrow: another active session is editing %s — do not edit it in parallel. Coordinate, pick different work, or wait for its lease to expire.\n' "$rel" >&2
   exit 2   # blocks this edit and shows the reason to the agent
 fi
 
-# No conflict — auto-claim the file for this session (once) so others can see it.
-if ! printf '%s' "$claims" | grep -qF "[$session]"; then
-  "$marrow" --root "$root" claim "editing $rel" --session "$session" --file "$rel" >/dev/null 2>&1 || true
+# No collision — auto-claim the file for this session (once) so other sessions see it.
+if ! printf '%s' "$claims" | grep -F '[autoclaim]' | grep -qF "[$session]"; then
+  "$marrow" --root "$root" claim "[autoclaim] $rel" --session "$session" --file "$rel" --by marrow-guard >/dev/null 2>&1 || true
 fi
 exit 0
