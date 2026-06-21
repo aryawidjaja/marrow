@@ -116,6 +116,16 @@ pub fn definitions() -> Value {
                 "project": {"type": "string"}
             }
         })),
+        tool("mem_progress", "Record a unit of progress (what you just did, which files) so other sessions see it in the activity stream.", json!({
+            "type": "object",
+            "properties": {
+                "summary": {"type": "string"},
+                "session": {"type": "string"},
+                "files": {"type": "array", "items": {"type": "string"}},
+                "by": {"type": "string"}
+            },
+            "required": ["summary"]
+        })),
         tool("mem_activity", "The most recent activity-stream events across all sessions (newest first).", json!({
             "type": "object",
             "properties": {"limit": {"type": "integer", "description": "max events (default 20)"}}
@@ -179,6 +189,7 @@ pub fn call(root: &Path, name: &str, args: &Value) -> Result<String, String> {
         "mem_claim" => claim(&store, args),
         "mem_release" => release(&store, args),
         "mem_claims" => claims(&store, args),
+        "mem_progress" => progress(&store, args),
         "mem_activity" => activity(&store, args),
         "mem_bootstrap" => bootstrap(&store, args),
         other => Err(format!("unknown tool: {other}")),
@@ -385,6 +396,17 @@ fn claims(store: &Store, args: &Value) -> Result<String, String> {
     .map_err(|e| e.to_string())?;
     let value = serde_json::to_value(&found).map_err(|e| e.to_string())?;
     Ok(json!({"claims": value, "count": found.len()}).to_string())
+}
+
+fn progress(store: &Store, args: &Value) -> Result<String, String> {
+    let summary = str_arg(args, "summary")?;
+    let session = opt_arg(args, "session").unwrap_or_else(|| "mcp".into());
+    let by = opt_arg(args, "by").unwrap_or_else(|| "mcp".into());
+    let files = arr_arg(args, "files");
+    store
+        .progress(&session, &by, &summary, &files)
+        .map_err(|e| e.to_string())?;
+    Ok(json!({"recorded": true}).to_string())
 }
 
 fn activity(store: &Store, args: &Value) -> Result<String, String> {

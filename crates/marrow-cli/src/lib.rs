@@ -125,6 +125,16 @@ pub enum Cmd {
         #[arg(long, default_value = "cli")]
         by: String,
     },
+    /// Record a unit of progress so other sessions see it in real time.
+    Progress {
+        summary: String,
+        #[arg(long, default_value = "cli")]
+        session: String,
+        #[arg(long = "file")]
+        files: Vec<String>,
+        #[arg(long, default_value = "cli")]
+        by: String,
+    },
 }
 
 /// Arguments for `marrow claim`.
@@ -596,6 +606,19 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
             for m in &brief.relevant {
                 writeln!(out, "  {} — {}", m.frontmatter.id, first_line(&m.body)).ok();
             }
+            Ok(())
+        }
+        Cmd::Progress {
+            summary,
+            session,
+            files,
+            by,
+        } => {
+            let store = open(&cli.root)?;
+            store
+                .progress(&session, &by, &summary, &files)
+                .map_err(|e| e.to_string())?;
+            writeln!(out, "recorded").ok();
             Ok(())
         }
     }

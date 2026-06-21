@@ -126,4 +126,24 @@ check "consolidation detects the duplicate" "$(n consolidate --repo "$proj2")" "
 check "applying consolidation merges it" "$(n consolidate --repo "$proj2" --apply)" "1 merged"
 check "no duplicates remain after merge" "$(n consolidate --repo "$proj2")" "related memories: 0"
 
+echo "==> Coordination plane: one brain, many hands"
+proj3="$work/project3"
+mkdir -p "$proj3"
+c() { "$marrow" --root "$proj3" "$@"; }
+c init > /dev/null
+claim_id="$(c claim "refactor auth" --session a --file src/auth.rs --project demo | tr -d '[:space:]')"
+check "a claim is registered" "$(c claims)" "refactor auth"
+check "a second agent sees the overlapping claim" "$(c claims --file src/auth.rs --project demo)" "1 active claim(s)"
+check "a non-overlapping scope is free" "$(c claims --file src/billing.rs --project demo)" "0 active claim(s)"
+c progress "wrote token issuer" --session a --file src/auth.rs > /dev/null
+check "progress shows in the activity stream" "$(c activity)" "wrote token issuer"
+c release "$claim_id" > /dev/null
+check "released claims are no longer active" "$(c claims)" "0 active claim(s)"
+check "bootstrap warm-starts a session" "$(c bootstrap 'work on auth' --project demo)" "goal: work on auth"
+coord_session="$(printf '%s\n%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"mem_claim","arguments":{"session":"x","intent":"db work","files":["src/db.rs"],"project":"demo"}}}' \
+  | "$marrow_mcp" --root "$proj3")"
+check "MCP exposes the coordination tools" "$coord_session" '"id"'
+
 printf '\nAll %d checks passed.\n' "$pass"
