@@ -82,16 +82,33 @@ python/
   marrow-anthropic A backend for Anthropic's memory tool (memory_20250818)
 ```
 
-## Set it up with your AI agent
+## Get started in 3 steps (Claude Code)
 
-Marrow is written to be installed *by* an agent. Point your assistant (Claude Code, Cursor,
-Codex, …) at the repo and say:
+**1. Install the binaries.**
+```bash
+git clone https://github.com/aryawidjaja/marrow && cd marrow
+cargo install --path crates/marrow-cli      # the `marrow` command
+cargo install --path crates/marrow-mcp       # the MCP server agents connect to
+```
+If `marrow` isn't found afterward, add Cargo's bin dir to your shell PATH (the installer prints
+this too):
+```bash
+echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
+```
 
-> "Read `llms.txt` in the Marrow repo and follow it to install Marrow, connect it to yourself
-> over MCP, and use it for memory in this project."
+**2. Set it up in your project (one command).** From the project where you use Claude Code:
+```bash
+bash /path/to/marrow/integrations/claude-code/install.sh .
+```
+This creates the memory store, connects Marrow over MCP, and installs the auto-capture hooks.
 
-[`llms.txt`](llms.txt) is a machine-readable guide with the exact install, MCP-config, and
-usage steps — so setup is a single request, not a manual.
+**3. Open Claude Code in that project.** That's it. Every session now **starts warm** (it
+auto-loads what past sessions did and decided), records its progress, and shares one brain with
+your other sessions — no prompting required. Run two sessions at once and they won't collide.
+
+> Prefer to do it by hand, or use Cursor/Codex/another agent? See
+> [integrations/](integrations/README.md) for copy-paste config, and [`llms.txt`](llms.txt) — a
+> machine-readable guide so you can just tell your agent *"read llms.txt and set up Marrow here."*
 
 ## Quick start
 

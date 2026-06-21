@@ -4,19 +4,29 @@ These hooks make Marrow hands-free in Claude Code: every session starts warm, fi
 into the shared brain as progress, and sessions close themselves out — without spending model
 tokens.
 
-## Setup
+## Setup (one command)
+
+From the project where you use Claude Code:
+```bash
+bash /path/to/marrow/integrations/claude-code/install.sh .
+```
+It creates the store, connects Marrow over MCP (`.mcp.json`), installs these hooks into
+`.claude/hooks/`, and registers them in `.claude/settings.json`. Safe to re-run; it won't
+overwrite an existing `settings.json`.
+
+### Manual setup (if you prefer)
 
 1. Make sure `marrow` and `marrow-mcp` are installed and `marrow init` has been run in your project.
-2. Copy the hook scripts into your project:
+2. Copy the hook scripts in:
    ```bash
    mkdir -p .claude/hooks
    cp integrations/claude-code/hooks/*.sh .claude/hooks/
    chmod +x .claude/hooks/*.sh
    ```
-3. Merge [`settings.example.json`](settings.example.json) into your `.claude/settings.json`
-   (it registers the MCP server and the three hooks).
+3. Merge [`settings.example.json`](settings.example.json) (the `hooks` block) into your
+   `.claude/settings.json`, and add the MCP server to `.mcp.json` (see [../README.md](../README.md)).
 
-That's it. The scripts use `jq` (preinstalled on most systems; `brew install jq` / `apt install jq`).
+The scripts use `jq` (preinstalled on most systems; `brew install jq` / `apt install jq`).
 Every hook fails open — if anything goes wrong it exits 0 and never blocks your session.
 
 ## What each hook does

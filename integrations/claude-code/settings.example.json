@@ -1,7 +1,4 @@
 {
-  "mcpServers": {
-    "marrow": { "command": "marrow-mcp", "args": ["--root", "."] }
-  },
   "hooks": {
     "SessionStart": [
       {
