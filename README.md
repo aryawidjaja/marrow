@@ -41,18 +41,26 @@ cargo install --git https://github.com/aryawidjaja/marrow marrow-cli marrow-mcp
 ```
 Each puts `marrow` and `marrow-mcp` on your PATH (add `marrow-web` for the dashboard).
 
-## Use it with your agent
+## Use it with your agent (Claude Code)
 
-Register Marrow once, for every project (Claude Code):
+One command wires everything up — registers the MCP server for all your projects, installs the
+auto-capture hooks, and adds a short guidance block:
 ```bash
-claude mcp add marrow -s user -- marrow-mcp --root .
+cd your-project
+marrow setup
 ```
-Now open Claude Code in any project and it connects automatically, gaining the `mem_*` tools:
-`mem_write` / `mem_recall` / `mem_search` for memory, and `mem_bootstrap` / `mem_claim` /
-`mem_activity` for the shared brain. Each project keeps its own memory under `.marrow/` (created on
-first use). For Cursor / Codex, or to scope it to one project, put the same server in the project's
-MCP config (`.mcp.json`). For hands-free auto-capture and warm-start hooks, see
-[integrations/](integrations/README.md); to have an agent set it all up, point it at [`llms.txt`](llms.txt).
+Restart Claude Code. Now every session **starts warm** (it already knows what past sessions did and
+decided), **claims files** so parallel sessions don't collide, and **captures durable decisions** —
+automatically, no prompting. Each project keeps its own memory under `.marrow/`.
+
+The agent gets the `mem_*` tools: `mem_write` / `mem_recall` / `mem_search` for memory, and
+`mem_bootstrap` / `mem_claim` / `mem_activity` for the shared brain.
+
+Just want the tools (no hooks), or using Cursor / Codex? Register the MCP server only:
+```bash
+claude mcp add marrow -s user -- marrow-mcp --root .          # Claude Code, every project
+# or per-project: add the same server to .mcp.json / .cursor/mcp.json / Codex TOML
+```
 
 > **One brain across projects, or a team?** Point sessions at a shared store
 > (`--root ~/marrow-shared` instead of `.`) — memories are scoped per project, so an agent can

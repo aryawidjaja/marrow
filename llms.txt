@@ -17,21 +17,22 @@ marrow init                                # creates .marrow/ in the current pro
 
 Verify: `marrow status` should print `total: 0`.
 
-## Connect Marrow to this agent (MCP)
+## Connect Marrow to this agent (Claude Code)
 
-Best default — register it once for EVERY project (Claude Code):
+Best — one command from the project dir; registers the MCP server (all projects), installs the
+auto-capture hooks, and adds a CLAUDE.md guidance block, then restart Claude Code:
 ```
-claude mcp add marrow -s user -- marrow-mcp --root .
+marrow setup
 ```
-`-s user` makes Marrow's tools available in all your projects; `--root .` gives each project its
-own memory under `.marrow/` (created on first use). Restart the session to pick it up.
 
-Per-project instead (or for Cursor / Codex):
-- Claude Code / Cursor — `.mcp.json` (or `.cursor/mcp.json`):
+Tools only (no hooks), or other agents:
+- Claude Code, every project: `claude mcp add marrow -s user -- marrow-mcp --root .`
+- Per-project / Cursor — `.mcp.json` (or `.cursor/mcp.json`):
   `{"mcpServers":{"marrow":{"command":"marrow-mcp","args":["--root","."]}}}`
 - Codex (TOML): `[mcp_servers.marrow]` with `command = "marrow-mcp"`, `args = ["--root","."]`.
 
-After connecting, the agent gains the `mem_*` tools below.
+After connecting, the agent gains the `mem_*` tools below. (`--root .` = each project keeps its own
+memory under `.marrow/`, created on first use.)
 
 ## How an agent should use Marrow (the loop)
 

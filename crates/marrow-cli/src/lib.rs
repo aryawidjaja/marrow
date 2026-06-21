@@ -10,6 +10,8 @@ use clap::{Parser, Subcommand, ValueEnum};
 use marrow_memdocs::{Frontmatter, Memory, MemoryKind, Provenance, Scope, Status};
 use marrow_store::{ClaimScope, Query, Store};
 
+mod setup;
+
 /// Marrow: a markdown-native memory store for AI agents.
 #[derive(Debug, Parser)]
 #[command(name = "marrow", version, about)]
@@ -135,6 +137,9 @@ pub enum Cmd {
         #[arg(long, default_value = "cli")]
         by: String,
     },
+    /// Wire Marrow into this project + Claude Code in one step: register the MCP server (user
+    /// scope), install the auto-capture hooks, and add a short CLAUDE.md guidance block.
+    Setup,
 }
 
 /// Arguments for `marrow claim`.
@@ -622,6 +627,7 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
             writeln!(out, "recorded").ok();
             Ok(())
         }
+        Cmd::Setup => setup::run(&cli.root, out),
     }
 }
 

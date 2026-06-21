@@ -316,3 +316,20 @@ fn claim_release_and_bootstrap_flow() {
     assert!(brief.contains("goal: set up auth"));
     assert!(brief.contains("active claims (0)"));
 }
+
+#[test]
+fn setup_scaffolds_hooks_settings_and_guidance() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(root, &["setup"]); // claude CLI may be absent here; setup still scaffolds files
+
+    assert!(root.join(".claude/hooks/marrow-bootstrap.sh").exists());
+    assert!(root.join(".claude/hooks/marrow-guard.sh").exists());
+    assert!(root.join(".claude/hooks/marrow-progress.sh").exists());
+    assert!(root.join(".claude/settings.json").exists());
+    let claude_md = std::fs::read_to_string(root.join("CLAUDE.md")).unwrap();
+    assert!(
+        claude_md.contains("marrow:begin"),
+        "guidance block added to CLAUDE.md"
+    );
+}
