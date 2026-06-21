@@ -1,0 +1,53 @@
+# Marrow
+
+> Marrow is persistent, shared memory for AI agents — so they stop forgetting and can work together. It keeps every memory as a plain markdown file but adds what a database gives you (validation, query, hybrid search, provenance) plus three things file-based memory lacks: staleness detection (a memory is flagged the moment the code it describes changes), consolidation (duplicates merged, contradictions resolved automatically), and a coordination plane so many agent sessions share one brain instead of colliding. It runs as a single offline binary on the user's own machine, speaks the Model Context Protocol, and writes a tamper-evident audit ledger.
+
+This file is written so an AI agent can install and use Marrow on the user's behalf. Follow the steps literally.
+
+## Install
+
+```bash
+# From the Marrow repo (Rust toolchain required):
+cargo install --path crates/marrow-cli    # the `marrow` command
+cargo install --path crates/marrow-mcp     # the `marrow-mcp` server
+# or: cargo build --release  -> binaries in target/release/ (marrow, marrow-mcp, marrow-serve)
+
+marrow init                                # creates .marrow/ in the current project
+```
+
+Verify: `marrow status` should print `total: 0`.
+
+## Connect Marrow to this agent (MCP)
+
+Add Marrow as an MCP server in the host's config, pointing `--root` at the project:
+
+- Claude Code — add to `.mcp.json`:
+  `{"mcpServers":{"marrow":{"command":"marrow-mcp","args":["--root","."]}}}`
+- Cursor — same JSON in `.cursor/mcp.json`.
+- Codex (TOML): `[mcp_servers.marrow]` with `command = "marrow-mcp"`, `args = ["--root","."]`.
+
+After adding it, the agent gains the `mem_*` tools below.
+
+## How an agent should use Marrow (the loop)
+
+1. **Start warm.** Call `mem_bootstrap` with your goal. It returns active work-claims (what other sessions are doing) + the memories/decisions most relevant to the goal. Do NOT re-scan the whole codebase first.
+2. **Avoid collisions.** Before editing, call `mem_claims` with the files/feature you intend to change. If an active claim overlaps, pick different work or coordinate.
+3. **Claim your work.** Call `mem_claim` (session, intent, files). Record steps with `mem_progress`.
+4. **Remember what you learn.** When you reach a durable decision/fact/gotcha, call `mem_write` so the next session inherits it.
+5. **Release.** Call `mem_release` when done.
+
+## Tools (MCP) and CLI equivalents
+
+Knowledge: `mem_write`/`marrow add`, `mem_anchor`/`marrow anchor`, `mem_read`/`marrow read`, `mem_query`/`marrow query`, `mem_search`/`marrow search`, `mem_recall`/`marrow recall`, `mem_provenance`/`marrow provenance`, `mem_supersede`/`marrow supersede`, `mem_list_stale`/`marrow list-stale`, `mem_consolidate`/`marrow consolidate`, `mem_history`/`marrow history`, `mem_audit`/`marrow audit`.
+
+Coordination (the shared brain): `mem_bootstrap`/`marrow bootstrap`, `mem_claim`/`marrow claim`, `mem_claims`/`marrow claims`, `mem_release`/`marrow release`, `mem_progress`/`marrow progress`, `mem_activity`/`marrow activity`.
+
+## Optional: hands-free auto-capture (Claude Code)
+
+Copy `integrations/claude-code/hooks/*.sh` to `.claude/hooks/`, `chmod +x` them, and merge `integrations/claude-code/settings.example.json` into `.claude/settings.json`. Then sessions bootstrap warm, file edits stream as progress, and sessions close out automatically — no tokens spent.
+
+## Notes
+
+- Everything runs locally; nothing leaves the machine. Markdown under `.marrow/memory/` is the source of truth; the SQLite index is rebuildable with `marrow doctor`.
+- Watch it in a browser: `marrow-serve --root . --port 8088`.
+- Full integration guide: `integrations/README.md`. Project overview: `README.md`.

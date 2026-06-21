@@ -80,6 +80,17 @@ python/
   marrow-anthropic A backend for Anthropic's memory tool (memory_20250818)
 ```
 
+## Set it up with your AI agent
+
+Marrow is written to be installed *by* an agent. Point your assistant (Claude Code, Cursor,
+Codex, …) at the repo and say:
+
+> "Read `llms.txt` in the Marrow repo and follow it to install Marrow, connect it to yourself
+> over MCP, and use it for memory in this project."
+
+[`llms.txt`](llms.txt) is a machine-readable guide with the exact install, MCP-config, and
+usage steps — so setup is a single request, not a manual.
+
 ## Quick start
 
 Build the binaries:
