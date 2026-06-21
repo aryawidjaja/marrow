@@ -199,6 +199,11 @@ impl Store {
         self.distiller = distiller;
     }
 
+    /// The project root this store is anchored to.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
     fn memory_dir(&self) -> PathBuf {
         self.root.join(".marrow/memory")
     }

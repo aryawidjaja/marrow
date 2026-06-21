@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use marrow_memdocs::{Frontmatter, Memory, MemoryKind, Provenance, Scope, Status};
-use marrow_store::{ClaimScope, Query, Store};
+use marrow_store::{knowledge_docs, ClaimScope, Query, Store};
 
 mod setup;
 
@@ -139,7 +139,15 @@ pub enum Cmd {
     },
     /// Wire Marrow into this project + Claude Code in one step: register the MCP server (user
     /// scope), install the auto-capture hooks, and add a short CLAUDE.md guidance block.
-    Setup,
+    Setup {
+        /// Install the hooks once at the user level (~/.claude) so every project is hands-free,
+        /// instead of just this project's .claude.
+        #[arg(long)]
+        global: bool,
+    },
+    /// List the project's existing knowledge docs and tell the agent how to seed memory from
+    /// them — a one-time onboarding step for an existing repo.
+    Ingest,
 }
 
 /// Arguments for `marrow claim`.
@@ -612,6 +620,14 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
             for m in &brief.relevant {
                 writeln!(out, "  {} — {}", m.frontmatter.id, first_line(&m.body)).ok();
             }
+            if brief.suggest_ingest {
+                let n = knowledge_docs(&cli.root).len();
+                writeln!(
+                    out,
+                    "onboarding: this repo has {n} knowledge doc(s) but no memory yet — run `marrow ingest` to seed the brain so future sessions start warm."
+                )
+                .ok();
+            }
             Ok(())
         }
         Cmd::Progress {
@@ -627,12 +643,48 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
             writeln!(out, "recorded").ok();
             Ok(())
         }
-        Cmd::Setup => setup::run(&cli.root, out),
+        Cmd::Setup { global } => setup::run(&cli.root, global, out),
+        Cmd::Ingest => {
+            let docs = knowledge_docs(&cli.root);
+            write!(out, "{}", ingest_report(&docs)).ok();
+            Ok(())
+        }
     }
 }
 
 fn first_line(body: &str) -> &str {
     body.trim().lines().next().unwrap_or("")
+}
+
+/// The onboarding instruction an agent acts on: the project's knowledge docs plus a directive to
+/// distill (not dump) them into memory. Marrow does no LLM work here — the agent reads the docs and
+/// writes the distilled memories itself.
+fn ingest_report(docs: &[(String, u64)]) -> String {
+    if docs.is_empty() {
+        return "No knowledge docs (Markdown) found under this project.\n".to_string();
+    }
+    let total: u64 = docs.iter().map(|(_, n)| n).sum();
+    let mut s = format!(
+        "Found {} knowledge doc(s) (~{}). To seed Marrow's memory, read each and save the durable \
+         decisions, facts, and architecture with mem_write — distill, don't paste whole files. Call \
+         mem_recall first and skip anything already saved.\n\nFiles:\n",
+        docs.len(),
+        human_bytes(total),
+    );
+    for (path, size) in docs {
+        s.push_str(&format!("  {path} ({})\n", human_bytes(*size)));
+    }
+    s
+}
+
+fn human_bytes(n: u64) -> String {
+    if n >= 1024 * 1024 {
+        format!("{:.1} MB", n as f64 / (1024.0 * 1024.0))
+    } else if n >= 1024 {
+        format!("{} KB", n / 1024)
+    } else {
+        format!("{n} B")
+    }
 }
 
 fn open(root: &std::path::Path) -> Result<Store, String> {

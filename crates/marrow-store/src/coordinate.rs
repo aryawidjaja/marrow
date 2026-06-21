@@ -6,6 +6,8 @@
 //! are no mutable shared records to contend on, so this is safe for many writers, and every
 //! action lands in the same tamper-evident log (coordination is audit for free).
 
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
@@ -115,6 +117,69 @@ pub struct Briefing {
     pub relevant: Vec<Memory>,
     /// The most recent active decisions in the project.
     pub recent_decisions: Vec<Memory>,
+    /// Set when the brain is empty but the repo has knowledge docs on disk — a hint to onboard the
+    /// project with `marrow ingest` so future sessions start warm.
+    pub suggest_ingest: bool,
+}
+
+/// Project knowledge docs worth seeding memory from: root-level Markdown plus everything under
+/// `docs/`, excluding VCS/build/Marrow dirs. Returns `(path relative to root, size in bytes)`,
+/// sorted by path and capped, so an existing repo can be onboarded (`marrow ingest`) and a
+/// cold-start session can be pointed at them.
+pub fn knowledge_docs(root: &Path) -> Vec<(String, u64)> {
+    const CAP: usize = 50;
+    let mut out: Vec<(String, u64)> = Vec::new();
+
+    // Root-level Markdown only (don't recurse the whole repo).
+    if let Ok(entries) = std::fs::read_dir(root) {
+        for e in entries.flatten() {
+            if let Ok(md) = e.metadata() {
+                if md.is_file() && is_markdown(&e.path()) {
+                    out.push((rel_to(root, &e.path()), md.len()));
+                }
+            }
+        }
+    }
+    // Everything under docs/ (recursive).
+    collect_markdown(&root.join("docs"), root, &mut out);
+
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out.dedup_by(|a, b| a.0 == b.0);
+    out.truncate(CAP);
+    out
+}
+
+fn is_markdown(p: &Path) -> bool {
+    p.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("md"))
+}
+
+fn rel_to(root: &Path, p: &Path) -> String {
+    p.strip_prefix(root)
+        .unwrap_or(p)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn collect_markdown(dir: &Path, root: &Path, out: &mut Vec<(String, u64)>) {
+    const SKIP: &[&str] = &[".git", "target", "node_modules", ".marrow"];
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let p = e.path();
+        let Ok(md) = e.metadata() else { continue };
+        if md.is_dir() {
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if name.starts_with('.') || SKIP.contains(&name) {
+                continue;
+            }
+            collect_markdown(&p, root, out);
+        } else if is_markdown(&p) {
+            out.push((rel_to(root, &p), md.len()));
+        }
+    }
 }
 
 impl Store {
@@ -316,11 +381,17 @@ impl Store {
             ..Query::default()
         })?;
 
+        // Onboarding hint: an empty brain in a repo that already has docs should be seeded, so the
+        // first session points the agent at `marrow ingest` instead of starting cold.
+        let suggest_ingest = self.list().map(|r| r.is_empty()).unwrap_or(false)
+            && !knowledge_docs(self.root()).is_empty();
+
         Ok(Briefing {
             goal: goal.to_string(),
             active_claims,
             relevant,
             recent_decisions,
+            suggest_ingest,
         })
     }
 }
@@ -520,5 +591,93 @@ mod tests {
             .unwrap()
             .iter()
             .any(|e| e.kind == "session_started"));
+    }
+
+    #[test]
+    fn knowledge_docs_finds_root_and_docs_excludes_build() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("README.md"), "readme").unwrap();
+        std::fs::write(root.join("notes.txt"), "not markdown").unwrap();
+        std::fs::create_dir_all(root.join("docs/sub")).unwrap();
+        std::fs::write(root.join("docs/guide.md"), "guide").unwrap();
+        std::fs::write(root.join("docs/sub/deep.md"), "deep").unwrap();
+        std::fs::create_dir_all(root.join("target")).unwrap();
+        std::fs::write(root.join("target/build.md"), "build artifact").unwrap();
+        std::fs::create_dir_all(root.join("docs/node_modules")).unwrap();
+        std::fs::write(root.join("docs/node_modules/dep.md"), "dep").unwrap();
+
+        let found: Vec<String> = knowledge_docs(root).into_iter().map(|(p, _)| p).collect();
+        assert_eq!(
+            found,
+            vec![
+                "README.md".to_string(),
+                "docs/guide.md".to_string(),
+                "docs/sub/deep.md".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn bootstrap_suggests_ingest_only_when_empty_with_docs() {
+        use marrow_memdocs::{Frontmatter, Provenance, Scope};
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::init(dir.path()).unwrap();
+
+        // No docs, empty brain → no hint.
+        assert!(
+            !store
+                .bootstrap("resume", "demo", "a", 1000)
+                .unwrap()
+                .suggest_ingest
+        );
+
+        // Empty brain + a doc on disk → hint.
+        std::fs::write(dir.path().join("README.md"), "hello").unwrap();
+        assert!(
+            store
+                .bootstrap("resume", "demo", "a", 1000)
+                .unwrap()
+                .suggest_ingest
+        );
+
+        // Once the brain has a memory, stop nudging even though the doc is still there.
+        let mut m = Memory {
+            frontmatter: Frontmatter {
+                id: String::new(),
+                kind: MemoryKind::Fact,
+                status: Status::Active,
+                topic: Some("t".into()),
+                scope: Scope {
+                    user_id: None,
+                    agent_id: None,
+                    project_id: "demo".into(),
+                    org_id: None,
+                },
+                refs: vec![],
+                code_anchors: vec![],
+                confidence: 1.0,
+                decay: None,
+                provenance: Provenance {
+                    written_by: "test".into(),
+                    session_id: None,
+                    sources: vec![],
+                },
+                supersedes: vec![],
+                tags: vec![],
+                created_at: String::new(),
+                updated_at: String::new(),
+                hmac: None,
+            },
+            body: "a memory".into(),
+        };
+        store.write(&mut m).unwrap();
+        assert!(
+            !store
+                .bootstrap("resume", "demo", "a", 1000)
+                .unwrap()
+                .suggest_ingest
+        );
     }
 }

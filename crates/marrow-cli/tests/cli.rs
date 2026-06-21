@@ -327,9 +327,43 @@ fn setup_scaffolds_hooks_settings_and_guidance() {
     assert!(root.join(".claude/hooks/marrow-guard.sh").exists());
     assert!(root.join(".claude/hooks/marrow-progress.sh").exists());
     assert!(root.join(".claude/settings.json").exists());
+    assert!(root.join(".claude/commands/marrow-save.md").exists());
     let claude_md = std::fs::read_to_string(root.join("CLAUDE.md")).unwrap();
     assert!(
         claude_md.contains("marrow:begin"),
         "guidance block added to CLAUDE.md"
     );
+}
+
+#[test]
+fn ingest_lists_docs_with_distill_instructions() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(root, &["init"]);
+    std::fs::write(root.join("README.md"), "# readme").unwrap();
+    std::fs::create_dir_all(root.join("docs")).unwrap();
+    std::fs::write(root.join("docs/architecture.md"), "arch").unwrap();
+
+    let out = ok(root, &["ingest"]);
+    assert!(out.contains("README.md"));
+    assert!(out.contains("docs/architecture.md"));
+    assert!(out.contains("mem_write"));
+    assert!(out.contains("distill"));
+
+    // A project with no docs says so plainly.
+    let empty = tempfile::tempdir().unwrap();
+    ok(empty.path(), &["init"]);
+    assert!(ok(empty.path(), &["ingest"]).contains("No knowledge docs"));
+}
+
+#[test]
+fn bootstrap_nudges_ingest_when_empty_with_docs() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(root, &["init"]);
+    std::fs::write(root.join("README.md"), "# readme").unwrap();
+
+    let brief = ok(root, &["bootstrap", "resume", "--project", "demo"]);
+    assert!(brief.contains("onboarding"));
+    assert!(brief.contains("marrow ingest"));
 }
