@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use marrow_memdocs::{Frontmatter, Memory, MemoryKind, Provenance, Scope, Status};
-use marrow_store::{Query, Store};
+use marrow_store::{ClaimScope, Query, Store};
 
 /// Marrow: a markdown-native memory store for AI agents.
 #[derive(Debug, Parser)]
@@ -89,6 +89,69 @@ pub enum Cmd {
     },
     /// Show a memory's provenance: who wrote it, its lineage, and how it's been used.
     Provenance { id: String },
+    /// Register an advisory work-claim so parallel sessions don't collide.
+    Claim(ClaimArgs),
+    /// Release a work-claim by id (otherwise it expires at its TTL).
+    Release {
+        claim_id: String,
+        #[arg(long, default_value = "cli")]
+        by: String,
+    },
+    /// List active work-claims; with a scope, only those that would collide.
+    Claims {
+        #[arg(long = "file")]
+        files: Vec<String>,
+        #[arg(long = "symbol")]
+        symbols: Vec<String>,
+        #[arg(long)]
+        topic: Option<String>,
+        #[arg(long)]
+        feature: Option<String>,
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Show the most recent activity-stream events across sessions (newest first).
+    Activity {
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
+    /// Warm-start a session: announce it, then print active claims + relevant memory.
+    Bootstrap {
+        goal: String,
+        #[arg(long, default_value = "default")]
+        project: String,
+        #[arg(long, default_value_t = 1500)]
+        max_tokens: usize,
+        #[arg(long, default_value = "cli")]
+        by: String,
+    },
+}
+
+/// Arguments for `marrow claim`.
+#[derive(Debug, clap::Args)]
+pub struct ClaimArgs {
+    /// What you're about to do, e.g. "refactor auth to async".
+    pub intent: String,
+    /// Your session id.
+    #[arg(long, default_value = "cli")]
+    pub session: String,
+    /// A file or `dir/*` glob you'll touch (repeatable).
+    #[arg(long = "file")]
+    pub files: Vec<String>,
+    /// A code symbol you'll touch (repeatable).
+    #[arg(long = "symbol")]
+    pub symbols: Vec<String>,
+    #[arg(long)]
+    pub topic: Option<String>,
+    #[arg(long)]
+    pub feature: Option<String>,
+    #[arg(long)]
+    pub project: Option<String>,
+    /// Lease length in seconds (default 30 minutes).
+    #[arg(long, default_value_t = 1800)]
+    pub ttl_secs: i64,
+    #[arg(long, default_value = "cli")]
+    pub by: String,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -444,7 +507,102 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
                 None => Err(format!("no memory with id {id}")),
             }
         }
+        Cmd::Claim(a) => {
+            let store = open(&cli.root)?;
+            let scope = ClaimScope {
+                files: a.files,
+                symbols: a.symbols,
+                topic: a.topic,
+                feature: a.feature,
+                project_id: a.project.unwrap_or_default(),
+            };
+            let c = store
+                .claim(&a.session, &a.by, scope, &a.intent, a.ttl_secs)
+                .map_err(|e| e.to_string())?;
+            writeln!(out, "{}", c.id).ok();
+            Ok(())
+        }
+        Cmd::Release { claim_id, by } => {
+            let store = open(&cli.root)?;
+            store.release(&claim_id, &by).map_err(|e| e.to_string())?;
+            writeln!(out, "released {claim_id}").ok();
+            Ok(())
+        }
+        Cmd::Claims {
+            files,
+            symbols,
+            topic,
+            feature,
+            project,
+        } => {
+            let store = open(&cli.root)?;
+            let scope = ClaimScope {
+                files,
+                symbols,
+                topic,
+                feature,
+                project_id: project.unwrap_or_default(),
+            };
+            let scoped = !scope.files.is_empty()
+                || !scope.symbols.is_empty()
+                || scope.topic.is_some()
+                || scope.feature.is_some();
+            let found = if scoped {
+                store.claims_overlapping(&scope)
+            } else {
+                store.active_claims()
+            }
+            .map_err(|e| e.to_string())?;
+            for c in &found {
+                writeln!(out, "{}  [{}]  {}", c.id, c.session_id, c.intent).ok();
+            }
+            writeln!(out, "{} active claim(s)", found.len()).ok();
+            Ok(())
+        }
+        Cmd::Activity { limit } => {
+            let store = open(&cli.root)?;
+            let events = store.activity(limit).map_err(|e| e.to_string())?;
+            for e in &events {
+                writeln!(
+                    out,
+                    "{}  {}  {}  {} — {}",
+                    e.seq, e.ts, e.kind, e.actor, e.summary
+                )
+                .ok();
+            }
+            writeln!(out, "{} event(s)", events.len()).ok();
+            Ok(())
+        }
+        Cmd::Bootstrap {
+            goal,
+            project,
+            max_tokens,
+            by,
+        } => {
+            let store = open(&cli.root)?;
+            let brief = store
+                .bootstrap(&goal, &project, &by, max_tokens)
+                .map_err(|e| e.to_string())?;
+            writeln!(out, "goal: {}", brief.goal).ok();
+            writeln!(out, "active claims ({}):", brief.active_claims.len()).ok();
+            for c in &brief.active_claims {
+                writeln!(out, "  {} — {} [{}]", c.id, c.intent, c.session_id).ok();
+            }
+            writeln!(out, "recent decisions ({}):", brief.recent_decisions.len()).ok();
+            for m in &brief.recent_decisions {
+                writeln!(out, "  {} — {}", m.frontmatter.id, first_line(&m.body)).ok();
+            }
+            writeln!(out, "relevant memories ({}):", brief.relevant.len()).ok();
+            for m in &brief.relevant {
+                writeln!(out, "  {} — {}", m.frontmatter.id, first_line(&m.body)).ok();
+            }
+            Ok(())
+        }
     }
+}
+
+fn first_line(body: &str) -> &str {
+    body.trim().lines().next().unwrap_or("")
 }
 
 fn open(root: &std::path::Path) -> Result<Store, String> {

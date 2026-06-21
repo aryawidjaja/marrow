@@ -269,3 +269,50 @@ fn recall_and_provenance_trace_usage() {
     assert!(prov.contains("written by"));
     assert!(prov.contains("retrieve"));
 }
+
+#[test]
+fn claim_release_and_bootstrap_flow() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(root, &["init"]);
+
+    // Agent A claims the auth refactor on a file.
+    let claim_id = ok(
+        root,
+        &[
+            "claim",
+            "refactor auth",
+            "--session",
+            "a",
+            "--file",
+            "src/auth.rs",
+            "--project",
+            "demo",
+        ],
+    )
+    .trim()
+    .to_string();
+    assert!(!claim_id.is_empty());
+
+    // Agent B checks the same file and sees the collision.
+    let overlap = ok(
+        root,
+        &["claims", "--file", "src/auth.rs", "--project", "demo"],
+    );
+    assert!(overlap.contains("refactor auth"));
+    assert!(overlap.contains("1 active claim(s)"));
+
+    // Activity shows the claim event.
+    let act = ok(root, &["activity"]);
+    assert!(act.contains("claim"));
+
+    // Release it; no claims remain.
+    ok(root, &["release", &claim_id]);
+    let after = ok(root, &["claims"]);
+    assert!(after.contains("0 active claim(s)"));
+
+    // Bootstrap announces a session and prints the (now empty) claim list.
+    let brief = ok(root, &["bootstrap", "set up auth", "--project", "demo"]);
+    assert!(brief.contains("goal: set up auth"));
+    assert!(brief.contains("active claims (0)"));
+}
