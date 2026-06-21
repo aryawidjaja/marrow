@@ -27,15 +27,20 @@ echo "Setting up Marrow in: $target"
 # 1) The store
 [ -d .marrow ] || { marrow init >/dev/null && echo "  ✓ created .marrow store"; }
 
-# 2) Connect Marrow over MCP. Use the ABSOLUTE path to marrow-mcp: Claude Code spawns MCP
-# servers in a shell that may not have ~/.cargo/bin on PATH, so a bare "marrow-mcp" can fail
-# to connect.
+# 2) Connect Marrow over MCP. Prefer registering it once at USER scope so it's available in every
+# project. Use the ABSOLUTE path: the spawn shell may not have ~/.cargo/bin on PATH.
 mcp_bin="$(command -v marrow-mcp)"
-if [ ! -f .mcp.json ]; then
+if command -v claude >/dev/null 2>&1; then
+  if claude mcp add marrow -s user -- "$mcp_bin" --root . >/dev/null 2>&1; then
+    echo "  ✓ registered marrow MCP at user scope (available in every project)"
+  else
+    echo "  • marrow MCP already registered at user scope — left as-is"
+  fi
+elif [ ! -f .mcp.json ]; then
   printf '{ "mcpServers": { "marrow": { "command": "%s", "args": ["--root", "."] } } }\n' "$mcp_bin" > .mcp.json
-  echo "  ✓ wrote .mcp.json (MCP connection -> $mcp_bin)"
+  echo "  ✓ wrote .mcp.json (project-scoped MCP connection -> $mcp_bin)"
 else
-  echo "  • .mcp.json already exists — left as-is (ensure it points to: $mcp_bin)"
+  echo "  • .mcp.json already exists — left as-is"
 fi
 
 # 3) Auto-capture hooks
