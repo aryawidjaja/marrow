@@ -39,3 +39,34 @@ jobs:
         with:
           files: "*.tar.gz"
           generate_release_notes: true
+
+  # Auto-bump the Homebrew tap formula to the new tag (no manual SHA editing).
+  # Requires a repo secret HOMEBREW_TAP_TOKEN: a fine-grained PAT with Contents: Read+Write
+  # on aryawidjaja/homebrew-marrow.
+  homebrew:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compute source tarball sha256
+        id: src
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          sha=$(curl -fsSL "https://github.com/${{ github.repository }}/archive/refs/tags/${tag}.tar.gz" | sha256sum | awk '{print $1}')
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+      - name: Check out the tap
+        uses: actions/checkout@v4
+        with:
+          repository: aryawidjaja/homebrew-marrow
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      - name: Bump and push the formula
+        run: |
+          tag="${GITHUB_REF_NAME}"; ver="${{ steps.src.outputs.version }}"
+          f="Formula/marrow.rb"
+          sed -i -E "s#archive/refs/tags/v[0-9.]+\.tar\.gz#archive/refs/tags/${tag}.tar.gz#" "$f"
+          sed -i -E "s#sha256 \"[0-9a-f]{64}\"#sha256 \"${{ steps.src.outputs.sha }}\"#" "$f"
+          sed -i -E "s#assert_match \"marrow [0-9.]+\"#assert_match \"marrow ${ver}\"#" "$f"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$f"
+          git diff --cached --quiet || git commit -m "marrow ${ver}"
+          git push
