@@ -3,6 +3,8 @@
 CLAUDE.md
 AGENTS.md
 .claude/
+.marrow/
+.mcp.json
 
 # Python
 __pycache__/
