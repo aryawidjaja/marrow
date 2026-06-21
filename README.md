@@ -2,328 +2,118 @@
 
 *A cure for amnesiac AI agents — persistent, shared memory so they stop forgetting and stop colliding.*
 
-Marrow is a memory store for AI agents that keeps everything in plain markdown files while
-giving you the things a real database provides: schemas, validation, structured queries,
-full-text search, provenance, decay, and — the part most file-based memory gets wrong —
-**it tells you when a memory has gone out of date.**
+AI agents forget. Every session re-reads the codebase, repeats past decisions, and loses what it
+learned when the context window compacts — and running several at once makes them collide. Marrow
+fixes this. Memories are plain markdown files you can read and git-commit; a rebuildable SQLite
+index adds query, hybrid keyword+vector search, provenance, and decay. Unlike a loose `CLAUDE.md`,
+Marrow keeps memory **fresh** (it flags a note the moment the code it describes changes),
+**coherent** (it merges duplicates and resolves contradictions on its own), and **shared** (many
+agent sessions read and write one brain instead of working blind).
 
-Agents accumulate notes: decisions, facts about a codebase, things they learned last
-session. Stored as loose markdown, those notes rot quietly. You rename a function and the
-note that describes it keeps claiming the old behavior. Marrow anchors a memory to the code
-it talks about and flags it the moment that code changes underneath it.
+## Does it actually save tokens?
 
-The files stay human-readable and git-friendly. The database lives beside them as a
-rebuildable index, never as the source of truth.
-
-## Why it exists
-
-File-based memory (`CLAUDE.md`, `.cursorrules`, and friends) won out for agents because it's
-transparent, version-controllable, and needs no infrastructure. But in practice it has real
-gaps:
-
-- **It goes stale silently.** Nothing warns you when a note no longer matches the code.
-- **It can't be queried.** Loading a whole file into context to use one paragraph wastes
-  the model's attention.
-- **Nothing is validated.** An agent can write a malformed or contradictory note and poison
-  later sessions.
-- **There's no provenance or lifecycle.** No record of who wrote what, when, or whether a
-  decision was later reversed.
-
-Marrow keeps the markdown-first approach and closes those gaps.
-
-## What you get
-
-- **Staleness detection.** A memory can cite a code symbol. Marrow stores a structural
-  fingerprint of that symbol and checks it against the live code. Reformatting or renaming a
-  local variable does not trip it; changing the logic, the signature, or deleting the symbol
-  does. If the symbol simply moved to another file, Marrow finds it and relocates the
-  citation instead of crying stale.
-- **Typed documents.** Every memory is a markdown file with YAML frontmatter conforming to
-  one of five base schemas: `fact`, `decision`, `entity`, `session`, `skill`.
-- **Validated writes.** Bad writes are rejected with the specific reasons, so an agent can
-  fix and retry. At most one active decision is allowed per topic per project.
-- **Hybrid search.** Structured queries plus a single search that fuses keyword matching
-  (SQLite FTS5) with semantic vector similarity, tunable from pure keyword to pure semantic.
-  An optional token budget caps how much a search returns.
-- **Lifecycle and decay.** Memories can supersede one another, carry a confidence score, and
-  expire or decay over time.
-- **Provenance and integrity.** Each memory records who wrote it; optional HMAC signing makes
-  tampering detectable.
-- **Tamper-evident audit trail.** Every write, supersede, and agent observation is recorded
-  in an append-only, hash-chained ledger. Edit any past entry and `marrow audit` reports the
-  break. Nothing is ever deleted from it.
-- **Decision provenance.** Recall records which memories it returned, so an answer can be traced
-  back through the memories that produced it to their sources and the events that created them.
-- **Consolidation that learns.** A pass that keeps memory coherent: it clusters related
-  memories by *meaning* (embedding similarity), then merges duplicates, resolves
-  contradictions, and retires expired notes — distilling rather than dropping, choosing the
-  survivor by salience and preserving lineage. Contradiction resolution can run against a
-  local or sovereign-hosted LLM (it never has to leave your infrastructure).
-- **A shared brain for many agents.** One store, many sessions. Agents can warm-start from
-  what others have done (`bootstrap`), register advisory **work-claims** so parallel sessions
-  don't collide on the same files (`claim`/`claims`), and stream what they're doing to a
-  real-time activity log (`progress`/`activity`). Every claim and step rides the same
-  tamper-evident ledger, so coordination is auditable too. It works across tools — anything
-  that speaks MCP shares the same brain.
-
-## Repository layout
-
-```
-crates/
-  marrow-core      Code-anchored staleness: structural fingerprint + relocation search
-  marrow-memdocs   The memory document format: typed frontmatter, schemas, validation
-  marrow-episodic  Append-only, hash-chained event ledger (episodic memory + audit trail)
-  marrow-store     Persistence, SQLite/FTS5 index, hybrid search, decay, scope, consolidation
-  marrow-cli       The `marrow` command-line tool
-  marrow-mcp       A Model Context Protocol server exposing the store to agents
-  marrow-web       A local dashboard (`marrow-serve`) to watch memories and consolidation
-  marrow-bench     Reproducible benchmarks (consolidation quality, token-efficiency)
-python/
-  marrow-anthropic A backend for Anthropic's memory tool (memory_20250818)
-```
-
-## Get started in 3 steps (Claude Code)
-
-**1. Install Marrow.** No clone needed.
-
-With Rust:
-```bash
-cargo install --git https://github.com/aryawidjaja/marrow marrow-cli marrow-mcp
-```
-Or without Rust (prebuilt binaries):
-```bash
-curl -fsSL https://raw.githubusercontent.com/aryawidjaja/marrow/main/install.sh | sh
-```
-Either way you get `marrow` and `marrow-mcp` on your PATH. (With `cargo install`, that's
-`~/.cargo/bin` — add it to your shell if needed: `export PATH="$HOME/.cargo/bin:$PATH"`. The
-prebuilt installer uses `~/.local/bin`. Add `marrow-web` to the cargo line for the optional
-dashboard.)
-
-**2. Set it up in your project.** Two small commands, no clone:
-```bash
-cd your-project
-marrow init
-printf '{ "mcpServers": { "marrow": { "command": "marrow-mcp", "args": ["--root", "."] } } }\n' > .mcp.json
-```
-
-**3. Open Claude Code in that project.** It connects to Marrow automatically — ask it to remember
-decisions and recall them, and it will across sessions.
-
-> **Want it fully hands-free** (warm-start, collision-avoidance, and auto-capture with zero
-> prompting) plus Cursor/Codex configs? That's one more step — see
-> [integrations/](integrations/README.md). Or point any agent at [`llms.txt`](llms.txt) — a
-> machine-readable guide so you can just tell your agent *"read llms.txt and set up Marrow here."*
-
-## Quick start
-
-Build the binaries:
-
-```bash
-cargo build --release
-# produces target/release/marrow and target/release/marrow-mcp
-```
-
-Create a store and add a memory:
-
-```bash
-marrow init
-marrow add --kind decision --topic auth "We use short-lived JWTs for sessions."
-marrow query --kind decision
-marrow search JWT                 # hybrid keyword + semantic
-marrow search "token expiry" --weight 1   # 0 = keyword only, 1 = semantic only
-```
-
-Memories are written as markdown you can read and edit by hand:
-
-```markdown
----
-id: 01J9Z3K2Q8WXYZ4ABCD5EFGH6
-type: decision
-status: active
-topic: auth
-scope:
-  project_id: default
-refs: []
-confidence: 1.0
-provenance:
-  written_by: cli
-  sources: []
-supersedes: []
-tags: []
-created_at: 2026-06-17T09:00:00Z
-updated_at: 2026-06-17T09:00:00Z
----
-
-We use short-lived JWTs for sessions.
-```
-
-Check which code-anchored memories have drifted from a repository:
-
-```bash
-marrow list-stale --repo .
-```
-
-Review the tamper-evident history, or keep memory coherent:
-
-```bash
-marrow history                    # every write/supersede/observation
-marrow audit                      # verify the hash chain is intact
-marrow consolidate --repo .       # report stale, expired, and duplicate memories
-marrow consolidate --repo . --apply   # merge duplicates and retire expired
-```
-
-Coordinate many agent sessions through one shared brain:
-
-```bash
-marrow bootstrap "add OAuth login"          # warm-start: who's doing what + relevant memory
-marrow claims --file src/auth.rs            # is anyone already working here?
-marrow claim "refactor auth" --file src/auth.rs --session $SID   # stake out the work
-marrow progress "added token issuer" --file src/auth.rs --session $SID
-marrow activity                             # the live cross-session stream
-marrow release <claim-id>                   # done
-```
-
-If you ever lose or delete the index, rebuild it from the files:
-
-```bash
-marrow doctor
-```
-
-Or watch it in a browser — a small local dashboard that lists memories, flags stale ones in
-red as the code changes, and collapses duplicates when you click Consolidate:
-
-```bash
-marrow-serve --root . --port 8088   # then open http://127.0.0.1:8088
-```
-
-## Use it from an agent (MCP)
-
-`marrow-mcp` speaks the Model Context Protocol over stdio and exposes the whole store as tools —
-the knowledge plane (`mem_write`, `mem_anchor`, `mem_read`, `mem_query`, `mem_search`,
-`mem_recall`, `mem_provenance`, `mem_supersede`, `mem_list_stale`, `mem_validate`, `mem_status`,
-`mem_history`, `mem_audit`, `mem_consolidate`, `mem_log`) and the shared-brain coordination plane
-(`mem_bootstrap`, `mem_claim`, `mem_claims`, `mem_release`, `mem_progress`, `mem_activity`).
-Point an MCP-capable client at it:
-
-```json
-{
-  "mcpServers": {
-    "marrow": {
-      "command": "marrow-mcp",
-      "args": ["--root", "/path/to/your/project"]
-    }
-  }
-}
-```
-
-The same config works for Claude Code, Cursor, and Codex. For ready-to-paste snippets, a
-recommended agent workflow, and optional auto-capture hooks, see
-[integrations/](integrations/README.md).
-
-## Use it as an Anthropic memory-tool backend
-
-`python/marrow-anthropic` implements Anthropic's memory tool (`memory_20250818`) — the six
-file operations the model expects — with strict path confinement. See its
-[README](python/marrow-anthropic/README.md).
-
-```python
-from anthropic import Anthropic
-from marrow_anthropic import MarrowMemoryBackend
-
-client = Anthropic()
-memory = MarrowMemoryBackend("./.marrow/memories")
-client.beta.messages.run_tools(model="claude-opus-4-8", messages=[...], tools=[memory])
-```
-
-## How staleness works
-
-When a memory references a code symbol, Marrow records two things about it:
-
-1. A **structural fingerprint** — the symbol's syntax tree with formatting and identifier
-   names normalized away. This ignores cosmetic edits (reformatting, renaming a local) but
-   changes when the behavior, signature, or shape of the code changes.
-2. A **normalized copy of the text**, used to locate the symbol if it moves to another file.
-
-A memory is reported stale only when both checks agree the code is gone or changed. If the
-fingerprint no longer matches at the recorded location but the text turns up elsewhere, the
-symbol moved — Marrow reports the new location rather than a false alarm. Today this works on
-Rust source via tree-sitter; the same approach extends to other languages by adding their
-grammars.
-
-## Design notes
-
-- **Markdown is the source of truth.** The SQLite index under `.marrow/.index` is derived
-  and disposable; `marrow doctor` rebuilds it from the files.
-- **Writes are atomic.** A memory is written to a temporary file and renamed into place, so a
-  crash never leaves a half-written document.
-- **The store is a library.** `marrow-store` is a normal Rust crate; the CLI and MCP server
-  are thin layers over it, and you can embed it directly.
-
-## Search and embeddings
-
-Search is hybrid by default: keyword (FTS5) results and semantic (vector cosine) results are
-fused with reciprocal rank fusion, weighted by `--weight`. With no embedding backend
-configured it is exactly keyword search, so nothing extra is required to get started.
-
-Embeddings are pluggable via the `[embedding]` section of `.marrow/.marrow.toml`:
-
-- `provider = "hash"` — a built-in, dependency-free lexical embedder (good for tests/demos).
-- `provider = "http"` (build with `--features embed-http`) — any OpenAI-compatible embedding
-  endpoint; the API key comes from `MARROW_EMBED_API_KEY`.
-- `provider = "fastembed"` (build with `--features embed-fastembed`) — a local ONNX model,
-  fully offline. The default is multilingual, so non-English text (including Arabic) embeds
-  well.
-
-Vectors live in the SQLite index and are rebuilt by `marrow doctor`.
-
-Consolidation uses the same embeddings to find related memories, and a pluggable distiller to
-judge each cluster (merge / resolve-conflict / keep). The default is deterministic and offline;
-set `[consolidation] distiller = "http"` (build with `--features distill-http`) to point at any
-OpenAI-compatible chat endpoint — including a local or sovereign-hosted model — with the key in
-`MARROW_DISTILL_API_KEY`.
-
-## Benchmarks
-
-The claims here are measured. Full method and honest caveats are in [bench/REPORT.md](bench/REPORT.md).
-
-**Does it actually save tokens?** In an end-to-end A/B — the same "understand this codebase"
-question run through Claude Code against this repo, once with Marrow and once without — a warm
-Marrow session answered with **~72% fewer tokens** and finished **~57% faster** than a cold session
-that had to read files (5-run average; warm stays roughly flat while cold scales with the codebase):
+The same "understand this codebase" question, run through Claude Code against this repo — once with
+Marrow, once without. The warm session recalls distilled memory instead of reading files:
 
 | | Cold (reads files) | Warm (Marrow) | Saved |
 |---|---|---|---|
 | Tokens | ~134k | ~38k | **~72%** |
 | Time | ~26s | ~11s | **~57%** |
 
-The engine benchmarks (reproducible offline with `cargo run -p marrow-bench`):
+5-run average; the warm cost stays roughly flat while the cold cost grows with the codebase. The
+engine benchmarks — staleness ~1% false-positive at ~98% recall, consolidation 100% clustering
+precision / 0 false merges, ~82% retrieval-budget token cut — reproduce offline with
+`cargo run -p marrow-bench`. Method and caveats: [bench/REPORT.md](bench/REPORT.md).
 
-- **Staleness** — ~1% false-positive at ~98% recall.
-- **Consolidation** — 100% clustering precision, 0 false merges.
-- **Retrieval budget** — ~82% fewer tokens for a broad query.
+## Install
 
-## Status
+```bash
+cargo install --git https://github.com/aryawidjaja/marrow marrow-cli marrow-mcp
+```
+Or, without Rust, grab prebuilt binaries:
+```bash
+curl -fsSL https://raw.githubusercontent.com/aryawidjaja/marrow/main/install.sh | sh
+```
 
-Working today: the staleness engine, the document format and validation, the store with its
-index, hybrid keyword+semantic search, decay, scope, supersession and integrity, the
-append-only audit ledger, decision provenance, the consolidation pass, the shared-brain
-coordination plane (work-claims, activity stream, session bootstrap), the CLI, the MCP server,
-the local dashboard, the reproducible benchmarks, and the Anthropic memory-tool backend. Tested
-end to end.
+## Use it with your agent
 
-Planned: staleness for more languages, richer consolidation (LLM-assisted distillation), and
-concurrent multi-writer support.
+```bash
+cd your-project
+marrow init
+printf '{ "mcpServers": { "marrow": { "command": "marrow-mcp", "args": ["--root", "."] } } }\n' > .mcp.json
+```
+Open Claude Code (or Cursor / Codex — same config) and it connects automatically, gaining the
+`mem_*` tools: `mem_write` / `mem_recall` / `mem_search` for memory, and `mem_bootstrap` /
+`mem_claim` / `mem_activity` for the shared brain. For hands-free auto-capture and warm-start hooks,
+see [integrations/](integrations/README.md); to have an agent set it all up itself, point it at
+[`llms.txt`](llms.txt).
+
+## What it does
+
+- **Staleness detection** — a memory can cite a code symbol; Marrow fingerprints it and flags the
+  note the moment the symbol's behavior or signature changes, while ignoring reformatting and
+  renames. If the symbol just moved, it relocates the citation instead of crying stale.
+- **Consolidation** — clusters related memories by meaning, merges duplicates, resolves
+  contradictions, and retires expired notes, preserving lineage.
+- **Shared brain** — many sessions share one store: warm-start with `bootstrap`, avoid collisions
+  with advisory `claim`s, stream `progress` to a live activity log. Vendor-neutral over MCP.
+- **Audit & provenance** — every write, supersede, and recall lands in an append-only, hash-chained
+  ledger; `marrow audit` proves it untampered, and any answer traces back to its sources.
+- **Typed & validated** — five schemas (`fact`, `decision`, `entity`, `session`, `skill`); bad
+  writes are rejected with reasons; lifecycle via supersede, confidence, and decay.
+- **Runs anywhere** — a single offline binary; nothing leaves your machine.
+
+## CLI
+
+```bash
+marrow add --kind decision --topic auth "We use short-lived JWTs."
+marrow search "token expiry" --weight 1   # 0 = keyword, 1 = semantic
+marrow list-stale --repo .                # notes whose code drifted
+marrow consolidate --repo . --apply       # merge duplicates, retire expired
+marrow audit                              # verify the ledger
+marrow-serve --root . --port 8088         # local dashboard
+```
+
+Memories are markdown you can read and edit by hand:
+```markdown
+---
+type: decision
+topic: auth
+confidence: 1.0
+---
+We use short-lived JWTs for sessions.
+```
+
+## How it works
+
+- **Markdown is the source of truth.** The SQLite index under `.marrow/.index` is a disposable
+  cache — `marrow doctor` rebuilds it from the files. Writes are atomic (temp file + rename).
+- **Hybrid search** fuses keyword (FTS5) and semantic (vector cosine) results with reciprocal rank
+  fusion, tuned by `--weight`. Embeddings are pluggable in `.marrow/.marrow.toml`: `hash` (default,
+  offline), `fastembed` (local ONNX, multilingual incl. Arabic), or `http` (any OpenAI-compatible
+  endpoint). With no embedder it's plain keyword search.
+- **Staleness** records a structural fingerprint of the cited symbol plus a normalized copy for
+  relocation; a note is stale only when the code is genuinely gone or changed. Rust today, via
+  tree-sitter; other languages by adding grammars.
+- **Consolidation** judges each cluster with a pluggable distiller (merge / resolve / keep) —
+  deterministic by default, or pointed at a local or sovereign-hosted LLM, so nothing leaves your
+  infrastructure.
+- **It's a library.** `marrow-store` is a normal Rust crate; the CLI, MCP server, and dashboard are
+  thin layers over it.
+
+## Anthropic memory-tool backend
+
+`python/marrow-anthropic` implements Anthropic's memory tool (`memory_20250818`) with strict path
+confinement — see its [README](python/marrow-anthropic/README.md).
 
 ## The name
 
-Marrow is the essential core a body grows from — "the marrow of the matter" is the part that
-actually matters. It's also, biologically, where the immune system's memory begins. That's the
-idea here: the quiet, foundational layer an agent's knowledge is built on and remembered from.
+Marrow is the essential core a body grows from — and, biologically, where the immune system's
+memory begins: the quiet, foundational layer an agent's knowledge is built on and remembered from.
 
 ## License
 
-Open source and dual-licensed. The engine and tools (`crates/`) are **AGPL-3.0-only**; the
-embeddable Anthropic memory-tool backend (`python/marrow-anthropic`) is **Apache-2.0**. Using
-Marrow from your agent over MCP or the CLI does **not** make your code a derivative work — it's
-a separate process. A commercial license (which also lifts AGPL obligations) is available for
-organizations that need it. See [COMMERCIAL.md](COMMERCIAL.md).
+Dual-licensed: the engine (`crates/`) is **AGPL-3.0-only**; the embeddable Python backend
+(`python/marrow-anthropic`) is **Apache-2.0**. Using Marrow from your agent over MCP or the CLI is a
+separate process, not a derivative work. A commercial license is available — see
+[COMMERCIAL.md](COMMERCIAL.md).
