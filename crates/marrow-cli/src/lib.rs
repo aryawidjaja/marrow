@@ -157,8 +157,8 @@ pub struct ClaimArgs {
     pub feature: Option<String>,
     #[arg(long)]
     pub project: Option<String>,
-    /// Lease length in seconds (default 30 minutes).
-    #[arg(long, default_value_t = 1800)]
+    /// Lease length in seconds (default 60 minutes).
+    #[arg(long, default_value_t = 3600)]
     pub ttl_secs: i64,
     #[arg(long, default_value = "cli")]
     pub by: String,
