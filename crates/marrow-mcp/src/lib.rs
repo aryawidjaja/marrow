@@ -200,6 +200,40 @@ mod tests {
     }
 
     #[test]
+    fn coordination_tools_round_trip() {
+        let dir = store_root();
+        // Agent A claims the auth work.
+        let c = call(
+            dir.path(),
+            "mem_claim",
+            json!({"session":"a","intent":"refactor auth","files":["src/auth.rs"],"project":"demo"}),
+        );
+        let claim_id = result_text(&c);
+        assert!(claim_id.contains("\"id\""));
+
+        // Agent B checks before touching the same file and sees the collision.
+        let overlap = call(
+            dir.path(),
+            "mem_claims",
+            json!({"files":["src/auth.rs"],"project":"demo"}),
+        );
+        assert!(result_text(&overlap).contains("refactor auth"));
+        assert!(result_text(&overlap).contains("\"count\":1"));
+
+        // Activity stream shows the claim.
+        let act = call(dir.path(), "mem_activity", json!({}));
+        assert!(result_text(&act).contains("\"kind\":\"claim\""));
+
+        // Bootstrap warm-starts a fresh session with the active claim.
+        let brief = call(
+            dir.path(),
+            "mem_bootstrap",
+            json!({"goal":"work on auth","project":"demo"}),
+        );
+        assert!(result_text(&brief).contains("refactor auth"));
+    }
+
+    #[test]
     fn anchor_tool_tracks_code_staleness() {
         let dir = store_root();
         std::fs::create_dir_all(dir.path().join("src")).unwrap();

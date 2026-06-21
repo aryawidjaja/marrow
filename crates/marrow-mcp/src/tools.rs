@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use marrow_memdocs::{Frontmatter, Memory, MemoryKind, Provenance, Scope, Status};
-use marrow_store::{Query, Store};
+use marrow_store::{ClaimScope, Query, Store};
 use serde_json::{json, Value};
 
 /// The tool catalog advertised via `tools/list`.
@@ -86,6 +86,50 @@ pub fn definitions() -> Value {
             },
             "required": ["summary"]
         })),
+        tool("mem_claim", "Register an advisory work-claim so other agent sessions know what you're working on and don't collide. Returns the claim id.", json!({
+            "type": "object",
+            "properties": {
+                "session": {"type": "string", "description": "your session id"},
+                "intent": {"type": "string", "description": "what you're about to do"},
+                "files": {"type": "array", "items": {"type": "string"}, "description": "files or dir/* globs you'll touch"},
+                "symbols": {"type": "array", "items": {"type": "string"}},
+                "topic": {"type": "string"},
+                "feature": {"type": "string"},
+                "project": {"type": "string"},
+                "ttl_secs": {"type": "integer", "description": "lease length in seconds (default 1800)"},
+                "by": {"type": "string"}
+            },
+            "required": ["session","intent"]
+        })),
+        tool("mem_release", "Release a work-claim you no longer need (otherwise it expires at its TTL).", json!({
+            "type": "object",
+            "properties": {"claim_id": {"type": "string"}, "by": {"type": "string"}},
+            "required": ["claim_id"]
+        })),
+        tool("mem_claims", "List active work-claims. With a scope (files/symbols/topic/feature), returns only claims that would collide — check this BEFORE starting work.", json!({
+            "type": "object",
+            "properties": {
+                "files": {"type": "array", "items": {"type": "string"}},
+                "symbols": {"type": "array", "items": {"type": "string"}},
+                "topic": {"type": "string"},
+                "feature": {"type": "string"},
+                "project": {"type": "string"}
+            }
+        })),
+        tool("mem_activity", "The most recent activity-stream events across all sessions (newest first).", json!({
+            "type": "object",
+            "properties": {"limit": {"type": "integer", "description": "max events (default 20)"}}
+        })),
+        tool("mem_bootstrap", "Warm-start a session: announce it and get back what other sessions are doing plus the memories and decisions most relevant to your goal. Call this FIRST instead of re-scanning.", json!({
+            "type": "object",
+            "properties": {
+                "goal": {"type": "string"},
+                "project": {"type": "string"},
+                "max_tokens": {"type": "integer", "description": "budget for relevant memories (default 1500)"},
+                "by": {"type": "string"}
+            },
+            "required": ["goal"]
+        })),
     ])
 }
 
@@ -132,6 +176,11 @@ pub fn call(root: &Path, name: &str, args: &Value) -> Result<String, String> {
         "mem_audit" => audit(&store),
         "mem_log" => log_event(&store, args),
         "mem_consolidate" => consolidate(&store, root, args),
+        "mem_claim" => claim(&store, args),
+        "mem_release" => release(&store, args),
+        "mem_claims" => claims(&store, args),
+        "mem_activity" => activity(&store, args),
+        "mem_bootstrap" => bootstrap(&store, args),
         other => Err(format!("unknown tool: {other}")),
     }
 }
@@ -304,6 +353,113 @@ fn log_event(store: &Store, args: &Value) -> Result<String, String> {
         .log_event(&kind, &by, &summary)
         .map_err(|e| e.to_string())?;
     Ok("logged".to_string())
+}
+
+fn claim(store: &Store, args: &Value) -> Result<String, String> {
+    let session = str_arg(args, "session")?;
+    let intent = str_arg(args, "intent")?;
+    let by = opt_arg(args, "by").unwrap_or_else(|| "mcp".into());
+    let ttl = args.get("ttl_secs").and_then(Value::as_i64).unwrap_or(1800);
+    let c = store
+        .claim(&session, &by, scope_from(args), &intent, ttl)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_value(&c)
+        .map(|v| v.to_string())
+        .map_err(|e| e.to_string())
+}
+
+fn release(store: &Store, args: &Value) -> Result<String, String> {
+    let claim_id = str_arg(args, "claim_id")?;
+    let by = opt_arg(args, "by").unwrap_or_else(|| "mcp".into());
+    store.release(&claim_id, &by).map_err(|e| e.to_string())?;
+    Ok(json!({"released": claim_id}).to_string())
+}
+
+fn claims(store: &Store, args: &Value) -> Result<String, String> {
+    let scope = scope_from(args);
+    let found = if scope_is_empty(&scope) {
+        store.active_claims()
+    } else {
+        store.claims_overlapping(&scope)
+    }
+    .map_err(|e| e.to_string())?;
+    let value = serde_json::to_value(&found).map_err(|e| e.to_string())?;
+    Ok(json!({"claims": value, "count": found.len()}).to_string())
+}
+
+fn activity(store: &Store, args: &Value) -> Result<String, String> {
+    let limit = args
+        .get("limit")
+        .and_then(Value::as_u64)
+        .map(|n| n as usize)
+        .unwrap_or(20);
+    let events = store.activity(limit).map_err(|e| e.to_string())?;
+    let items: Vec<Value> = events
+        .iter()
+        .map(|e| {
+            json!({
+                "seq": e.seq, "ts": e.ts, "kind": e.kind, "actor": e.actor,
+                "summary": e.summary, "data": e.data,
+            })
+        })
+        .collect();
+    Ok(json!({"events": items, "count": items.len()}).to_string())
+}
+
+fn bootstrap(store: &Store, args: &Value) -> Result<String, String> {
+    let goal = str_arg(args, "goal")?;
+    let project = opt_arg(args, "project").unwrap_or_else(|| "default".into());
+    let by = opt_arg(args, "by").unwrap_or_else(|| "mcp".into());
+    let max_tokens = args
+        .get("max_tokens")
+        .and_then(Value::as_u64)
+        .map(|n| n as usize)
+        .unwrap_or(1500);
+    let brief = store
+        .bootstrap(&goal, &project, &by, max_tokens)
+        .map_err(|e| e.to_string())?;
+    let claims = serde_json::to_value(&brief.active_claims).map_err(|e| e.to_string())?;
+    Ok(json!({
+        "goal": brief.goal,
+        "active_claims": claims,
+        "relevant": brief.relevant.iter().map(mem_brief).collect::<Vec<_>>(),
+        "recent_decisions": brief.recent_decisions.iter().map(mem_brief).collect::<Vec<_>>(),
+    })
+    .to_string())
+}
+
+fn mem_brief(m: &Memory) -> Value {
+    json!({
+        "id": m.frontmatter.id,
+        "kind": kind_name(m.frontmatter.kind),
+        "topic": m.frontmatter.topic,
+        "body": m.body.trim(),
+    })
+}
+
+fn scope_from(args: &Value) -> ClaimScope {
+    ClaimScope {
+        files: arr_arg(args, "files"),
+        symbols: arr_arg(args, "symbols"),
+        topic: opt_arg(args, "topic"),
+        feature: opt_arg(args, "feature"),
+        project_id: opt_arg(args, "project").unwrap_or_default(),
+    }
+}
+
+fn scope_is_empty(s: &ClaimScope) -> bool {
+    s.files.is_empty() && s.symbols.is_empty() && s.topic.is_none() && s.feature.is_none()
+}
+
+fn arr_arg(args: &Value, key: &str) -> Vec<String> {
+    args.get(key)
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn status(store: &Store) -> Result<String, String> {
