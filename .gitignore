@@ -29,3 +29,6 @@ marrow_demo.rs
 
 # Local-only efficiency A/B harness (needs the claude CLI + quota)
 bench/ab_efficiency.sh
+
+# macOS junk
+.DS_Store
