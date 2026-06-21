@@ -18,7 +18,7 @@
     "Stop": [
       {
         "hooks": [
-          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/marrow-finished.sh" }
+          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/marrow-stop.sh" }
         ]
       }
     ]

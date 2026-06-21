@@ -23,3 +23,6 @@ spike/staleness/corpus/
 
 # Generated benchmark output
 bench/results/
+
+# Dashboard demo artifact (written by marrow-serve Seed/Break demo)
+marrow_demo.rs

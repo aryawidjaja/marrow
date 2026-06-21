@@ -35,7 +35,9 @@ Every hook fails open — if anything goes wrong it exits 0 and never blocks you
 |------|-------|--------|
 | `marrow-bootstrap.sh` | `SessionStart` | Injects a warm-start briefing (active claims + relevant memories) so the session doesn't cold-start. |
 | `marrow-progress.sh` | `PostToolUse` (Edit/Write) | Records each file edit as a `progress` event other sessions can see live. |
-| `marrow-finished.sh` | `Stop` | Marks the session finished in the activity stream. |
+| `marrow-stop.sh` | `Stop` | If the session changed code, asks the agent **once** to save any durable decisions/facts to Marrow, then marks the session finished. Read-only/Q&A sessions are not interrupted. |
 
-The agent can still call the MCP tools directly (`mem_claim`, `mem_bootstrap`, …); the hooks just
-make the common cases automatic.
+This is what makes memory truly automatic: the user never has to say "remember this." The
+SessionStart hook reads the shared brain, `PostToolUse` records activity, and `Stop` captures the
+durable decisions — all on the agent side, in the background. The agent can also call the MCP
+tools directly (`mem_write`, `mem_claim`, …) any time.
