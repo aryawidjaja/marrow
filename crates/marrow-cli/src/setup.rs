@@ -124,12 +124,22 @@ pub fn run(root: &Path, global: bool, out: &mut impl Write) -> Result<(), String
         )
     };
 
+    // The hook path written into settings.json. Project setup uses the project-relative
+    // $CLAUDE_PROJECT_DIR; global setup must point at the absolute ~/.claude/hooks so every project
+    // fires the globally-installed scripts (not a per-project copy that may not exist).
+    let settings_hook_dir = if global {
+        base.join("hooks").to_string_lossy().into_owned()
+    } else {
+        "$CLAUDE_PROJECT_DIR/.claude/hooks".to_string()
+    };
+
     install(
         &base,
         &claude_md,
         init_root.as_deref(),
         &bin_dir,
         &label,
+        &settings_hook_dir,
         out,
     )?;
     register_mcp(&bin_dir, out);
@@ -155,6 +165,7 @@ fn install(
     init_root: Option<&Path>,
     bin_dir: &str,
     label: &str,
+    settings_hook_dir: &str,
     out: &mut impl Write,
 ) -> Result<(), String> {
     // 1) Make sure a project store exists (global setup has no single project; stores auto-create).
@@ -182,9 +193,11 @@ fn install(
 
     // 3) Register the hooks in settings.json, merging into an existing file rather than clobbering
     //    it (so the hooks actually activate on a machine that already has Claude Code settings).
+    //    The hook path is project-relative for project setup, absolute for --global.
+    let settings_src = SETTINGS.replace("$CLAUDE_PROJECT_DIR/.claude/hooks", settings_hook_dir);
     let settings = base.join("settings.json");
     match fs::read_to_string(&settings) {
-        Ok(existing) => match merge_hooks_into(&existing, SETTINGS) {
+        Ok(existing) => match merge_hooks_into(&existing, &settings_src) {
             Some(merged) => {
                 fs::write(&settings, merged).map_err(|e| e.to_string())?;
                 writeln!(
@@ -195,7 +208,7 @@ fn install(
             }
             None => {
                 // Existing file isn't valid JSON we can merge — leave it untouched, drop a sidecar.
-                fs::write(base.join("settings.marrow.json"), SETTINGS)
+                fs::write(base.join("settings.marrow.json"), &settings_src)
                     .map_err(|e| e.to_string())?;
                 writeln!(
                     out,
@@ -205,7 +218,7 @@ fn install(
             }
         },
         Err(_) => {
-            fs::write(&settings, SETTINGS).map_err(|e| e.to_string())?;
+            fs::write(&settings, &settings_src).map_err(|e| e.to_string())?;
             writeln!(out, "  settings    -> {label}/settings.json").ok();
         }
     }
@@ -290,7 +303,16 @@ mod tests {
         let claude_md = dir.path().join("CLAUDE.md");
         let mut out = Vec::new();
 
-        install(&base, &claude_md, Some(dir.path()), "", ".claude", &mut out).unwrap();
+        install(
+            &base,
+            &claude_md,
+            Some(dir.path()),
+            "",
+            ".claude",
+            "$CLAUDE_PROJECT_DIR/.claude/hooks",
+            &mut out,
+        )
+        .unwrap();
 
         assert!(base.join("hooks/marrow-bootstrap.sh").exists());
         assert!(base.join("hooks/marrow-guard.sh").exists());
@@ -302,7 +324,16 @@ mod tests {
             .contains("marrow:begin"));
 
         // Idempotent: a second run doesn't duplicate the guidance block.
-        install(&base, &claude_md, Some(dir.path()), "", ".claude", &mut out).unwrap();
+        install(
+            &base,
+            &claude_md,
+            Some(dir.path()),
+            "",
+            ".claude",
+            "$CLAUDE_PROJECT_DIR/.claude/hooks",
+            &mut out,
+        )
+        .unwrap();
         let body = fs::read_to_string(&claude_md).unwrap();
         assert_eq!(body.matches("marrow:begin").count(), 1);
     }
@@ -343,11 +374,22 @@ mod tests {
         let claude_md = dir.path().join("CLAUDE.md");
         let mut out = Vec::new();
 
-        install(&base, &claude_md, Some(dir.path()), "", ".claude", &mut out).unwrap();
+        install(
+            &base,
+            &claude_md,
+            Some(dir.path()),
+            "",
+            ".claude",
+            "$CLAUDE_PROJECT_DIR/.claude/hooks",
+            &mut out,
+        )
+        .unwrap();
 
         let settings = fs::read_to_string(base.join("settings.json")).unwrap();
         assert!(settings.contains("marrow-bootstrap.sh"));
         assert!(settings.contains("\"model\""));
+        // Project setup keeps the project-relative hook path.
+        assert!(settings.contains("$CLAUDE_PROJECT_DIR/.claude/hooks/marrow-bootstrap.sh"));
         // No sidecar needed when we can merge.
         assert!(!base.join("settings.marrow.json").exists());
     }
@@ -358,19 +400,35 @@ mod tests {
     }
 
     #[test]
-    fn install_global_style_creates_user_level_claude_md() {
-        // Mimics --global: base is a ~/.claude-like dir with no project store.
+    fn install_global_points_settings_at_absolute_hook_path() {
+        // Mimics --global: base is a ~/.claude-like dir with no project store. The settings must
+        // point at the absolute global hooks, NOT $CLAUDE_PROJECT_DIR (which would only resolve in
+        // repos that also had project setup).
         let dir = tempfile::tempdir().unwrap();
         let base = dir.path().join("dot-claude");
         let claude_md = base.join("CLAUDE.md");
+        let hook_dir = base.join("hooks").to_string_lossy().into_owned();
         let mut out = Vec::new();
 
-        install(&base, &claude_md, None, "", "~/.claude", &mut out).unwrap();
+        install(
+            &base,
+            &claude_md,
+            None,
+            "",
+            "~/.claude",
+            &hook_dir,
+            &mut out,
+        )
+        .unwrap();
 
         assert!(base.join("hooks/marrow-bootstrap.sh").exists());
         assert!(base.join("commands/marrow-save.md").exists());
         assert!(fs::read_to_string(&claude_md)
             .unwrap()
             .contains("marrow:begin"));
+
+        let settings = fs::read_to_string(base.join("settings.json")).unwrap();
+        assert!(settings.contains(&format!("{hook_dir}/marrow-bootstrap.sh")));
+        assert!(!settings.contains("$CLAUDE_PROJECT_DIR"));
     }
 }
