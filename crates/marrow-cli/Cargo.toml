@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Command-line interface for the Marrow memory store."
 license = "AGPL-3.0-only"
+repository = "https://github.com/aryawidjaja/marrow"
 
 [[bin]]
 name = "marrow"
