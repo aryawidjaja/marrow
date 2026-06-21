@@ -99,6 +99,9 @@ pub struct Claim {
     pub created_at: String,
     /// When the lease expires (RFC3339).
     pub expires_at: String,
+    /// Lease length in seconds — used to extend the lease when the holder makes progress.
+    #[serde(default)]
+    pub ttl_secs: i64,
 }
 
 /// A warm-start briefing handed to a new session so it doesn't cold-start or re-scan.
@@ -124,6 +127,7 @@ impl Store {
         intent: &str,
         ttl_secs: i64,
     ) -> Result<Claim, Error> {
+        let ttl = ttl_secs.max(0);
         let claim = Claim {
             id: Ulid::new().to_string(),
             session_id: session_id.to_string(),
@@ -131,7 +135,8 @@ impl Store {
             scope,
             intent: intent.to_string(),
             created_at: util::now_rfc3339(),
-            expires_at: util::rfc3339_after(ttl_secs.max(0)),
+            expires_at: util::rfc3339_after(ttl),
+            ttl_secs: ttl,
         };
         let data = serde_json::to_value(&claim).map_err(|e| Error::Parse(e.to_string()))?;
         self.log_data("claim", actor, &format!("claim: {intent}"), data)?;
@@ -148,16 +153,33 @@ impl Store {
         )
     }
 
-    /// All claims that are still active: registered, not released, not expired.
+    /// All claims that are still active: registered, not released, renewed-or-not-expired.
+    ///
+    /// Folds the ledger: a `claim` registers a lease, a `renew` extends its expiry (so active
+    /// work keeps its claim alive), and a `release` drops it. The latest renewal wins.
     pub fn active_claims(&self) -> Result<Vec<Claim>, Error> {
+        use std::collections::{HashMap, HashSet};
         let now = util::to_unix(&util::now_rfc3339()).unwrap_or(0);
-        let mut claims: Vec<Claim> = Vec::new();
-        let mut released: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut by_id: HashMap<String, Claim> = HashMap::new();
+        let mut order: Vec<String> = Vec::new();
+        let mut renewed: HashMap<String, String> = HashMap::new();
+        let mut released: HashSet<String> = HashSet::new();
         for ev in self.history()? {
             match ev.kind.as_str() {
                 "claim" => {
                     if let Ok(c) = serde_json::from_value::<Claim>(ev.data.clone()) {
-                        claims.push(c);
+                        if !by_id.contains_key(&c.id) {
+                            order.push(c.id.clone());
+                        }
+                        by_id.insert(c.id.clone(), c);
+                    }
+                }
+                "renew" => {
+                    if let (Some(id), Some(exp)) = (
+                        ev.data.get("claim_id").and_then(|v| v.as_str()),
+                        ev.data.get("expires_at").and_then(|v| v.as_str()),
+                    ) {
+                        renewed.insert(id.to_string(), exp.to_string());
                     }
                 }
                 "release" => {
@@ -168,11 +190,24 @@ impl Store {
                 _ => {}
             }
         }
-        Ok(claims
-            .into_iter()
-            .filter(|c| !released.contains(&c.id))
-            .filter(|c| util::to_unix(&c.expires_at).is_some_and(|e| e > now))
-            .collect())
+        let mut out = Vec::new();
+        for id in order {
+            if released.contains(&id) {
+                continue;
+            }
+            let Some(mut c) = by_id.remove(&id) else {
+                continue;
+            };
+            if let Some(exp) = renewed.get(&id) {
+                if util::to_unix(exp) >= util::to_unix(&c.expires_at) {
+                    c.expires_at = exp.clone();
+                }
+            }
+            if util::to_unix(&c.expires_at).is_some_and(|e| e > now) {
+                out.push(c);
+            }
+        }
+        Ok(out)
     }
 
     /// Active claims that would collide with `scope` — what an agent checks before starting work.
@@ -184,7 +219,9 @@ impl Store {
             .collect())
     }
 
-    /// Record a unit of progress so other sessions can see it in real time.
+    /// Record a unit of progress so other sessions can see it in real time. Recording progress
+    /// also **renews the lease** on this session's claims that cover the touched files, so a long
+    /// task never loses its claim mid-work (claims can only otherwise expire at their TTL).
     pub fn progress(
         &self,
         session_id: &str,
@@ -197,7 +234,32 @@ impl Store {
             actor,
             summary,
             serde_json::json!({ "session_id": session_id, "files": files }),
-        )
+        )?;
+        self.renew_claims(session_id, actor, files)
+    }
+
+    /// Extend the lease on this session's active claims that overlap any of `files`. A no-op if
+    /// `files` is empty or nothing matches.
+    fn renew_claims(&self, session_id: &str, actor: &str, files: &[String]) -> Result<(), Error> {
+        if files.is_empty() {
+            return Ok(());
+        }
+        let touched = ClaimScope {
+            files: files.to_vec(),
+            ..Default::default()
+        };
+        for c in self.active_claims()? {
+            if c.session_id == session_id && c.scope.overlaps(&touched) {
+                let ttl = if c.ttl_secs > 0 { c.ttl_secs } else { 3600 };
+                self.log_data(
+                    "renew",
+                    actor,
+                    &format!("renew: {}", c.intent),
+                    serde_json::json!({ "claim_id": c.id, "expires_at": util::rfc3339_after(ttl) }),
+                )?;
+            }
+        }
+        Ok(())
     }
 
     /// The most recent activity-stream events (newest first), capped at `limit`.
@@ -357,12 +419,46 @@ mod tests {
         store
             .claim("s", "a", scope(&["f1"], "demo"), "first", 600)
             .unwrap();
+        // progress on an unclaimed file → no lease renewal, so the order stays claim, progress.
         store
-            .progress("s", "a", "did a thing", &["f1".into()])
+            .progress("s", "a", "did a thing", &["f2".into()])
             .unwrap();
         let recent = store.activity(10).unwrap();
         assert_eq!(recent[0].kind, "progress");
         assert_eq!(recent[1].kind, "claim");
+    }
+
+    #[test]
+    fn progress_renews_the_holders_lease() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::init(dir.path()).unwrap();
+        let c = store
+            .claim("s1", "a", scope(&["src/auth.rs"], "demo"), "auth", 3600)
+            .unwrap();
+        store
+            .progress("s1", "a", "edited auth", &["src/auth.rs".into()])
+            .unwrap();
+        // A renewal event was recorded, and the claim is still a single active claim (deduped).
+        assert!(store.history().unwrap().iter().any(|e| e.kind == "renew"));
+        let active = store.active_claims().unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].id, c.id);
+    }
+
+    #[test]
+    fn progress_does_not_renew_another_sessions_lease() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::init(dir.path()).unwrap();
+        store
+            .claim("owner", "a", scope(&["src/x.rs"], "demo"), "x", 3600)
+            .unwrap();
+        store
+            .progress("intruder", "b", "poking", &["src/x.rs".into()])
+            .unwrap();
+        assert!(
+            !store.history().unwrap().iter().any(|e| e.kind == "renew"),
+            "another session's progress must not renew the owner's lease"
+        );
     }
 
     #[test]
