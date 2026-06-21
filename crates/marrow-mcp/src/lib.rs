@@ -9,6 +9,7 @@ use std::path::Path;
 
 use serde_json::{json, Value};
 
+pub mod prompts;
 pub mod tools;
 
 const PROTOCOL_VERSION: &str = "2025-06-18";
@@ -25,7 +26,7 @@ pub fn handle(root: &Path, req: &Value) -> Option<Value> {
             id,
             json!({
                 "protocolVersion": PROTOCOL_VERSION,
-                "capabilities": {"tools": {}},
+                "capabilities": {"tools": {}, "prompts": {}},
                 "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION}
             }),
         )),
@@ -33,6 +34,8 @@ pub fn handle(root: &Path, req: &Value) -> Option<Value> {
         "ping" => Some(success(id, json!({}))),
         "tools/list" => Some(success(id, json!({"tools": tools::definitions()}))),
         "tools/call" => Some(handle_call(root, id, req.get("params"))),
+        "prompts/list" => Some(success(id, json!({"prompts": prompts::definitions()}))),
+        "prompts/get" => Some(handle_prompt_get(id, req.get("params"))),
         _ if id.is_none() => None, // unknown notification
         _ => Some(error(id, -32601, &format!("method not found: {method}"))),
     }
@@ -52,6 +55,17 @@ fn handle_call(root: &Path, id: Option<Value>, params: Option<&Value>) -> Value 
         Err(text) => tool_result(&text, true),
     };
     success(id, result)
+}
+
+fn handle_prompt_get(id: Option<Value>, params: Option<&Value>) -> Value {
+    let name = params
+        .and_then(|p| p.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    match prompts::get(name) {
+        Some(prompt) => success(id, prompt),
+        None => error(id, -32602, &format!("unknown prompt: {name}")),
+    }
 }
 
 /// Read newline-delimited JSON-RPC from `input`, writing responses to `output`.
@@ -261,6 +275,59 @@ mod tests {
         let stale = call(dir.path(), "mem_list_stale", json!({}));
         assert!(result_text(&stale).contains("\"count\":1"));
         assert!(result_text(&stale).contains("issue_token"));
+    }
+
+    #[test]
+    fn initialize_advertises_prompts_capability() {
+        let dir = store_root();
+        let req = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}});
+        let resp = handle(dir.path(), &req).unwrap();
+        assert!(resp["result"]["capabilities"]["prompts"].is_object());
+    }
+
+    #[test]
+    fn prompts_list_and_get_the_save_prompt() {
+        let dir = store_root();
+        let list = handle(
+            dir.path(),
+            &json!({"jsonrpc":"2.0","id":1,"method":"prompts/list"}),
+        )
+        .unwrap();
+        let names: Vec<&str> = list["result"]["prompts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["name"].as_str().unwrap())
+            .collect();
+        assert!(names.contains(&"save"));
+
+        let got = handle(
+            dir.path(),
+            &json!({"jsonrpc":"2.0","id":2,"method":"prompts/get","params":{"name":"save"}}),
+        )
+        .unwrap();
+        assert!(got["result"]["messages"][0]["content"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("mem_write"));
+
+        let missing = handle(
+            dir.path(),
+            &json!({"jsonrpc":"2.0","id":3,"method":"prompts/get","params":{"name":"nope"}}),
+        )
+        .unwrap();
+        assert_eq!(missing["error"]["code"], -32602);
+    }
+
+    #[test]
+    fn ingest_tool_lists_docs() {
+        let dir = store_root();
+        std::fs::write(dir.path().join("README.md"), "# hi").unwrap();
+        let resp = call(dir.path(), "mem_ingest", json!({}));
+        let text = result_text(&resp);
+        assert!(text.contains("README.md"));
+        assert!(text.contains("mem_write"));
+        assert!(text.contains("\"count\":1"));
     }
 
     #[test]

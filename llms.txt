@@ -22,7 +22,7 @@ Verify: `marrow status` should print `total: 0`.
 Best — one command from the project dir; registers the MCP server (all projects), installs the
 auto-capture hooks, and adds a CLAUDE.md guidance block, then restart Claude Code:
 ```
-marrow setup
+marrow setup            # this project; add --global to wire every project at once
 ```
 
 Tools only (no hooks), or other agents:
@@ -33,6 +33,14 @@ Tools only (no hooks), or other agents:
 
 After connecting, the agent gains the `mem_*` tools below. (`--root .` = each project keeps its own
 memory under `.marrow/`, created on first use.)
+
+## Onboarding an existing repo (do this once)
+
+A fresh store is empty. If the project already has docs, seed memory from them so future sessions
+start warm: call `mem_ingest` (or run `marrow ingest`) to get the list of knowledge docs, then read
+each and `mem_write` the durable decisions/facts — distill, don't paste whole files; `mem_recall`
+first to skip anything already saved. `mem_bootstrap` will nudge you to do this when the brain is
+empty but docs exist.
 
 ## How an agent should use Marrow (the loop)
 
@@ -47,6 +55,8 @@ memory under `.marrow/`, created on first use.)
 Knowledge: `mem_write`/`marrow add`, `mem_anchor`/`marrow anchor`, `mem_read`/`marrow read`, `mem_query`/`marrow query`, `mem_search`/`marrow search`, `mem_recall`/`marrow recall`, `mem_provenance`/`marrow provenance`, `mem_supersede`/`marrow supersede`, `mem_list_stale`/`marrow list-stale`, `mem_consolidate`/`marrow consolidate`, `mem_history`/`marrow history`, `mem_audit`/`marrow audit`.
 
 Coordination (the shared brain): `mem_bootstrap`/`marrow bootstrap`, `mem_claim`/`marrow claim`, `mem_claims`/`marrow claims`, `mem_release`/`marrow release`, `mem_progress`/`marrow progress`, `mem_activity`/`marrow activity`.
+
+Onboarding: `mem_ingest`/`marrow ingest` (seed memory from existing docs). A `save` MCP prompt (Claude Code: `/mcp__marrow__save`, or the `/marrow-save` slash command) tells the agent to distill the current session into memory.
 
 ## Optional: hands-free auto-capture (Claude Code)
 

@@ -146,4 +146,31 @@ coord_session="$(printf '%s\n%s\n' \
   | "$marrow_mcp" --root "$proj3")"
 check "MCP exposes the coordination tools" "$coord_session" '"id"'
 
+echo "==> Onboarding: seed an existing repo + capture prompt"
+proj4="$work/project4"
+mkdir -p "$proj4/docs"
+echo "# Read me" > "$proj4/README.md"
+echo "architecture notes" > "$proj4/docs/architecture.md"
+o() { "$marrow" --root "$proj4" "$@"; }
+o init > /dev/null
+ingest_out="$(o ingest)"
+check "ingest lists the existing README" "$ingest_out" "README.md"
+check "ingest lists docs/ markdown" "$ingest_out" "docs/architecture.md"
+check "ingest tells the agent to distill via mem_write" "$ingest_out" "mem_write"
+check "empty-brain bootstrap nudges ingest" "$(o bootstrap 'resume' --project demo)" "marrow ingest"
+onboard_session="$(printf '%s\n%s\n%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"prompts/list"}' \
+  '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mem_ingest","arguments":{}}}' \
+  | "$marrow_mcp" --root "$proj4")"
+check "MCP advertises the save prompt" "$onboard_session" '"save"'
+check "MCP mem_ingest returns the docs" "$onboard_session" "README.md"
+
+echo "==> Setup: scaffolds hooks, slash command, guidance"
+proj5="$work/project5"
+mkdir -p "$proj5"
+setup_out="$("$marrow" --root "$proj5" setup 2>&1 || true)"
+check "setup reports the slash command" "$setup_out" "marrow-save.md"
+check "setup wrote the /marrow-save command" "$(cat "$proj5/.claude/commands/marrow-save.md")" "mem_write"
+
 printf '\nAll %d checks passed.\n' "$pass"

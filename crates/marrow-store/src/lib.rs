@@ -29,7 +29,7 @@ pub use consolidate::{
     Cluster, ClusterAction, ConsolidationOutcome, ConsolidationReport, Distiller,
     HeuristicDistiller, Verdict,
 };
-pub use coordinate::{Briefing, Claim, ClaimScope};
+pub use coordinate::{knowledge_docs, Briefing, Claim, ClaimScope};
 pub use embed::{EmbedError, Embedder, HashEmbedder};
 pub use provenance::{MemoryRef, ProvenanceTrail};
 pub use query::Query;

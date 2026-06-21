@@ -51,7 +51,14 @@ marrow setup
 ```
 Restart Claude Code. Now every session **starts warm** (it already knows what past sessions did and
 decided), **claims files** so parallel sessions don't collide, and **captures durable decisions** —
-automatically, no prompting. Each project keeps its own memory under `.marrow/`.
+automatically, no prompting. Each project keeps its own memory under `.marrow/`. Wiring every repo
+at once? `marrow setup --global` installs the hooks user-wide instead of per-project.
+
+**Adopting on an existing repo?** Its brain starts empty, so seed it from the docs you already have:
+the first warm-start nudges the agent to run `marrow ingest`, which lists your READMEs/`docs/` and has
+the agent distill them into memory. From then on, every session starts informed. And any time you
+want to capture the session you're in, run **`/marrow-save`** — the agent writes what you decided to
+the shared brain.
 
 The agent gets the `mem_*` tools: `mem_write` / `mem_recall` / `mem_search` for memory, and
 `mem_bootstrap` / `mem_claim` / `mem_activity` for the shared brain.
@@ -61,6 +68,9 @@ Just want the tools (no hooks), or using Cursor / Codex? Register the MCP server
 claude mcp add marrow -s user -- marrow-mcp --root .          # Claude Code, every project
 # or per-project: add the same server to .mcp.json / .cursor/mcp.json / Codex TOML
 ```
+Other MCP agents get the full `mem_*` toolset and the `save` prompt, but the automatic hooks
+(warm-start, collision-guard, activity) are Claude Code-specific — there, capture is a tool the
+agent calls rather than a background reflex.
 
 > **One brain across projects, or a team?** Point sessions at a shared store
 > (`--root ~/marrow-shared` instead of `.`) — memories are scoped per project, so an agent can

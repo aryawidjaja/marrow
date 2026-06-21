@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use marrow_memdocs::{Frontmatter, Memory, MemoryKind, Provenance, Scope, Status};
-use marrow_store::{ClaimScope, Query, Store};
+use marrow_store::{knowledge_docs, ClaimScope, Query, Store};
 use serde_json::{json, Value};
 
 /// The tool catalog advertised via `tools/list`.
@@ -140,6 +140,10 @@ pub fn definitions() -> Value {
             },
             "required": ["goal"]
         })),
+        tool("mem_ingest", "Onboard an existing repo: list its knowledge docs (READMEs, docs/) so you can distill them into memory. Read each and save the durable decisions/facts with mem_write — distill, don't dump.", json!({
+            "type": "object",
+            "properties": {}
+        })),
     ])
 }
 
@@ -192,6 +196,7 @@ pub fn call(root: &Path, name: &str, args: &Value) -> Result<String, String> {
         "mem_progress" => progress(&store, args),
         "mem_activity" => activity(&store, args),
         "mem_bootstrap" => bootstrap(&store, args),
+        "mem_ingest" => ingest(root),
         other => Err(format!("unknown tool: {other}")),
     }
 }
@@ -446,8 +451,27 @@ fn bootstrap(store: &Store, args: &Value) -> Result<String, String> {
         "active_claims": claims,
         "relevant": brief.relevant.iter().map(mem_brief).collect::<Vec<_>>(),
         "recent_decisions": brief.recent_decisions.iter().map(mem_brief).collect::<Vec<_>>(),
+        "suggest_ingest": brief.suggest_ingest,
     })
     .to_string())
+}
+
+/// List the project's knowledge docs plus a directive to distill them into memory. Marrow runs no
+/// LLM here — the agent reads the docs and writes the memories itself.
+fn ingest(root: &Path) -> Result<String, String> {
+    let docs = knowledge_docs(root);
+    let files: Vec<Value> = docs
+        .iter()
+        .map(|(path, bytes)| json!({"path": path, "bytes": bytes}))
+        .collect();
+    let instruction = if docs.is_empty() {
+        "No knowledge docs (Markdown) found under this project.".to_string()
+    } else {
+        "Read each file and save the durable decisions, facts, and architecture with mem_write — \
+         distill, don't paste whole files. Call mem_recall first and skip anything already saved."
+            .to_string()
+    };
+    Ok(json!({"instruction": instruction, "docs": files, "count": docs.len()}).to_string())
 }
 
 fn mem_brief(m: &Memory) -> Value {
