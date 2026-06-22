@@ -181,4 +181,15 @@ check "setup preserved the user's existing settings" "$merged" '"model"'
 echo "==> Bare invocation: getting-started banner"
 check "marrow with no args points to setup" "$("$marrow")" "marrow setup"
 
+echo "==> Auto-consolidation: threshold-driven cleanup"
+proj6="$work/project6"
+mkdir -p "$proj6"
+a() { "$marrow" --root "$proj6" "$@"; }
+a init > /dev/null
+check "below threshold, --if-due is a no-op" "$(a consolidate --if-due)" "not due"
+for i in $(seq 1 20); do a add --kind fact --topic "t$i" "memory body number $i" > /dev/null; done
+check "past threshold, bootstrap nudges consolidation" "$(a bootstrap 'resume' --project demo)" "maintenance:"
+check "past threshold, --if-due applies" "$(a consolidate --if-due)" "applied:"
+check "after a pass, --if-due is a no-op again" "$(a consolidate --if-due)" "not due"
+
 printf '\nAll %d checks passed.\n' "$pass"

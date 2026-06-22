@@ -80,6 +80,10 @@ pub enum Cmd {
         /// Apply changes (merge duplicates, retire expired) instead of only reporting.
         #[arg(long)]
         apply: bool,
+        /// Apply only if enough new memories have accumulated since the last pass (otherwise a
+        /// no-op). Used for hands-free auto-consolidation.
+        #[arg(long)]
+        if_due: bool,
     },
     /// Recall memories for a query and record the retrieval (so answers stay traceable).
     Recall {
@@ -471,9 +475,23 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
             writeln!(out, "logged").ok();
             Ok(())
         }
-        Cmd::Consolidate { repo, apply } => {
+        Cmd::Consolidate {
+            repo,
+            apply,
+            if_due,
+        } => {
             let store = open(&cli.root)?;
-            if apply {
+            if if_due {
+                match store.consolidate_if_due(&repo).map_err(|e| e.to_string())? {
+                    Some(o) => writeln!(
+                        out,
+                        "applied: {} deprecated, {} merged, {} conflicts resolved",
+                        o.deprecated, o.merged, o.conflicts_resolved
+                    )
+                    .ok(),
+                    None => writeln!(out, "consolidation not due").ok(),
+                };
+            } else if apply {
                 let o = store.consolidate_apply(&repo).map_err(|e| e.to_string())?;
                 writeln!(
                     out,
@@ -628,6 +646,13 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
                 writeln!(
                     out,
                     "onboarding: this repo has {n} knowledge doc(s) but no memory yet — run `marrow ingest` to seed the brain so future sessions start warm."
+                )
+                .ok();
+            }
+            if brief.suggest_consolidate {
+                writeln!(
+                    out,
+                    "maintenance: many new memories since the last cleanup — run `marrow consolidate --apply` (or mem_consolidate) to merge duplicates and retire stale notes."
                 )
                 .ok();
             }

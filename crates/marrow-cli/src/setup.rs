@@ -22,7 +22,8 @@ This project has a Marrow shared brain connected over MCP. Hooks bootstrap conte
 start, prevent file collisions before edits, and record activity — automatically. You only need\n\
 to do one thing: when you reach a durable decision, fact, or gotcha, save it with the `mem_write`\n\
 tool (kind `decision`/`fact`, a short topic). Use `mem_recall` before answering questions about\n\
-past decisions, and don't re-save anything already in Marrow.\n\
+past decisions, and don't re-save anything already in Marrow. If a bootstrap briefing suggests\n\
+consolidation, run `mem_consolidate` (apply) to keep the memory tidy.\n\
 <!-- marrow:end -->\n";
 
 /// Add the marrow binary's own directory to a hook's lookup chain, so the hook finds `marrow`

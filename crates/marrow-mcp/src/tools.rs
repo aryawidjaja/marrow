@@ -452,6 +452,7 @@ fn bootstrap(store: &Store, args: &Value) -> Result<String, String> {
         "relevant": brief.relevant.iter().map(mem_brief).collect::<Vec<_>>(),
         "recent_decisions": brief.recent_decisions.iter().map(mem_brief).collect::<Vec<_>>(),
         "suggest_ingest": brief.suggest_ingest,
+        "suggest_consolidate": brief.suggest_consolidate,
     })
     .to_string())
 }

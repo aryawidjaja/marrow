@@ -103,6 +103,9 @@ pub struct ConsolidationReport {
     pub clusters: Vec<Cluster>,
 }
 
+/// New memories written since the last consolidation that make an automatic cleanup pass worthwhile.
+pub const CONSOLIDATE_THRESHOLD: usize = 20;
+
 /// What applying consolidation changed.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct ConsolidationOutcome {
@@ -148,6 +151,38 @@ impl Store {
         );
         self.log_event("consolidate", "marrow", &summary)?;
         Ok(outcome)
+    }
+
+    /// How many memories have been written since the last consolidation pass (folds the ledger:
+    /// each `write` increments, a `consolidate` event resets the count).
+    pub fn writes_since_consolidation(&self) -> Result<usize, Error> {
+        let mut count = 0;
+        for ev in self.history()? {
+            match ev.kind.as_str() {
+                "consolidate" => count = 0,
+                "write" => count += 1,
+                _ => {}
+            }
+        }
+        Ok(count)
+    }
+
+    /// True once enough new memories have accumulated to warrant an automatic cleanup pass.
+    pub fn consolidation_due(&self) -> Result<bool, Error> {
+        Ok(self.writes_since_consolidation()? >= CONSOLIDATE_THRESHOLD)
+    }
+
+    /// Apply consolidation only if it's [`Store::consolidation_due`]; otherwise a no-op. This is the
+    /// entry point for hands-free auto-consolidation (the bootstrap hook / agent call it cheaply).
+    pub fn consolidate_if_due(
+        &self,
+        repo_root: &Path,
+    ) -> Result<Option<ConsolidationOutcome>, Error> {
+        if self.consolidation_due()? {
+            Ok(Some(self.consolidate_apply(repo_root)?))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Ids of active memories whose `expires_at` is in the past.
@@ -323,5 +358,64 @@ mod tests {
             .unwrap();
         assert_eq!(v.action, ClusterAction::Merge);
         assert_eq!(v.body, "a\nb\nc");
+    }
+
+    fn write_fact(store: &Store, topic: &str, body: &str) {
+        use marrow_memdocs::{Frontmatter, MemoryKind, Provenance, Scope};
+        let mut m = Memory {
+            frontmatter: Frontmatter {
+                id: String::new(),
+                kind: MemoryKind::Fact,
+                status: Status::Active,
+                topic: Some(topic.into()),
+                scope: Scope {
+                    user_id: None,
+                    agent_id: None,
+                    project_id: "demo".into(),
+                    org_id: None,
+                },
+                refs: vec![],
+                code_anchors: vec![],
+                confidence: 1.0,
+                decay: None,
+                provenance: Provenance {
+                    written_by: "t".into(),
+                    session_id: None,
+                    sources: vec![],
+                },
+                supersedes: vec![],
+                tags: vec![],
+                created_at: String::new(),
+                updated_at: String::new(),
+                hmac: None,
+            },
+            body: body.into(),
+        };
+        store.write(&mut m).unwrap();
+    }
+
+    #[test]
+    fn consolidation_becomes_due_then_resets_after_a_pass() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::init(dir.path()).unwrap();
+
+        // A handful of writes: not due yet.
+        for i in 0..3 {
+            write_fact(&store, &format!("t{i}"), &format!("fact number {i}"));
+        }
+        assert_eq!(store.writes_since_consolidation().unwrap(), 3);
+        assert!(!store.consolidation_due().unwrap());
+        assert!(store.consolidate_if_due(dir.path()).unwrap().is_none());
+
+        // Cross the threshold.
+        for i in 3..CONSOLIDATE_THRESHOLD {
+            write_fact(&store, &format!("t{i}"), &format!("fact number {i}"));
+        }
+        assert!(store.consolidation_due().unwrap());
+
+        // consolidate_if_due runs the pass and resets the counter.
+        assert!(store.consolidate_if_due(dir.path()).unwrap().is_some());
+        assert_eq!(store.writes_since_consolidation().unwrap(), 0);
+        assert!(!store.consolidation_due().unwrap());
     }
 }
