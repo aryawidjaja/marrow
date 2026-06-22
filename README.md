@@ -123,10 +123,17 @@ these files.)
 
 - **Markdown is the source of truth.** The SQLite index under `.marrow/.index` is a disposable
   cache — `marrow doctor` rebuilds it from the files. Writes are atomic (temp file + rename).
-- **Hybrid search** fuses keyword (FTS5) and semantic (vector cosine) results with reciprocal rank
-  fusion, tuned by `--weight`. Embeddings are pluggable in `.marrow/.marrow.toml`: `hash` (default,
-  offline), `fastembed` (local ONNX, multilingual incl. Arabic), or `http` (any OpenAI-compatible
-  endpoint). With no embedder it's plain keyword search.
+- **Search** is keyword (FTS5) by default — small, instant, fully offline. **Semantic search is an
+  opt-in:** meaning-based recall via vector embeddings, fused with keyword results (reciprocal rank
+  fusion, tuned by `--weight`). It needs an embedding model, so it ships disabled. To turn it on:
+  ```bash
+  # local + offline (downloads a small model on first use):
+  cargo install --git https://github.com/aryawidjaja/marrow marrow-cli marrow-mcp --features embed-fastembed
+  marrow embed fastembed
+  # or point at any OpenAI-compatible endpoint instead:
+  #   cargo install ... --features embed-http && marrow embed http --url <endpoint>
+  ```
+  `fastembed` is local ONNX and multilingual (incl. Arabic); `http` calls an endpoint you control.
 - **Staleness** records a structural fingerprint of the cited symbol plus a normalized copy for
   relocation; a note is stale only when the code is genuinely gone or changed. Rust today, via
   tree-sitter; other languages by adding grammars.

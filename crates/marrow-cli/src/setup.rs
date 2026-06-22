@@ -156,7 +156,9 @@ pub fn run(root: &Path, global: bool, out: &mut impl Write) -> Result<(), String
          2. Sessions now warm-start, avoid collisions, and you can capture anytime —\n     \
          type /marrow-save (or just say \"save this to marrow\").\n  \
          3. New repo with existing docs? The first session will offer to run `marrow ingest`\n     \
-         to seed memory — or just ask the agent to \"seed marrow from this repo's docs\"."
+         to seed memory — or just ask the agent to \"seed marrow from this repo's docs\".\n\n\
+         Tip: search is keyword by default. For smarter, meaning-based recall, enable semantic\n  \
+         search (opt-in — needs an embedding model): see `marrow embed` and the README."
     )
     .ok();
     Ok(())

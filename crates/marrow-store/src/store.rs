@@ -222,6 +222,11 @@ impl Store {
         &self.root
     }
 
+    /// The configured embedding backend ("none"/"hash" = keyword search).
+    pub fn embedding_provider(&self) -> &str {
+        &self.config.embedding.provider
+    }
+
     fn memory_dir(&self) -> PathBuf {
         self.root.join(".marrow/memory")
     }

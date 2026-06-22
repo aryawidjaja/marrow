@@ -158,6 +158,15 @@ pub enum Cmd {
         #[arg(long, default_value = "cli")]
         session: String,
     },
+    /// Choose the search backend: `none`/`hash` (keyword, default) or `fastembed`/`http`
+    /// (semantic). Semantic needs a binary built with the matching feature.
+    Embed {
+        /// none | hash | fastembed | http
+        provider: String,
+        /// Endpoint for the `http` provider.
+        #[arg(long)]
+        url: Option<String>,
+    },
 }
 
 /// Arguments for `marrow claim`.
@@ -444,6 +453,14 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
                     writeln!(out, "  {kind}: {n}").ok();
                 }
             }
+            match store.embedding_provider() {
+                "fastembed" | "http" => writeln!(out, "search: semantic").ok(),
+                _ => writeln!(
+                    out,
+                    "search: keyword — enable smarter semantic recall with `marrow embed fastembed` (see README)."
+                )
+                .ok(),
+            };
             Ok(())
         }
         Cmd::History { limit } => {
@@ -688,6 +705,37 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
             write!(out, "{}", watch_report(&store, &session)?).ok();
             Ok(())
         }
+        Cmd::Embed { provider, url } => {
+            let cfg_path = cli.root.join(".marrow/.marrow.toml");
+            if !cli.root.join(".marrow").exists() {
+                return Err("no .marrow store here — run `marrow init` first".into());
+            }
+            let mut cfg = std::fs::read_to_string(&cfg_path)
+                .ok()
+                .and_then(|t| marrow_store::Config::from_toml(&t).ok())
+                .unwrap_or_default();
+            cfg.embedding.provider = provider.clone();
+            if let Some(u) = url {
+                cfg.embedding.url = u;
+            }
+            std::fs::write(&cfg_path, cfg.to_toml()).map_err(|e| e.to_string())?;
+            writeln!(out, "search backend set to '{provider}'.").ok();
+            let semantic = provider == "fastembed" || provider == "http";
+            if semantic && !marrow_store::semantic_supported() {
+                writeln!(
+                    out,
+                    "note: this marrow build has no semantic support, so search stays keyword-only. Reinstall with the feature:\n  cargo install --git https://github.com/aryawidjaja/marrow marrow-cli marrow-mcp --features embed-fastembed"
+                )
+                .ok();
+            } else if semantic {
+                writeln!(
+                    out,
+                    "semantic search active (first query downloads the model)."
+                )
+                .ok();
+            }
+            Ok(())
+        }
     }
 }
 
@@ -707,6 +755,8 @@ fn welcome(out: &mut impl Write) -> Result<(), String> {
          marrow --help           all commands\n\n\
          After `marrow setup`, restart Claude Code — then sessions warm-start, avoid collisions, and\n\
          you can capture anytime with /marrow-save (or just \"save this to marrow\").\n\n\
+         Search is keyword by default; for smarter meaning-based recall, enable semantic search\n\
+         (opt-in, needs an embedding model): see `marrow embed` and the README.\n\n\
          Docs: https://github.com/aryawidjaja/marrow",
         env!("CARGO_PKG_VERSION"),
     )
