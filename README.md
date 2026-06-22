@@ -18,23 +18,9 @@ agent sessions read and write one brain instead of working blind).
 ![runs](https://img.shields.io/badge/method-5--run%20A%2FB-blue)
 
 The same "understand this codebase" question, run through Claude Code against this repo — once with
-Marrow, once without. The warm session recalls distilled memory instead of reading files (5-run average):
+Marrow, once without. The warm session recalls distilled memory instead of reading files:
 
-```mermaid
-xychart-beta
-    title "Tokens to understand this repo — lower is better"
-    x-axis ["Cold · reads files", "Warm · Marrow"]
-    y-axis "Tokens" 0 --> 140000
-    bar [134000, 37800]
-```
-
-```mermaid
-xychart-beta
-    title "Wall-clock time — lower is better"
-    x-axis ["Cold · reads files", "Warm · Marrow"]
-    y-axis "Seconds" 0 --> 30
-    bar [25.9, 11.1]
-```
+![Marrow vs no Marrow: 72% fewer tokens, 57% faster (5-run average)](assets/benchmark.png)
 
 | Metric | Cold (reads files) | Warm (Marrow) | Saved |
 |---|---|---|---|
