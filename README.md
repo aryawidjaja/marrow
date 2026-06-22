@@ -41,6 +41,23 @@ cargo install --git https://github.com/aryawidjaja/marrow marrow-cli marrow-mcp
 ```
 Each puts `marrow` and `marrow-mcp` on your PATH (add `marrow-web` for the dashboard).
 
+### Search: keyword by default, semantic is opt-in
+
+Out of the box search is keyword (FTS5) — small, instant, fully offline. For **semantic** recall
+(finds a "JWT" note when you search "login security"), install a build with an embedding model and
+turn it on:
+```bash
+# local + offline (multilingual incl. Arabic; downloads a small model on first query):
+cargo install --git https://github.com/aryawidjaja/marrow marrow-cli marrow-mcp --features embed-fastembed
+marrow embed fastembed
+
+# …or point at any OpenAI-compatible endpoint instead of a local model:
+cargo install --git https://github.com/aryawidjaja/marrow marrow-cli marrow-mcp --features embed-http
+marrow embed http --url https://your-endpoint/v1/embeddings
+```
+The brew/curl binaries are keyword-only — use a feature build above for semantic. `marrow status`
+shows the active mode; `marrow embed none` reverts to keyword.
+
 ## Use it with your agent (Claude Code)
 
 One command wires everything up — registers the MCP server for all your projects, installs the
@@ -123,17 +140,8 @@ these files.)
 
 - **Markdown is the source of truth.** The SQLite index under `.marrow/.index` is a disposable
   cache — `marrow doctor` rebuilds it from the files. Writes are atomic (temp file + rename).
-- **Search** is keyword (FTS5) by default — small, instant, fully offline. **Semantic search is an
-  opt-in:** meaning-based recall via vector embeddings, fused with keyword results (reciprocal rank
-  fusion, tuned by `--weight`). It needs an embedding model, so it ships disabled. To turn it on:
-  ```bash
-  # local + offline (downloads a small model on first use):
-  cargo install --git https://github.com/aryawidjaja/marrow marrow-cli marrow-mcp --features embed-fastembed
-  marrow embed fastembed
-  # or point at any OpenAI-compatible endpoint instead:
-  #   cargo install ... --features embed-http && marrow embed http --url <endpoint>
-  ```
-  `fastembed` is local ONNX and multilingual (incl. Arabic); `http` calls an endpoint you control.
+- **Search** is keyword (FTS5) by default; semantic (vector embeddings, fused with keyword via
+  reciprocal rank fusion, tuned by `--weight`) is an opt-in — see [Install](#search-keyword-by-default-semantic-is-opt-in).
 - **Staleness** records a structural fingerprint of the cited symbol plus a normalized copy for
   relocation; a note is stale only when the code is genuinely gone or changed. Rust today, via
   tree-sitter; other languages by adding grammars.
