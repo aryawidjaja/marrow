@@ -3,12 +3,24 @@
 //! Runs fully offline after the model is fetched once. The default model is multilingual
 //! (Multilingual-E5-small), so non-English memories — including Arabic — embed sensibly.
 
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use fastembed::{EmbeddingModel, TextEmbedding, TextInitOptions};
 
 use crate::config::EmbeddingConfig;
 use crate::embed::{EmbedError, Embedder};
+
+/// Shared model cache, so the embedding model downloads once for all repos instead of into each
+/// project's `./.fastembed_cache`.
+fn model_cache_dir() -> PathBuf {
+    std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
+        .unwrap_or_else(|| PathBuf::from(".cache"))
+        .join("marrow")
+        .join("models")
+}
 
 pub struct FastEmbedder {
     model: Mutex<TextEmbedding>,
@@ -25,7 +37,8 @@ impl FastEmbedder {
             // Default is multilingual so Arabic and other non-English text embed well.
             _ => EmbeddingModel::MultilingualE5Small,
         };
-        let embedding = TextEmbedding::try_new(TextInitOptions::new(model)).ok()?;
+        let opts = TextInitOptions::new(model).with_cache_dir(model_cache_dir());
+        let embedding = TextEmbedding::try_new(opts).ok()?;
         Some(FastEmbedder {
             model: Mutex::new(embedding),
             dim: cfg.dim,
