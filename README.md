@@ -18,9 +18,10 @@ agent sessions read and write one brain instead of working blind).
 ![runs](https://img.shields.io/badge/method-5--run%20A%2FB-blue)
 
 The same "understand this codebase" question, run through Claude Code against this repo — once with
-Marrow, once without. The warm session recalls distilled memory instead of reading files:
+Marrow, once without. The warm session recalls distilled memory instead of reading files. Plus the
+engine benchmarks that reproduce offline:
 
-![Marrow vs no Marrow: 72% fewer tokens, 57% faster (5-run average)](assets/benchmark.png)
+<img src="assets/benchmark.png" width="720" alt="Marrow benchmarks: 72% fewer tokens, 57% faster, 25% cheaper; 98% stale-knowledge recall, 100% consolidation precision, 82% smaller retrieval payload">
 
 | Metric | Cold (reads files) | Warm (Marrow) | Saved |
 |---|---|---|---|
