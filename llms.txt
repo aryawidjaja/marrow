@@ -65,6 +65,7 @@ Copy `integrations/claude-code/hooks/*.sh` to `.claude/hooks/`, `chmod +x` them,
 
 ## Notes
 
+- Search is keyword (FTS5) by default. Semantic (meaning-based) search is opt-in and needs an embedding model: install with `--features embed-fastembed` (local) or `--features embed-http`, then `marrow embed fastembed` (or `marrow embed http --url <endpoint>`). `marrow status` shows the active mode.
 - Everything runs locally; nothing leaves the machine. Markdown under `.marrow/memory/` is the source of truth; the SQLite index is rebuildable with `marrow doctor`.
 - Watch it in a browser: `marrow-serve --root . --port 8088`.
 - Full integration guide: `integrations/README.md`. Project overview: `README.md`.

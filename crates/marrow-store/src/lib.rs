@@ -30,6 +30,12 @@ pub use consolidate::{
     HeuristicDistiller, Verdict,
 };
 pub use coordinate::{knowledge_docs, Briefing, Claim, ClaimScope};
+
+/// Whether this binary was built with a real semantic-embedding backend (local `fastembed` or
+/// `http`). When false, only keyword search is available regardless of config.
+pub fn semantic_supported() -> bool {
+    cfg!(feature = "embed-fastembed") || cfg!(feature = "embed-http")
+}
 pub use embed::{EmbedError, Embedder, HashEmbedder};
 pub use provenance::{MemoryRef, ProvenanceTrail};
 pub use query::Query;

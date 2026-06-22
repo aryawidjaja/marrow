@@ -57,5 +57,10 @@ Next steps:
   # then restart Claude Code
 
 Onboarding an existing repo? Run `marrow ingest` (or ask your agent to "seed marrow from this
-repo's docs"). Capture a session anytime with /marrow-save. Docs: https://github.com/aryawidjaja/marrow
+repo's docs"). Capture a session anytime with /marrow-save.
+
+Search is keyword by default. For smarter meaning-based recall, enable semantic search (opt-in,
+needs an embedding model) — see `marrow embed` and the README.
+
+Docs: https://github.com/aryawidjaja/marrow
 NEXT

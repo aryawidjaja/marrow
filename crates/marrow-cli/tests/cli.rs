@@ -336,6 +336,24 @@ fn setup_scaffolds_hooks_settings_and_guidance() {
 }
 
 #[test]
+fn embed_sets_backend_and_status_reflects_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(root, &["init"]);
+
+    // Default build has no semantic support, so status reports keyword search.
+    assert!(ok(root, &["status"]).contains("search: keyword"));
+
+    let out = ok(root, &["embed", "fastembed"]);
+    assert!(out.contains("set to 'fastembed'"));
+    // Config persisted.
+    let cfg = std::fs::read_to_string(root.join(".marrow/.marrow.toml")).unwrap();
+    assert!(cfg.contains("provider = \"fastembed\""));
+    // Without the feature compiled in, status still shows semantic provider configured.
+    assert!(ok(root, &["status"]).contains("search: semantic"));
+}
+
+#[test]
 fn bare_invocation_shows_getting_started() {
     let dir = tempfile::tempdir().unwrap();
     let out = ok(dir.path(), &[]);

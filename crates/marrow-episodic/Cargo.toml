@@ -1,6 +1,6 @@
 [package]
 name = "marrow-episodic"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 description = "Append-only, hash-chained event ledger for Marrow: the episodic memory and tamper-evident audit trail."
 license = "AGPL-3.0-only"

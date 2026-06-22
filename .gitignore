@@ -32,3 +32,6 @@ bench/ab_efficiency.sh
 
 # macOS junk
 .DS_Store
+
+# fastembed downloads its model cache into the cwd
+.fastembed_cache/
