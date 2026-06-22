@@ -12,6 +12,10 @@ marrow="$(command -v marrow || true)"
 [ -z "$marrow" ] && exit 0
 [ -d "$root/.marrow" ] || exit 0
 
+# Hands-free maintenance: run consolidation only if enough new memories have piled up since the
+# last pass (a no-op otherwise). Keeps the brain coherent without the user lifting a finger.
+"$marrow" --root "$root" consolidate --repo "$root" --if-due >/dev/null 2>&1 || true
+
 brief="$("$marrow" --root "$root" bootstrap "resume work on this project" --by claude-code 2>/dev/null)" || exit 0
 [ -n "$brief" ] || exit 0
 

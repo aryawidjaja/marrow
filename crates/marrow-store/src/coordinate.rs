@@ -120,6 +120,9 @@ pub struct Briefing {
     /// Set when the brain is empty but the repo has knowledge docs on disk — a hint to onboard the
     /// project with `marrow ingest` so future sessions start warm.
     pub suggest_ingest: bool,
+    /// Set when enough new memories have piled up since the last cleanup — a hint to run
+    /// consolidation so the brain stays coherent.
+    pub suggest_consolidate: bool,
 }
 
 /// Project knowledge docs worth seeding memory from: root-level Markdown plus everything under
@@ -385,6 +388,7 @@ impl Store {
         // first session points the agent at `marrow ingest` instead of starting cold.
         let suggest_ingest = self.list().map(|r| r.is_empty()).unwrap_or(false)
             && !knowledge_docs(self.root()).is_empty();
+        let suggest_consolidate = self.consolidation_due().unwrap_or(false);
 
         Ok(Briefing {
             goal: goal.to_string(),
@@ -392,6 +396,7 @@ impl Store {
             relevant,
             recent_decisions,
             suggest_ingest,
+            suggest_consolidate,
         })
     }
 }

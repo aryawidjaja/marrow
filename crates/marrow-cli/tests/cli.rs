@@ -365,6 +365,52 @@ fn ingest_lists_docs_with_distill_instructions() {
 }
 
 #[test]
+fn consolidate_if_due_runs_only_past_threshold_and_bootstrap_nudges() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(root, &["init"]);
+
+    // A few writes: not due, no nudge.
+    for i in 0..3 {
+        ok(
+            root,
+            &[
+                "add",
+                "--kind",
+                "fact",
+                "--topic",
+                &format!("t{i}"),
+                &format!("body {i}"),
+            ],
+        );
+    }
+    assert!(ok(root, &["consolidate", "--if-due"]).contains("not due"));
+    assert!(!ok(root, &["bootstrap", "resume", "--project", "demo"]).contains("maintenance:"));
+
+    // Cross the threshold (20 writes since last consolidation).
+    for i in 3..20 {
+        ok(
+            root,
+            &[
+                "add",
+                "--kind",
+                "fact",
+                "--topic",
+                &format!("t{i}"),
+                &format!("body {i}"),
+            ],
+        );
+    }
+    let brief = ok(root, &["bootstrap", "resume", "--project", "demo"]);
+    assert!(brief.contains("maintenance:"));
+    assert!(brief.contains("marrow consolidate"));
+
+    // Now --if-due applies, and a second call is a no-op again (counter reset).
+    assert!(ok(root, &["consolidate", "--if-due"]).contains("applied:"));
+    assert!(ok(root, &["consolidate", "--if-due"]).contains("not due"));
+}
+
+#[test]
 fn bootstrap_nudges_ingest_when_empty_with_docs() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();

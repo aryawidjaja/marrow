@@ -49,6 +49,7 @@ empty but docs exist.
 3. **Claim your work.** Call `mem_claim` (session, intent, files). Record steps with `mem_progress`.
 4. **Remember what you learn.** When you reach a durable decision/fact/gotcha, call `mem_write` so the next session inherits it.
 5. **Release.** Call `mem_release` when done.
+6. **Keep it tidy.** If `mem_bootstrap` returns `suggest_consolidate`, call `mem_consolidate` (apply) — it merges duplicates, resolves contradictions, and retires stale notes so memory doesn't drift. (Claude Code's hook also does this automatically when due.)
 
 ## Tools (MCP) and CLI equivalents
 
