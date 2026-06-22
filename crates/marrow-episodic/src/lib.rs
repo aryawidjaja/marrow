@@ -8,6 +8,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
@@ -88,33 +89,35 @@ impl From<std::io::Error> for Error {
 }
 
 /// An append-only ledger backed by a single JSONL file.
+///
+/// Appends are serialized across threads and processes with an advisory file lock, and the chain
+/// tip (`seq` + `prev_hash`) is re-read from disk under that lock on every append — so two sessions
+/// writing at once can't interleave lines or collide on a sequence number.
 pub struct EpisodicLog {
     path: PathBuf,
-    last_seq: u64,
-    last_hash: String,
 }
 
 impl EpisodicLog {
-    /// Open (creating if needed) the ledger at `<root>/.marrow/episodic/log.jsonl`, recovering
-    /// the chain tip so appends continue the chain.
+    /// Open (creating the directory if needed) the ledger at `<root>/.marrow/episodic/log.jsonl`.
     pub fn open(root: impl AsRef<Path>) -> Result<EpisodicLog, Error> {
         let dir = root.as_ref().join(".marrow/episodic");
         fs::create_dir_all(&dir)?;
-        let path = dir.join("log.jsonl");
-        let (last_seq, last_hash) = match read_events(&path)?.last() {
-            Some(e) => (e.seq, e.content_hash.clone()),
-            None => (0, String::new()),
-        };
         Ok(EpisodicLog {
-            path,
-            last_seq,
-            last_hash,
+            path: dir.join("log.jsonl"),
         })
     }
 
-    /// Append an event, returning the stored record.
+    /// Append an event, returning the stored record. Holds an exclusive lock for the whole
+    /// read-tip-then-write so concurrent writers serialize instead of corrupting the log.
     pub fn append(&mut self, ev: NewEvent) -> Result<Event, Error> {
-        let seq = self.last_seq + 1;
+        let lock = self.lock(true)?;
+
+        // Re-read the true tip under the lock — another process may have appended since we opened.
+        let (last_seq, last_hash) = match read_events_raw(&self.path)?.last() {
+            Some(e) => (e.seq, e.content_hash.clone()),
+            None => (0, String::new()),
+        };
+        let seq = last_seq + 1;
         let ts = OffsetDateTime::now_utc()
             .format(&Rfc3339)
             .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string());
@@ -127,23 +130,45 @@ impl EpisodicLog {
             memory_id: ev.memory_id,
             summary: ev.summary,
             data: ev.data,
-            content_hash: content_hash.clone(),
-            prev_hash: self.last_hash.clone(),
+            content_hash,
+            prev_hash: last_hash,
         };
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(&self.path)?;
         let line = serde_json::to_string(&event).map_err(|e| Error::Parse(e.to_string()))?;
-        writeln!(file, "{line}")?;
-        self.last_seq = seq;
-        self.last_hash = content_hash;
+        // One write of the whole framed line, under the lock — never a torn or interleaved line.
+        file.write_all(format!("{line}\n").as_bytes())?;
+        file.flush()?;
+        FileExt::unlock(&lock).ok();
         Ok(event)
+    }
+
+    /// Open and lock the sidecar lock file (`log.lock`). Exclusive for writers, shared for readers,
+    /// so a read never observes a half-written line.
+    fn lock(&self, exclusive: bool) -> Result<File, Error> {
+        let lock_path = self.path.with_extension("lock");
+        let f = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)?;
+        if exclusive {
+            f.lock_exclusive()?;
+        } else {
+            f.lock_shared()?;
+        }
+        Ok(f)
     }
 
     /// All events in order.
     pub fn read_all(&self) -> Result<Vec<Event>, Error> {
-        read_events(&self.path)
+        let lock = self.lock(false)?;
+        let out = read_events_raw(&self.path);
+        FileExt::unlock(&lock).ok();
+        out
     }
 
     /// Events with `seq` greater than `after`.
@@ -208,7 +233,7 @@ fn content_hash(seq: u64, ts: &str, ev: &NewEvent) -> String {
     hex::encode(hasher.finalize())
 }
 
-fn read_events(path: &Path) -> Result<Vec<Event>, Error> {
+fn read_events_raw(path: &Path) -> Result<Vec<Event>, Error> {
     let file = match File::open(path) {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -302,6 +327,44 @@ mod tests {
         let recent = log.since(1).unwrap();
         assert_eq!(recent.len(), 2);
         assert_eq!(recent[0].seq, 2);
+    }
+
+    #[test]
+    fn concurrent_appends_never_interleave_or_collide() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let dir = Arc::new(tempfile::tempdir().unwrap());
+        let (writers, per) = (8, 25);
+
+        let handles: Vec<_> = (0..writers)
+            .map(|w| {
+                let dir = Arc::clone(&dir);
+                thread::spawn(move || {
+                    // Each thread is its own writer (stands in for a separate process/session).
+                    let mut log = EpisodicLog::open(dir.path()).unwrap();
+                    for i in 0..per {
+                        log.append(NewEvent::new("write", "agent", &format!("w{w} e{i}")))
+                            .unwrap();
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        let log = EpisodicLog::open(dir.path()).unwrap();
+        let events = log.read_all().unwrap(); // would error on a torn line
+        assert_eq!(events.len(), writers * per);
+
+        // Sequence numbers are unique and gap-free (no two writers grabbed the same seq).
+        let mut seqs: Vec<u64> = events.iter().map(|e| e.seq).collect();
+        seqs.sort_unstable();
+        assert_eq!(seqs, (1..=(writers * per) as u64).collect::<Vec<_>>());
+
+        // And the hash chain is intact.
+        assert_eq!(log.verify(), Ok(()));
     }
 
     #[test]
