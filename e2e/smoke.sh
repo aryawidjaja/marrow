@@ -146,6 +146,18 @@ coord_session="$(printf '%s\n%s\n' \
   | "$marrow_mcp" --root "$proj3")"
 check "MCP exposes the coordination tools" "$coord_session" '"id"'
 
+echo "==> Hive-mind: cross-session awareness (watch)"
+proj_w="$work/projectw"
+mkdir -p "$proj_w"
+w() { "$marrow" --root "$proj_w" "$@"; }
+w init > /dev/null
+w claim "refactor auth" --session other --file src/auth.rs --project demo > /dev/null
+w progress "edited the parser" --session other --file src/parser.rs > /dev/null
+watch1="$(w watch --session me)"
+check "watch surfaces another session's claim" "$watch1" "refactor auth"
+check "watch surfaces another session's edit" "$watch1" "edited the parser"
+check "watch notes active foreign claims" "$(w watch --session me)" "other session(s) hold active claims"
+
 echo "==> Onboarding: seed an existing repo + capture prompt"
 proj4="$work/project4"
 mkdir -p "$proj4/docs"

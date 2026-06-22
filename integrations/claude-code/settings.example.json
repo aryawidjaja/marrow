@@ -22,6 +22,13 @@
           { "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/marrow-progress.sh" }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/marrow-watch.sh" }
+        ]
+      }
     ]
   }
 }

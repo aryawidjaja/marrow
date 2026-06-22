@@ -411,6 +411,60 @@ fn consolidate_if_due_runs_only_past_threshold_and_bootstrap_nudges() {
 }
 
 #[test]
+fn watch_shows_other_sessions_then_advances_watermark() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(root, &["init"]);
+    ok(
+        root,
+        &[
+            "claim",
+            "refactor auth",
+            "--session",
+            "other",
+            "--file",
+            "src/auth.rs",
+            "--project",
+            "demo",
+        ],
+    );
+    ok(
+        root,
+        &[
+            "progress",
+            "edited the parser",
+            "--session",
+            "other",
+            "--file",
+            "src/parser.rs",
+        ],
+    );
+
+    let first = ok(root, &["watch", "--session", "me"]);
+    assert!(first.contains("refactor auth"));
+    assert!(first.contains("edited the parser"));
+
+    // Watermark advanced: the deltas are gone, but the still-active claim is noted.
+    let second = ok(root, &["watch", "--session", "me"]);
+    assert!(!second.contains("edited the parser"));
+    assert!(second.contains("other session(s) hold active claims"));
+
+    // My own activity never shows up as someone else's.
+    ok(
+        root,
+        &[
+            "progress",
+            "my own edit",
+            "--session",
+            "me",
+            "--file",
+            "src/me.rs",
+        ],
+    );
+    assert!(!ok(root, &["watch", "--session", "me"]).contains("my own edit"));
+}
+
+#[test]
 fn bootstrap_nudges_ingest_when_empty_with_docs() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
