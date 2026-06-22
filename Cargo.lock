@@ -1616,7 +1616,7 @@ checksum = "670fdfda89751bc4a84ac13eaa63e205cf0fd22b4c9a5fbfa085b63c1f1d3a30"
 
 [[package]]
 name = "marrow-bench"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "marrow-memdocs",
  "marrow-store",
@@ -1626,7 +1626,7 @@ dependencies = [
 
 [[package]]
 name = "marrow-cli"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "clap",
  "marrow-memdocs",
@@ -1637,7 +1637,7 @@ dependencies = [
 
 [[package]]
 name = "marrow-core"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "sha2 0.11.0",
  "tempfile",
@@ -1647,7 +1647,7 @@ dependencies = [
 
 [[package]]
 name = "marrow-episodic"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "fs2",
  "hex",
@@ -1660,7 +1660,7 @@ dependencies = [
 
 [[package]]
 name = "marrow-mcp"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "marrow-memdocs",
  "marrow-store",
@@ -1670,7 +1670,7 @@ dependencies = [
 
 [[package]]
 name = "marrow-memdocs"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "serde",
  "serde_yaml",
@@ -1678,7 +1678,7 @@ dependencies = [
 
 [[package]]
 name = "marrow-store"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "fastembed",
  "hex",
@@ -1700,7 +1700,7 @@ dependencies = [
 
 [[package]]
 name = "marrow-web"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "marrow-memdocs",
  "marrow-store",
