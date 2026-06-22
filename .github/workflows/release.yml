@@ -61,12 +61,13 @@ jobs:
       - name: Bump and push the formula
         run: |
           tag="${GITHUB_REF_NAME}"; ver="${{ steps.src.outputs.version }}"
-          f="Formula/marrow.rb"
-          sed -i -E "s#archive/refs/tags/v[0-9.]+\.tar\.gz#archive/refs/tags/${tag}.tar.gz#" "$f"
-          sed -i -E "s#sha256 \"[0-9a-f]{64}\"#sha256 \"${{ steps.src.outputs.sha }}\"#" "$f"
-          sed -i -E "s#assert_match \"marrow [0-9.]+\"#assert_match \"marrow ${ver}\"#" "$f"
+          for f in Formula/marrow.rb Formula/marrow-semantic.rb; do
+            sed -i -E "s#archive/refs/tags/v[0-9.]+\.tar\.gz#archive/refs/tags/${tag}.tar.gz#" "$f"
+            sed -i -E "s#sha256 \"[0-9a-f]{64}\"#sha256 \"${{ steps.src.outputs.sha }}\"#" "$f"
+            sed -i -E "s#assert_match \"marrow [0-9.]+\"#assert_match \"marrow ${ver}\"#" "$f"
+          done
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "$f"
+          git add Formula/marrow.rb Formula/marrow-semantic.rb
           git diff --cached --quiet || git commit -m "marrow ${ver}"
           git push
