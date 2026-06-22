@@ -12,18 +12,41 @@ agent sessions read and write one brain instead of working blind).
 
 ## Does it actually save tokens?
 
-The same "understand this codebase" question, run through Claude Code against this repo — once with
-Marrow, once without. The warm session recalls distilled memory instead of reading files:
+![tokens saved](https://img.shields.io/badge/tokens-72%25%20saved-2ea44f)
+![time saved](https://img.shields.io/badge/time-57%25%20faster-2ea44f)
+![cost saved](https://img.shields.io/badge/cost-25%25%20cheaper-2ea44f)
+![runs](https://img.shields.io/badge/method-5--run%20A%2FB-blue)
 
-| | Cold (reads files) | Warm (Marrow) | Saved |
+The same "understand this codebase" question, run through Claude Code against this repo — once with
+Marrow, once without. The warm session recalls distilled memory instead of reading files (5-run average):
+
+```mermaid
+xychart-beta
+    title "Tokens to understand this repo — lower is better"
+    x-axis ["Cold · reads files", "Warm · Marrow"]
+    y-axis "Tokens" 0 --> 140000
+    bar [134000, 37800]
+```
+
+```mermaid
+xychart-beta
+    title "Wall-clock time — lower is better"
+    x-axis ["Cold · reads files", "Warm · Marrow"]
+    y-axis "Seconds" 0 --> 30
+    bar [25.9, 11.1]
+```
+
+| Metric | Cold (reads files) | Warm (Marrow) | Saved |
 |---|---|---|---|
 | Tokens | ~134k | ~38k | **~72%** |
 | Time | ~26s | ~11s | **~57%** |
+| Cost | ~$0.21 | ~$0.16 | ~25% |
 
-5-run average; the warm cost stays roughly flat while the cold cost grows with the codebase. The
-engine benchmarks — staleness ~1% false-positive at ~98% recall, consolidation 100% clustering
-precision / 0 false merges, ~82% retrieval-budget token cut — reproduce offline with
-`cargo run -p marrow-bench`. Method and caveats: [bench/REPORT.md](bench/REPORT.md).
+The tell is the variance: **warm stays flat at ~38k tokens every run, while cold swings from 98k to
+170k.** A warm session recalls a fixed, distilled briefing; a cold one re-reads the codebase — so the
+gap *widens* on larger projects. Engine benchmarks (staleness ~1% false-positive at ~98% recall,
+consolidation 100% clustering precision / 0 false merges, ~82% retrieval-budget token cut) reproduce
+offline with `cargo run -p marrow-bench`. Method and caveats: [bench/REPORT.md](bench/REPORT.md).
 
 ## Install
 
