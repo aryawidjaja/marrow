@@ -660,3 +660,39 @@ fn search_matches_word_stems() {
         "stemming should match 'session' against 'sessions'"
     );
 }
+
+#[test]
+fn search_survives_missing_tokens_and_punctuation() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::init(dir.path()).unwrap();
+    let mut m = mem(
+        MemoryKind::Fact,
+        "ui",
+        "The legend renders a colored symbol.",
+    );
+    store.write(&mut m).unwrap();
+    let q = Query::for_project("demo");
+
+    // A token present in no memory ("autocount") must not AND-collapse the whole query to zero.
+    assert_eq!(
+        store.search("legend autocount symbol", &q).unwrap().len(),
+        1
+    );
+    // Punctuation that FTS5 reads as operators must not error.
+    assert!(store.search("symbol.", &q).is_ok());
+    assert!(store.search("E201:", &q).is_ok());
+    assert!(store.search("…", &q).unwrap().is_empty());
+}
+
+#[test]
+fn open_discovers_store_in_an_ancestor_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = Store::init(dir.path()).unwrap();
+    let mut m = mem(MemoryKind::Fact, "x", "shared brain entry");
+    root.write(&mut m).unwrap();
+
+    let sub = dir.path().join("nested/deep");
+    std::fs::create_dir_all(&sub).unwrap();
+    let sub_store = Store::open(&sub).unwrap();
+    assert_eq!(sub_store.list().unwrap().len(), 1);
+}

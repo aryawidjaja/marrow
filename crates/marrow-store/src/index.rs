@@ -250,6 +250,18 @@ pub fn query(conn: &Connection, q: &Query, now: &str) -> rusqlite::Result<Vec<In
     rows.collect()
 }
 
+/// Turn raw user text into a safe FTS5 MATCH expression: each word becomes a quoted phrase and the
+/// phrases are OR-ed. This stops punctuation from being read as FTS5 operators (`.`/`:` → syntax
+/// errors) and stops a single missing token from collapsing a multi-word query to zero results
+/// (bare FTS5 ANDs terms). Returns an empty string when the query has no searchable words.
+fn fts5_query(text: &str) -> String {
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter(|t| !t.is_empty())
+        .map(|t| format!("\"{t}\""))
+        .collect::<Vec<_>>()
+        .join(" OR ")
+}
+
 /// Full-text search via FTS5, with the same structured filters applied.
 pub fn search(
     conn: &Connection,
@@ -257,18 +269,24 @@ pub fn search(
     q: &Query,
     now: &str,
 ) -> rusqlite::Result<Vec<IndexRow>> {
+    // Sanitize the user's text into a safe FTS5 expression. An all-punctuation query has no terms
+    // to match, so it returns nothing rather than erroring.
+    let match_expr = fts5_query(text);
+    if match_expr.is_empty() {
+        return Ok(Vec::new());
+    }
     let (mut where_sql, mut binds) = filters(q, now);
     // Prepend the FTS MATCH constraint.
     if where_sql.is_empty() {
         where_sql = "WHERE m.id IN (SELECT id FROM memories_fts WHERE memories_fts MATCH ?)".into();
-        binds.insert(0, text.to_string());
+        binds.insert(0, match_expr);
     } else {
         where_sql = where_sql.replacen(
             "WHERE ",
             "WHERE m.id IN (SELECT id FROM memories_fts WHERE memories_fts MATCH ?) AND ",
             1,
         );
-        binds.insert(0, text.to_string());
+        binds.insert(0, match_expr);
     }
     let limit = q.limit.map(|n| format!("LIMIT {n}")).unwrap_or_default();
     let cols: String = COLS
@@ -282,4 +300,27 @@ pub fn search(
     let params = rusqlite::params_from_iter(binds.iter());
     let rows = stmt.query_map(params, row_from)?;
     rows.collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fts5_query;
+
+    #[test]
+    fn fts5_query_quotes_ors_and_drops_punctuation() {
+        assert_eq!(
+            fts5_query("legend autocount symbol"),
+            "\"legend\" OR \"autocount\" OR \"symbol\""
+        );
+        // Punctuation that FTS5 would treat as operators is dropped, not passed through.
+        assert_eq!(fts5_query("E201:"), "\"E201\"");
+        assert_eq!(fts5_query("trailing dot."), "\"trailing\" OR \"dot\"");
+        assert_eq!(
+            fts5_query("first_login_at"),
+            "\"first\" OR \"login\" OR \"at\""
+        );
+        // No searchable words -> empty (caller returns no rows instead of erroring).
+        assert_eq!(fts5_query("…"), "");
+        assert_eq!(fts5_query("   "), "");
+    }
 }

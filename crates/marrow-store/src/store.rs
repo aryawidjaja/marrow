@@ -81,6 +81,24 @@ pub struct Store {
     pub(crate) distiller: Box<dyn crate::consolidate::Distiller>,
 }
 
+/// Resolve the effective store root: if `start` has no `.marrow`, walk up to the nearest ancestor
+/// that does, so launching from a subdirectory still opens the project's brain instead of a new
+/// empty one. Falls back to `start` when no ancestor store exists.
+fn resolve_root(start: &Path) -> PathBuf {
+    let start = start.canonicalize().unwrap_or_else(|_| start.to_path_buf());
+    if start.join(".marrow").is_dir() {
+        return start;
+    }
+    let mut cur = start.as_path();
+    while let Some(parent) = cur.parent() {
+        if parent.join(".marrow").is_dir() {
+            return parent.to_path_buf();
+        }
+        cur = parent;
+    }
+    start
+}
+
 impl Store {
     /// Initialize a new store under `root/.marrow`, creating the layout and config.
     pub fn init(root: impl AsRef<Path>) -> Result<Store, Error> {
@@ -97,7 +115,7 @@ impl Store {
 
     /// Open an existing store (initializing the index schema if needed).
     pub fn open(root: impl AsRef<Path>) -> Result<Store, Error> {
-        let root = root.as_ref().to_path_buf();
+        let root = resolve_root(root.as_ref());
         let marrow = root.join(".marrow");
         let config = match fs::read_to_string(marrow.join(".marrow.toml")) {
             Ok(t) => Config::from_toml(&t).map_err(|e| Error::Parse(e.to_string()))?,
