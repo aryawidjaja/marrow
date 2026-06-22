@@ -45,7 +45,7 @@ empty but docs exist.
 ## How an agent should use Marrow (the loop)
 
 1. **Start warm.** Call `mem_bootstrap` with your goal. It returns active work-claims (what other sessions are doing) + the memories/decisions most relevant to the goal. Do NOT re-scan the whole codebase first.
-2. **Avoid collisions.** Before editing, call `mem_claims` with the files/feature you intend to change. If an active claim overlaps, pick different work or coordinate.
+2. **Avoid collisions.** Before editing, call `mem_claims` with the files/feature you intend to change. If an active claim overlaps, pick different work, coordinate, or help that session if it's stuck. Stay aware of others as you go with `mem_activity` (Claude Code injects this automatically each turn).
 3. **Claim your work.** Call `mem_claim` (session, intent, files). Record steps with `mem_progress`.
 4. **Remember what you learn.** When you reach a durable decision/fact/gotcha, call `mem_write` so the next session inherits it.
 5. **Release.** Call `mem_release` when done.

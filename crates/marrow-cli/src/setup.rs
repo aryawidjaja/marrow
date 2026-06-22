@@ -13,6 +13,7 @@ use std::process::Command;
 const BOOTSTRAP: &str = include_str!("../../../integrations/claude-code/hooks/marrow-bootstrap.sh");
 const GUARD: &str = include_str!("../../../integrations/claude-code/hooks/marrow-guard.sh");
 const PROGRESS: &str = include_str!("../../../integrations/claude-code/hooks/marrow-progress.sh");
+const WATCH: &str = include_str!("../../../integrations/claude-code/hooks/marrow-watch.sh");
 const SETTINGS: &str = include_str!("../../../integrations/claude-code/settings.example.json");
 const MARROW_SAVE: &str = include_str!("../../../integrations/claude-code/commands/marrow-save.md");
 
@@ -23,7 +24,10 @@ start, prevent file collisions before edits, and record activity — automatical
 to do one thing: when you reach a durable decision, fact, or gotcha, save it with the `mem_write`\n\
 tool (kind `decision`/`fact`, a short topic). Use `mem_recall` before answering questions about\n\
 past decisions, and don't re-save anything already in Marrow. If a bootstrap briefing suggests\n\
-consolidation, run `mem_consolidate` (apply) to keep the memory tidy.\n\
+consolidation, run `mem_consolidate` (apply) to keep the memory tidy.\n\n\
+Hive etiquette: you share this brain with other live sessions. Notes about what they're doing are\n\
+injected as you work — heed them: don't duplicate or edit files another session has claimed, and if\n\
+one looks stuck or stale, offer to help or hand off. Check `mem_claims` before starting a big change.\n\
 <!-- marrow:end -->\n";
 
 /// Add the marrow binary's own directory to a hook's lookup chain, so the hook finds `marrow`
@@ -181,6 +185,7 @@ fn install(
         ("marrow-bootstrap.sh", BOOTSTRAP),
         ("marrow-guard.sh", GUARD),
         ("marrow-progress.sh", PROGRESS),
+        ("marrow-watch.sh", WATCH),
     ] {
         let path = hooks_dir.join(name);
         fs::write(&path, with_bin_dir(body, bin_dir)).map_err(|e| e.to_string())?;
@@ -318,6 +323,7 @@ mod tests {
         assert!(base.join("hooks/marrow-bootstrap.sh").exists());
         assert!(base.join("hooks/marrow-guard.sh").exists());
         assert!(base.join("hooks/marrow-progress.sh").exists());
+        assert!(base.join("hooks/marrow-watch.sh").exists());
         assert!(base.join("settings.json").exists());
         assert!(base.join("commands/marrow-save.md").exists());
         assert!(fs::read_to_string(&claude_md)

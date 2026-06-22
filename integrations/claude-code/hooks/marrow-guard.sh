@@ -38,8 +38,9 @@ claims="$("$marrow" --root "$root" claims --file "$rel" 2>/dev/null || true)"
 # (intent tagged "[autoclaim]") from a DIFFERENT session count as a hard collision.
 others="$(printf '%s' "$claims" | grep -F '[autoclaim]' | grep -vF "[$session]" || true)"
 if [ -n "$others" ]; then
-  printf 'Marrow: another active session is editing %s — do not edit it in parallel. Coordinate, pick different work, or wait for its lease to expire.\n' "$rel" >&2
-  exit 2   # blocks this edit and shows the reason to the agent
+  holder="$(printf '%s' "$others" | head -1)"
+  printf 'Marrow: another session is already editing %s (%s). Do not edit it in parallel — pick different work or coordinate; if that session looks stuck or stale, consider helping or waiting for its lease to expire.\n' "$rel" "$holder" >&2
+  exit 2
 fi
 
 # No collision — auto-claim the file for this session (once) so other sessions see it.

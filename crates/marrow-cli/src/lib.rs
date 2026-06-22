@@ -152,6 +152,12 @@ pub enum Cmd {
     /// List the project's existing knowledge docs and tell the agent how to seed memory from
     /// them — a one-time onboarding step for an existing repo.
     Ingest,
+    /// Show what other sessions have done since this session last checked (powers the hive-mind
+    /// awareness hook). Prints nothing when no other session is active.
+    Watch {
+        #[arg(long, default_value = "cli")]
+        session: String,
+    },
 }
 
 /// Arguments for `marrow claim`.
@@ -677,6 +683,11 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
             write!(out, "{}", ingest_report(&docs)).ok();
             Ok(())
         }
+        Cmd::Watch { session } => {
+            let store = open(&cli.root)?;
+            write!(out, "{}", watch_report(&store, &session)?).ok();
+            Ok(())
+        }
     }
 }
 
@@ -722,6 +733,62 @@ fn ingest_report(docs: &[(String, u64)]) -> String {
         s.push_str(&format!("  {path} ({})\n", human_bytes(*size)));
     }
     s
+}
+
+fn watch_report(store: &Store, session: &str) -> Result<String, String> {
+    use std::collections::HashSet;
+    let wm_path = store.root().join(".marrow/.watch").join(session);
+    let watermark: u64 = std::fs::read_to_string(&wm_path)
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0);
+
+    let events = store.activity(500).map_err(|e| e.to_string())?;
+    let latest = events.first().map(|e| e.seq).unwrap_or(watermark);
+
+    let short = |s: &str| s.chars().take(6).collect::<String>();
+    let mut lines = Vec::new();
+    for e in events.iter().rev() {
+        if e.seq <= watermark || !(e.kind == "claim" || e.kind == "progress") {
+            continue;
+        }
+        if let Some(sid) = e.data.get("session_id").and_then(|v| v.as_str()) {
+            if sid != session {
+                lines.push(format!("  {} (session {})", e.summary, short(sid)));
+            }
+        }
+    }
+
+    let others: HashSet<String> = store
+        .active_claims()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter(|c| c.session_id != session)
+        .map(|c| c.session_id)
+        .collect();
+
+    let mut out = String::new();
+    if !lines.is_empty() || !others.is_empty() {
+        out.push_str("Marrow — what other sessions are doing:\n");
+        out.push_str(&lines.join("\n"));
+        if !lines.is_empty() {
+            out.push('\n');
+        }
+        if !others.is_empty() {
+            out.push_str(&format!(
+                "  ({} other session(s) hold active claims — don't edit their files in parallel; offer to help if they look stuck.)\n",
+                others.len()
+            ));
+        }
+    }
+
+    if latest > watermark {
+        if let Some(dir) = wm_path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(&wm_path, latest.to_string());
+    }
+    Ok(out)
 }
 
 fn human_bytes(n: u64) -> String {
