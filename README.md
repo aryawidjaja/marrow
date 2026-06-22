@@ -47,7 +47,11 @@ Out of the box search is keyword (FTS5) — small, instant, fully offline. For *
 (finds a "JWT" note when you search "login security"), install a build with an embedding model and
 turn it on:
 ```bash
-# local + offline (multilingual incl. Arabic; downloads a small model on first query):
+# Homebrew, semantic build (multilingual incl. Arabic; downloads a small model on first query):
+brew install aryawidjaja/marrow/marrow-semantic
+marrow embed fastembed
+
+# …or via cargo:
 cargo install --git https://github.com/aryawidjaja/marrow marrow-cli marrow-mcp --features embed-fastembed
 marrow embed fastembed
 
