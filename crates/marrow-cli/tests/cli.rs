@@ -429,6 +429,60 @@ fn consolidate_if_due_runs_only_past_threshold_and_bootstrap_nudges() {
 }
 
 #[test]
+fn release_by_session_frees_all_that_sessions_claims() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(root, &["init"]);
+    ok(
+        root,
+        &[
+            "claim",
+            "edit a",
+            "--session",
+            "s1",
+            "--file",
+            "a.rs",
+            "--project",
+            "demo",
+        ],
+    );
+    ok(
+        root,
+        &[
+            "claim",
+            "edit b",
+            "--session",
+            "s1",
+            "--file",
+            "b.rs",
+            "--project",
+            "demo",
+        ],
+    );
+    ok(
+        root,
+        &[
+            "claim",
+            "edit c",
+            "--session",
+            "other",
+            "--file",
+            "c.rs",
+            "--project",
+            "demo",
+        ],
+    );
+    assert!(ok(root, &["claims"]).contains("3 active claim(s)"));
+
+    let out = ok(root, &["release", "--session", "s1"]);
+    assert!(out.contains("released 2 claim(s) for session s1"));
+    // s1's two are gone; the other session's claim remains.
+    let after = ok(root, &["claims"]);
+    assert!(after.contains("1 active claim(s)"));
+    assert!(after.contains("edit c"));
+}
+
+#[test]
 fn watch_shows_other_sessions_then_advances_watermark() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();

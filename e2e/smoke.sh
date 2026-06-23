@@ -139,6 +139,11 @@ c progress "wrote token issuer" --session a --file src/auth.rs > /dev/null
 check "progress shows in the activity stream" "$(c activity)" "wrote token issuer"
 c release "$claim_id" > /dev/null
 check "released claims are no longer active" "$(c claims)" "0 active claim(s)"
+# Releasing by session frees everything that session holds (auto-release on idle).
+c claim "edit one" --session sx --file src/one.rs --project demo > /dev/null
+c claim "edit two" --session sx --file src/two.rs --project demo > /dev/null
+check "release --session frees all its claims" "$(c release --session sx)" "released 2 claim(s)"
+check "no claims linger after session release" "$(c claims)" "0 active claim(s)"
 check "bootstrap warm-starts a session" "$(c bootstrap 'work on auth' --project demo)" "goal: work on auth"
 coord_session="$(printf '%s\n%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
