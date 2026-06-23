@@ -1,14 +1,15 @@
 # Marrow 🦴
 
-*A cure for amnesiac AI agents — persistent, shared memory so they stop forgetting and stop colliding.*
+*Persistent, shared memory so your AI agents stop forgetting — and a hive mind so a swarm of them works as one.*
 
 AI agents forget. Every session re-reads the codebase, repeats past decisions, and loses what it
 learned when the context window compacts — and running several at once makes them collide. Marrow
 fixes this. Memories are plain markdown files you can read and git-commit; a rebuildable SQLite
 index adds query, hybrid keyword+vector search, provenance, and decay. Unlike a loose `CLAUDE.md`,
 Marrow keeps memory **fresh** (it flags a note the moment the code it describes changes),
-**coherent** (it merges duplicates and resolves contradictions on its own), and **shared** (many
-agent sessions read and write one brain instead of working blind).
+**coherent** (it merges duplicates and resolves contradictions on its own), and **shared** — a
+**hive mind** where many agent sessions read and write one brain, sense what the others are doing,
+and work as one swarm instead of colliding.
 
 ## Does it actually save tokens?
 
@@ -115,8 +116,11 @@ agent calls rather than a background reflex.
   renames. If the symbol just moved, it relocates the citation instead of crying stale.
 - **Consolidation** — clusters related memories by meaning, merges duplicates, resolves
   contradictions, and retires expired notes, preserving lineage.
-- **Shared brain** — many sessions share one store: warm-start with `bootstrap`, avoid collisions
-  with advisory `claim`s, stream `progress` to a live activity log. Vendor-neutral over MCP.
+- **Hive mind** — many agent sessions work as one swarm over one shared brain: each joins *warm*
+  (`bootstrap` — it already knows what others did), `claim`s its work so two never collide, and reads
+  a live activity trail each turn — the swarm's pheromone trail — so every agent senses what the
+  others are doing. Unlike a black-box hive, it's fully **auditable**: every signal is in the ledger.
+  Vendor-neutral over MCP.
 - **Audit & provenance** — every write, supersede, and recall lands in an append-only, hash-chained
   ledger; `marrow audit` proves it untampered, and any answer traces back to its sources.
 - **Typed & validated** — five schemas (`fact`, `decision`, `entity`, `session`, `skill`); bad
