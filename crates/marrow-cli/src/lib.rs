@@ -156,6 +156,8 @@ pub enum Cmd {
     /// List the project's existing knowledge docs and tell the agent how to seed memory from
     /// them — a one-time onboarding step for an existing repo.
     Ingest,
+    /// Update marrow to the latest version (detects brew/cargo/curl) and refresh hooks + MCP.
+    Upgrade,
     /// Show what other sessions have done since this session last checked (powers the hive-mind
     /// awareness hook). Prints nothing when no other session is active.
     Watch {
@@ -718,6 +720,7 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
             Ok(())
         }
         Cmd::Setup { global } => setup::run(&cli.root, global, out),
+        Cmd::Upgrade => setup::upgrade(out),
         Cmd::Ingest => {
             let docs = knowledge_docs(&cli.root);
             write!(out, "{}", ingest_report(&docs)).ok();
