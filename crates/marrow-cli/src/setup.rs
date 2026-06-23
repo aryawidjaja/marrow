@@ -272,6 +272,10 @@ fn install(
         writeln!(out, "  guidance    -> added the Marrow block to CLAUDE.md").ok();
     }
 
+    // 6) Stamp the version that wired this up, so the bootstrap hook can notice when the binary has
+    //    been upgraded since (and nudge a refresh).
+    let _ = fs::write(base.join(".marrow-version"), env!("CARGO_PKG_VERSION"));
+
     Ok(())
 }
 
@@ -295,11 +299,15 @@ fn register_mcp(bin_dir: &str, out: &mut impl Write) {
     } else {
         format!("{bin_dir}/marrow-mcp")
     };
-    // Remove any prior registration first, so re-running setup re-points the server at THIS binary
-    // (otherwise a stale path, e.g. an old cargo build, stays pinned).
-    let _ = Command::new("claude")
-        .args(["mcp", "remove", "marrow", "-s", "user"])
-        .output();
+    // Remove any prior registration at EVERY scope first, so re-running setup re-points the server
+    // at THIS binary. A leftover registration at a higher-precedence scope (a project .mcp.json or
+    // a local entry) would otherwise shadow the user-scope one with a stale path (e.g. an old cargo
+    // build), showing "Failed to connect".
+    for scope in ["local", "project", "user"] {
+        let _ = Command::new("claude")
+            .args(["mcp", "remove", "marrow", "-s", scope])
+            .output();
+    }
     match Command::new("claude")
         .args([
             "mcp", "add", "marrow", "-s", "user", "--", &mcp_bin, "--root", ".",
@@ -324,6 +332,82 @@ fn register_mcp(bin_dir: &str, out: &mut impl Write) {
             .ok();
         }
     }
+}
+
+const REPO_URL: &str = "https://github.com/aryawidjaja/marrow";
+
+/// Decide how marrow was installed, so `marrow upgrade` runs the right updater.
+fn detect_method(exe: &str, brew_semantic: bool, brew_keyword: bool) -> &'static str {
+    if brew_semantic {
+        "brew-semantic"
+    } else if brew_keyword {
+        "brew-keyword"
+    } else if exe.contains("/.cargo/") {
+        "cargo"
+    } else if exe.contains("/.local/") {
+        "curl"
+    } else {
+        "unknown"
+    }
+}
+
+/// `marrow upgrade`: detect the install method, run the matching updater, then refresh hooks + MCP
+/// so the user never has to remember the second step.
+pub fn upgrade(out: &mut impl Write) -> Result<(), String> {
+    let exe = std::env::current_exe()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let brew_ok = |f: &str| {
+        Command::new("brew")
+            .args(["list", "--formula", f])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    };
+    let method = detect_method(&exe, brew_ok("marrow-semantic"), brew_ok("marrow"));
+    writeln!(out, "Detected install: {method}\n").ok();
+
+    let ran = match method {
+        "brew-semantic" | "brew-keyword" => {
+            let formula = if method == "brew-semantic" {
+                "marrow-semantic"
+            } else {
+                "marrow"
+            };
+            let _ = Command::new("brew").arg("update").status();
+            Command::new("brew").args(["upgrade", formula]).status()
+        }
+        "cargo" => {
+            let mut args = vec!["install", "--git", REPO_URL, "marrow-cli", "marrow-mcp", "--force"];
+            if marrow_store::semantic_supported() {
+                args.push("--features");
+                args.push("embed-fastembed");
+            }
+            Command::new("cargo").args(&args).status()
+        }
+        "curl" => Command::new("sh")
+            .args([
+                "-c",
+                "curl -fsSL https://raw.githubusercontent.com/aryawidjaja/marrow/main/install.sh | sh",
+            ])
+            .status(),
+        _ => {
+            return Err("couldn't detect how marrow was installed. Upgrade manually (brew upgrade marrow-semantic, or cargo install --git ... --force, or re-run the curl installer), then run `marrow setup --global`.".to_string());
+        }
+    };
+    match ran {
+        Ok(s) if s.success() => {}
+        _ => return Err("the upgrade command failed (see output above)".to_string()),
+    }
+
+    writeln!(out, "\nRefreshing hooks and MCP...").ok();
+    let _ = Command::new("marrow").args(["setup", "--global"]).status();
+    writeln!(
+        out,
+        "\nUpgraded. Restart Claude Code to load the new version."
+    )
+    .ok();
+    Ok(())
 }
 
 #[cfg(test)]
@@ -355,6 +439,10 @@ mod tests {
         assert!(base.join("hooks/marrow-distill.sh").exists());
         assert!(base.join("hooks/marrow-release.sh").exists());
         assert!(base.join("settings.json").exists());
+        assert_eq!(
+            fs::read_to_string(base.join(".marrow-version")).unwrap(),
+            env!("CARGO_PKG_VERSION")
+        );
         assert!(base.join("commands/marrow-save.md").exists());
         assert!(fs::read_to_string(&claude_md)
             .unwrap()
@@ -443,6 +531,32 @@ mod tests {
         assert_eq!(updated.matches("marrow:begin").count(), 1);
         // No block present -> None (caller appends).
         assert!(replace_block("# Just a readme\n").is_none());
+    }
+
+    #[test]
+    fn detect_method_picks_the_right_updater() {
+        assert_eq!(
+            detect_method("/opt/homebrew/bin/marrow", true, false),
+            "brew-semantic"
+        );
+        assert_eq!(
+            detect_method("/opt/homebrew/bin/marrow", false, true),
+            "brew-keyword"
+        );
+        // brew takes precedence over a path hint.
+        assert_eq!(
+            detect_method("/Users/x/.cargo/bin/marrow", true, false),
+            "brew-semantic"
+        );
+        assert_eq!(
+            detect_method("/Users/x/.cargo/bin/marrow", false, false),
+            "cargo"
+        );
+        assert_eq!(
+            detect_method("/Users/x/.local/bin/marrow", false, false),
+            "curl"
+        );
+        assert_eq!(detect_method("/usr/bin/marrow", false, false), "unknown");
     }
 
     #[test]
