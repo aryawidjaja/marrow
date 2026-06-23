@@ -14,20 +14,22 @@ const BOOTSTRAP: &str = include_str!("../../../integrations/claude-code/hooks/ma
 const GUARD: &str = include_str!("../../../integrations/claude-code/hooks/marrow-guard.sh");
 const PROGRESS: &str = include_str!("../../../integrations/claude-code/hooks/marrow-progress.sh");
 const WATCH: &str = include_str!("../../../integrations/claude-code/hooks/marrow-watch.sh");
+const DISTILL: &str = include_str!("../../../integrations/claude-code/hooks/marrow-distill.sh");
 const SETTINGS: &str = include_str!("../../../integrations/claude-code/settings.example.json");
 const MARROW_SAVE: &str = include_str!("../../../integrations/claude-code/commands/marrow-save.md");
 
 const GUIDANCE: &str = "<!-- marrow:begin (managed by `marrow setup`) -->\n\
 ## Marrow shared memory\n\n\
-This project has a Marrow shared brain connected over MCP. Hooks bootstrap context at session\n\
-start, prevent file collisions before edits, and record activity — automatically. You only need\n\
-to do one thing: when you reach a durable decision, fact, or gotcha, save it with the `mem_write`\n\
-tool (kind `decision`/`fact`, a short topic). Use `mem_recall` before answering questions about\n\
-past decisions, and don't re-save anything already in Marrow. If a bootstrap briefing suggests\n\
-consolidation, run `mem_consolidate` (apply) to keep the memory tidy.\n\n\
-Hive etiquette: you share this brain with other live sessions. Notes about what they're doing are\n\
-injected as you work — heed them: don't duplicate or edit files another session has claimed, and if\n\
-one looks stuck or stale, offer to help or hand off. Check `mem_claims` before starting a big change.\n\
+This project has a Marrow shared brain over MCP. Hooks load context at session start, prevent file\n\
+collisions, and record activity automatically. Two things are on you:\n\n\
+1. Recall before you answer. For any question about how this project works or what was decided, call\n\
+`mem_recall` first. Do not rely only on the start-of-session briefing; it can be stale.\n\
+2. Save as you go. The moment you reach a durable decision, fact, or gotcha, save it with `mem_write`\n\
+(kind `decision` or `fact`, a short topic). Call `mem_recall` first so you do not duplicate. If a\n\
+briefing suggests consolidation, run `mem_consolidate`.\n\n\
+Hive etiquette: you share this brain with other live sessions. Heed the notes about what they are\n\
+doing, do not edit a file another session has claimed, and if one looks stuck, offer to help. Check\n\
+`mem_claims` before a big change.\n\
 <!-- marrow:end -->\n";
 
 /// Add the marrow binary's own directory to a hook's lookup chain, so the hook finds `marrow`
@@ -157,8 +159,11 @@ pub fn run(root: &Path, global: bool, out: &mut impl Write) -> Result<(), String
          type /marrow-save (or just say \"save this to marrow\").\n  \
          3. New repo with existing docs? The first session will offer to run `marrow ingest`\n     \
          to seed memory — or just ask the agent to \"seed marrow from this repo's docs\".\n\n\
-         Tip: search is keyword by default. For smarter, meaning-based recall, enable semantic\n  \
-         search (opt-in — needs an embedding model): see `marrow embed` and the README."
+         Capture is two layers: the agent saves decisions as it works, and when a session winds\n     \
+         down a quick pass makes sure nothing durable was missed. Turn that second pass off with\n     \
+         MARROW_AUTODISTILL=0 if you prefer.\n\n  \
+         Tip: search is keyword by default. For smarter, meaning-based recall, enable semantic\n     \
+         search (opt-in, needs an embedding model): see `marrow embed` and the README."
     )
     .ok();
     Ok(())
@@ -188,6 +193,7 @@ fn install(
         ("marrow-guard.sh", GUARD),
         ("marrow-progress.sh", PROGRESS),
         ("marrow-watch.sh", WATCH),
+        ("marrow-distill.sh", DISTILL),
     ] {
         let path = hooks_dir.join(name);
         fs::write(&path, with_bin_dir(body, bin_dir)).map_err(|e| e.to_string())?;
@@ -195,7 +201,7 @@ fn install(
     }
     writeln!(
         out,
-        "  hooks       -> {label}/hooks/ (bootstrap, guard, progress)"
+        "  hooks       -> {label}/hooks/ (bootstrap, guard, progress, watch, distill)"
     )
     .ok();
 
@@ -241,14 +247,14 @@ fn install(
     )
     .ok();
 
-    // 5) Add the guidance block to CLAUDE.md (idempotent).
-    let has_block = fs::read_to_string(claude_md)
-        .map(|c| c.contains("marrow:begin"))
-        .unwrap_or(false);
-    if has_block {
+    // 5) Add or refresh the guidance block in CLAUDE.md. Re-running setup updates the block in
+    //    place (between the markers) so the guidance stays current across versions.
+    let existing = fs::read_to_string(claude_md).unwrap_or_default();
+    if let Some(updated) = replace_block(&existing) {
+        fs::write(claude_md, updated).map_err(|e| e.to_string())?;
         writeln!(
             out,
-            "  guidance    -> CLAUDE.md already has the Marrow block"
+            "  guidance    -> refreshed the Marrow block in CLAUDE.md"
         )
         .ok();
     } else {
@@ -267,6 +273,19 @@ fn install(
     Ok(())
 }
 
+/// If `content` already has a Marrow guidance block, return it with that block replaced by the
+/// current `GUIDANCE`. Returns `None` when there's no block to replace (caller appends instead).
+fn replace_block(content: &str) -> Option<String> {
+    let start = content.find("<!-- marrow:begin")?;
+    let end_marker = "<!-- marrow:end -->";
+    let end = content[start..].find(end_marker)? + start + end_marker.len();
+    let mut out = String::with_capacity(content.len());
+    out.push_str(&content[..start]);
+    out.push_str(GUIDANCE.trim_end());
+    out.push_str(&content[end..]);
+    Some(out)
+}
+
 /// Register the MCP server at user scope so every project gets the tools.
 fn register_mcp(bin_dir: &str, out: &mut impl Write) {
     let mcp_bin = if bin_dir.is_empty() {
@@ -274,6 +293,11 @@ fn register_mcp(bin_dir: &str, out: &mut impl Write) {
     } else {
         format!("{bin_dir}/marrow-mcp")
     };
+    // Remove any prior registration first, so re-running setup re-points the server at THIS binary
+    // (otherwise a stale path, e.g. an old cargo build, stays pinned).
+    let _ = Command::new("claude")
+        .args(["mcp", "remove", "marrow", "-s", "user"])
+        .output();
     match Command::new("claude")
         .args([
             "mcp", "add", "marrow", "-s", "user", "--", &mcp_bin, "--root", ".",
@@ -326,13 +350,14 @@ mod tests {
         assert!(base.join("hooks/marrow-guard.sh").exists());
         assert!(base.join("hooks/marrow-progress.sh").exists());
         assert!(base.join("hooks/marrow-watch.sh").exists());
+        assert!(base.join("hooks/marrow-distill.sh").exists());
         assert!(base.join("settings.json").exists());
         assert!(base.join("commands/marrow-save.md").exists());
         assert!(fs::read_to_string(&claude_md)
             .unwrap()
             .contains("marrow:begin"));
 
-        // Idempotent: a second run doesn't duplicate the guidance block.
+        // Idempotent: a second run doesn't duplicate the guidance block (it refreshes in place).
         install(
             &base,
             &claude_md,
@@ -401,6 +426,20 @@ mod tests {
         assert!(settings.contains("$CLAUDE_PROJECT_DIR/.claude/hooks/marrow-bootstrap.sh"));
         // No sidecar needed when we can merge.
         assert!(!base.join("settings.marrow.json").exists());
+    }
+
+    #[test]
+    fn guidance_block_refreshes_in_place_and_preserves_surrounding_text() {
+        let before = "# My Project\n\nSome notes.\n\n<!-- marrow:begin (old) -->\nOLD GUIDANCE\n<!-- marrow:end -->\n\nMore project notes.\n";
+        let updated = replace_block(before).unwrap();
+        assert!(updated.contains("# My Project"));
+        assert!(updated.contains("More project notes."));
+        assert!(!updated.contains("OLD GUIDANCE"));
+        assert!(updated.contains("Recall before you answer"));
+        // Still exactly one block.
+        assert_eq!(updated.matches("marrow:begin").count(), 1);
+        // No block present -> None (caller appends).
+        assert!(replace_block("# Just a readme\n").is_none());
     }
 
     #[test]

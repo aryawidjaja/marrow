@@ -29,6 +29,13 @@
           { "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/marrow-watch.sh" }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/marrow-distill.sh" }
+        ]
+      }
     ]
   }
 }
