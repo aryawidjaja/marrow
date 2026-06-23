@@ -15,6 +15,7 @@ const GUARD: &str = include_str!("../../../integrations/claude-code/hooks/marrow
 const PROGRESS: &str = include_str!("../../../integrations/claude-code/hooks/marrow-progress.sh");
 const WATCH: &str = include_str!("../../../integrations/claude-code/hooks/marrow-watch.sh");
 const DISTILL: &str = include_str!("../../../integrations/claude-code/hooks/marrow-distill.sh");
+const RELEASE: &str = include_str!("../../../integrations/claude-code/hooks/marrow-release.sh");
 const SETTINGS: &str = include_str!("../../../integrations/claude-code/settings.example.json");
 const MARROW_SAVE: &str = include_str!("../../../integrations/claude-code/commands/marrow-save.md");
 
@@ -194,6 +195,7 @@ fn install(
         ("marrow-progress.sh", PROGRESS),
         ("marrow-watch.sh", WATCH),
         ("marrow-distill.sh", DISTILL),
+        ("marrow-release.sh", RELEASE),
     ] {
         let path = hooks_dir.join(name);
         fs::write(&path, with_bin_dir(body, bin_dir)).map_err(|e| e.to_string())?;
@@ -351,6 +353,7 @@ mod tests {
         assert!(base.join("hooks/marrow-progress.sh").exists());
         assert!(base.join("hooks/marrow-watch.sh").exists());
         assert!(base.join("hooks/marrow-distill.sh").exists());
+        assert!(base.join("hooks/marrow-release.sh").exists());
         assert!(base.join("settings.json").exists());
         assert!(base.join("commands/marrow-save.md").exists());
         assert!(fs::read_to_string(&claude_md)

@@ -97,9 +97,13 @@ pub enum Cmd {
     Provenance { id: String },
     /// Register an advisory work-claim so parallel sessions don't collide.
     Claim(ClaimArgs),
-    /// Release a work-claim by id (otherwise it expires at its TTL).
+    /// Release a work-claim by id, or with --session release every active claim that session holds.
     Release {
-        claim_id: String,
+        /// Claim id to release (omit when using --session).
+        claim_id: Option<String>,
+        /// Release ALL active claims held by this session id (used when a session goes idle).
+        #[arg(long)]
+        session: Option<String>,
         #[arg(long, default_value = "cli")]
         by: String,
     },
@@ -590,10 +594,29 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
             writeln!(out, "{}", c.id).ok();
             Ok(())
         }
-        Cmd::Release { claim_id, by } => {
+        Cmd::Release {
+            claim_id,
+            session,
+            by,
+        } => {
             let store = open(&cli.root)?;
-            store.release(&claim_id, &by).map_err(|e| e.to_string())?;
-            writeln!(out, "released {claim_id}").ok();
+            if let Some(sid) = session {
+                let mine: Vec<_> = store
+                    .active_claims()
+                    .map_err(|e| e.to_string())?
+                    .into_iter()
+                    .filter(|c| c.session_id == sid)
+                    .collect();
+                for c in &mine {
+                    store.release(&c.id, &by).map_err(|e| e.to_string())?;
+                }
+                writeln!(out, "released {} claim(s) for session {sid}", mine.len()).ok();
+            } else if let Some(id) = claim_id {
+                store.release(&id, &by).map_err(|e| e.to_string())?;
+                writeln!(out, "released {id}").ok();
+            } else {
+                return Err("provide a claim id or --session <id>".to_string());
+            }
             Ok(())
         }
         Cmd::Claims {
