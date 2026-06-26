@@ -2,6 +2,13 @@
 
 *Persistent, shared memory so your AI agents stop forgetting — and a hive mind so a swarm of them works as one.*
 
+[![Release](https://img.shields.io/github/v/release/aryawidjaja/marrow?color=2ea44f&label=release)](https://github.com/aryawidjaja/marrow/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/aryawidjaja/marrow/ci.yml?branch=main&label=CI)](https://github.com/aryawidjaja/marrow/actions)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+[![Built with Rust](https://img.shields.io/badge/built%20with-Rust-dea584?logo=rust&logoColor=white)](https://www.rust-lang.org)
+[![MCP](https://img.shields.io/badge/MCP-compatible-8A2BE2)](https://modelcontextprotocol.io)
+[![Stars](https://img.shields.io/github/stars/aryawidjaja/marrow?style=flat&logo=github&color=ffd33d)](https://github.com/aryawidjaja/marrow/stargazers)
+
 AI agents forget. Every session re-reads the codebase, repeats past decisions, and loses what it
 learned when the context window compacts — and running several at once makes them collide. Marrow
 fixes this. Memories are plain markdown files you can read and git-commit; a rebuildable SQLite
