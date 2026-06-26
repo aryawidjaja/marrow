@@ -3,31 +3,32 @@
 *Persistent, shared memory so your AI agents stop forgetting — and a hive mind so a swarm of them works as one.*
 
 [![Release](https://img.shields.io/github/v/release/aryawidjaja/marrow?color=2ea44f&label=release)](https://github.com/aryawidjaja/marrow/releases/latest)
-[![CI](https://img.shields.io/github/actions/workflow/status/aryawidjaja/marrow/ci.yml?branch=main&label=CI)](https://github.com/aryawidjaja/marrow/actions)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Built with Rust](https://img.shields.io/badge/built%20with-Rust-dea584?logo=rust&logoColor=white)](https://www.rust-lang.org)
-[![MCP](https://img.shields.io/badge/MCP-compatible-8A2BE2)](https://modelcontextprotocol.io)
 [![Stars](https://img.shields.io/github/stars/aryawidjaja/marrow?style=flat&logo=github&color=ffd33d)](https://github.com/aryawidjaja/marrow/stargazers)
 
-AI agents forget. Every session re-reads the codebase, repeats past decisions, and loses what it
-learned when the context window compacts — and running several at once makes them collide. Marrow
-fixes this. Memories are plain markdown files you can read and git-commit; a rebuildable SQLite
-index adds query, hybrid keyword+vector search, provenance, and decay. Unlike a loose `CLAUDE.md`,
-Marrow keeps memory **fresh** (it flags a note the moment the code it describes changes),
-**coherent** (it merges duplicates and resolves contradictions on its own), and **shared** — a
-**hive mind** where many agent sessions read and write one brain, sense what the others are doing,
-and work as one swarm instead of colliding.
+[![MCP](https://img.shields.io/badge/MCP-compatible-8A2BE2?logo=modelcontextprotocol&logoColor=white)](https://modelcontextprotocol.io)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-compatible-D97757?logo=claude&logoColor=white)](https://www.anthropic.com/claude-code)
+[![Cursor](https://img.shields.io/badge/Cursor-compatible-000000?logo=cursor&logoColor=white)](https://cursor.com)
+[![Codex](https://img.shields.io/badge/Codex-compatible-412991)](https://openai.com/codex)
 
-## Does it actually save tokens?
+## What is Marrow
 
-![tokens saved](https://img.shields.io/badge/tokens-72%25%20saved-2ea44f)
-![time saved](https://img.shields.io/badge/time-57%25%20faster-2ea44f)
-![cost saved](https://img.shields.io/badge/cost-25%25%20cheaper-2ea44f)
-![runs](https://img.shields.io/badge/method-5--run%20A%2FB-blue)
+Marrow is a memory for your AI coding agents.
 
-The same "understand this codebase" question, run through Claude Code against this repo — once with
-Marrow, once without. The warm session recalls distilled memory instead of reading files. Plus the
-engine benchmarks that reproduce offline:
+Normally every new session starts from zero. The agent re-reads your codebase, repeats decisions you
+already made, and forgets everything the moment its context window fills up. Run several agents at
+once and it gets worse — blind to each other, they collide and undo each other's work.
+
+Marrow gives them one shared memory that **persists** across sessions, **stays current** as your code
+changes, and lets **many agents work together** without stepping on each other. The memory is plain
+markdown files you can read, edit, and commit to git — not a black box. And unlike a `CLAUDE.md` you
+maintain by hand, Marrow keeps itself fresh and merges duplicates on its own.
+
+And it pays for itself in tokens. Ask the same "understand this codebase" question through Claude Code
+against this repo — once cold, once warm with Marrow — and the warm run uses about **72% fewer
+tokens** and finishes about **57% faster**, because it recalls a small distilled briefing instead of
+re-reading every file:
 
 <img src="assets/benchmark.png" width="720" alt="Marrow benchmarks: 72% fewer tokens, 57% faster, 25% cheaper; 98% stale-knowledge recall, 100% consolidation precision, 82% smaller retrieval payload">
 
@@ -40,8 +41,34 @@ engine benchmarks that reproduce offline:
 The tell is the variance: **warm stays flat at ~38k tokens every run, while cold swings from 98k to
 170k.** A warm session recalls a fixed, distilled briefing; a cold one re-reads the codebase — so the
 gap *widens* on larger projects. Engine benchmarks (staleness ~1% false-positive at ~98% recall,
-consolidation 100% clustering precision / 0 false merges, ~82% retrieval-budget token cut) reproduce
-offline with `cargo run -p marrow-bench`. Method and caveats: [bench/REPORT.md](bench/REPORT.md).
+consolidation 100% clustering precision / 0 false merges, ~82% retrieval-budget token cut).
+
+## Quickstart
+
+Wire it up, then let your agents fill the memory.
+
+**1. Install** (Homebrew, macOS / Linux — other options under [Install](#install)):
+```bash
+brew install aryawidjaja/marrow/marrow
+```
+
+**2. Set it up** from your project's root folder:
+```bash
+marrow setup
+```
+This registers Marrow with your agent, installs the automatic hooks, and adds a short guidance note.
+Want every repo wired at once? Run `marrow setup --global` instead to install the hooks user-wide.
+
+**3. Restart your agent.** Reading is now automatic: every session starts warm — it loads what's
+already in the brain instead of re-reading everything — and claims the files it touches so parallel
+sessions don't collide.
+
+**4. Let it capture.** Start a fresh session and the agent uses Marrow on its own — saving decisions,
+context, and checkpoints as it works, so the next session picks up where this one left off. Already
+deep in a session from before you ran setup? Run **`/marrow-save`** in it once to capture everything
+it knows into the brain.
+
+The memory lives under `.marrow/` in your project.
 
 ## Install
 
@@ -49,7 +76,7 @@ Homebrew (macOS / Linux):
 ```bash
 brew install aryawidjaja/marrow/marrow
 ```
-Prebuilt binaries, no Rust:
+Prebuilt binaries, no Rust needed:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/aryawidjaja/marrow/main/install.sh | sh
 ```
@@ -57,64 +84,116 @@ From source with Rust:
 ```bash
 cargo install --git https://github.com/aryawidjaja/marrow marrow-cli marrow-mcp
 ```
-Each puts `marrow` and `marrow-mcp` on your PATH (add `marrow-web` for the dashboard).
+Each puts `marrow` and `marrow-mcp` on your PATH. Add `marrow-web` for the dashboard.
 
-### Search: keyword by default, semantic is opt-in
+## Bringing in an existing project
 
-Out of the box search is keyword (FTS5) — small, instant, fully offline. For **semantic** recall
-(finds a "JWT" note when you search "login security"), install a build with an embedding model and
-turn it on:
+A fresh project's memory starts empty. To seed it from the docs you already have, the first warm
+start nudges your agent to run `marrow ingest` — it lists your README and `docs/` files and distills
+them into memory. After that, every session starts informed.
+
+Any time you want to capture the session you're in, run **`/marrow-save`** and the agent writes what
+you decided to the shared brain.
+
+## Using Cursor, Codex, or tools without the hooks
+
+The automatic hooks (warm start, collision guard, activity trail) are specific to Claude Code. With
+any other MCP agent you still get the full memory toolset — capture just becomes a tool the agent
+calls instead of a background reflex.
+
+Register the MCP server for every Claude Code project:
 ```bash
-# Homebrew, semantic build (multilingual incl. Arabic; downloads a small model on first query):
+claude mcp add marrow -s user -- marrow-mcp --root .
+```
+For a single project instead, add the same server to `.mcp.json` (Claude Code), `.cursor/mcp.json`
+(Cursor), or your Codex TOML.
+
+Either way your agent gets the `mem_*` tools — `mem_write` / `mem_recall` / `mem_search` for memory,
+and `mem_bootstrap` / `mem_claim` / `mem_activity` for the shared brain — plus the `save` prompt.
+
+## Optional: smarter (semantic) search
+
+By default, search is keyword-based (FTS5) — small, instant, fully offline, and enough for most
+people. If you want **semantic** recall — finding a note about "JWT" when you search "login
+security" — install a build with an embedding model and turn it on.
+
+Homebrew, semantic build (multilingual including Arabic; downloads a small model on first use):
+```bash
 brew install aryawidjaja/marrow/marrow-semantic
+```
+```bash
 marrow embed fastembed
+```
 
-# …or via cargo:
+Or build the same local model from source with cargo:
+```bash
 cargo install --git https://github.com/aryawidjaja/marrow marrow-cli marrow-mcp --features embed-fastembed
+```
+```bash
 marrow embed fastembed
+```
 
-# …or point at any OpenAI-compatible endpoint instead of a local model:
+Or point at any OpenAI-compatible endpoint instead of a local model:
+```bash
 cargo install --git https://github.com/aryawidjaja/marrow marrow-cli marrow-mcp --features embed-http
+```
+```bash
 marrow embed http --url https://your-endpoint/v1/embeddings
 ```
-The brew/curl binaries are keyword-only — use a feature build above for semantic. `marrow status`
-shows the active mode; `marrow embed none` reverts to keyword.
 
-## Use it with your agent (Claude Code)
+The Homebrew and curl binaries are keyword-only, so use a build above for semantic search.
+`marrow status` shows the active mode; `marrow embed none` switches back to keyword.
 
-One command wires everything up — registers the MCP server for all your projects, installs the
-auto-capture hooks, and adds a short guidance block:
+## Optional: one brain across projects or a team
+
+Point your sessions at a shared store instead of the local project — use `--root ~/marrow-shared` in
+place of `.`. Memories are scoped per project, so an agent can recall across all of them when it
+wants to. This shared/team brain is the direction the served and enterprise editions build on.
+
+## CLI
+
+Most of the time your agent drives Marrow for you. You can also use it directly from the terminal.
+
+Save a memory:
 ```bash
-cd your-project
-marrow setup
+marrow add --kind decision --topic auth "We use short-lived JWTs."
 ```
-Restart Claude Code. Now every session **starts warm** (it already knows what past sessions did and
-decided), **claims files** so parallel sessions don't collide, and **captures durable decisions** —
-automatically, no prompting. Each project keeps its own memory under `.marrow/`. Wiring every repo
-at once? `marrow setup --global` installs the hooks user-wide instead of per-project.
-
-**Adopting on an existing repo?** Its brain starts empty, so seed it from the docs you already have:
-the first warm-start nudges the agent to run `marrow ingest`, which lists your READMEs/`docs/` and has
-the agent distill them into memory. From then on, every session starts informed. And any time you
-want to capture the session you're in, run **`/marrow-save`** — the agent writes what you decided to
-the shared brain.
-
-The agent gets the `mem_*` tools: `mem_write` / `mem_recall` / `mem_search` for memory, and
-`mem_bootstrap` / `mem_claim` / `mem_activity` for the shared brain.
-
-Just want the tools (no hooks), or using Cursor / Codex? Register the MCP server only:
+Search it back — `--weight` runs from 0 (keyword) to 1 (semantic):
 ```bash
-claude mcp add marrow -s user -- marrow-mcp --root .          # Claude Code, every project
-# or per-project: add the same server to .mcp.json / .cursor/mcp.json / Codex TOML
+marrow search "token expiry" --weight 1
 ```
-Other MCP agents get the full `mem_*` toolset and the `save` prompt, but the automatic hooks
-(warm-start, collision-guard, activity) are Claude Code-specific — there, capture is a tool the
-agent calls rather than a background reflex.
+List notes whose underlying code has drifted:
+```bash
+marrow list-stale --repo .
+```
+Merge duplicates and retire expired notes:
+```bash
+marrow consolidate --repo . --apply
+```
+Verify the audit ledger is untampered:
+```bash
+marrow audit
+```
+Open the local dashboard:
+```bash
+marrow-serve --root . --port 8088
+```
 
-> **One brain across projects, or a team?** Point sessions at a shared store
-> (`--root ~/marrow-shared` instead of `.`) — memories are scoped per project, so an agent can
-> recall across them when it wants to. That shared/team brain is the direction the served and
-> enterprise editions build on.
+That `marrow add` doesn't write to an opaque database — it saves a plain markdown file under
+`.marrow/memory/` that you (and git) can read and edit by hand. The YAML frontmatter is the
+metadata; the text below it is the memory:
+
+```markdown
+---
+type: decision
+topic: auth
+confidence: 1.0
+---
+We use short-lived JWTs for sessions.
+```
+
+(That's `.marrow/memory/decision/<id>.md` — the SQLite index is just a rebuildable cache over
+these files.)
 
 ## What it does
 
@@ -134,39 +213,12 @@ agent calls rather than a background reflex.
   writes are rejected with reasons; lifecycle via supersede, confidence, and decay.
 - **Runs anywhere** — a single offline binary; nothing leaves your machine.
 
-## CLI
-
-```bash
-marrow add --kind decision --topic auth "We use short-lived JWTs."
-marrow search "token expiry" --weight 1   # 0 = keyword, 1 = semantic
-marrow list-stale --repo .                # notes whose code drifted
-marrow consolidate --repo . --apply       # merge duplicates, retire expired
-marrow audit                              # verify the ledger
-marrow-serve --root . --port 8088         # local dashboard
-```
-
-That `marrow add` doesn't write to an opaque database — it saves a plain markdown file under
-`.marrow/memory/` that you (and git) can read and edit by hand. The YAML frontmatter is the
-metadata; the text below it is the memory:
-
-```markdown
----
-type: decision
-topic: auth
-confidence: 1.0
----
-We use short-lived JWTs for sessions.
-```
-
-(That's `.marrow/memory/decision/<id>.md` — the SQLite index is just a rebuildable cache over
-these files.)
-
 ## How it works
 
 - **Markdown is the source of truth.** The SQLite index under `.marrow/.index` is a disposable
   cache — `marrow doctor` rebuilds it from the files. Writes are atomic (temp file + rename).
 - **Search** is keyword (FTS5) by default; semantic (vector embeddings, fused with keyword via
-  reciprocal rank fusion, tuned by `--weight`) is an opt-in — see [Install](#search-keyword-by-default-semantic-is-opt-in).
+  reciprocal rank fusion, tuned by `--weight`) is an opt-in — see [Optional: smarter (semantic) search](#optional-smarter-semantic-search).
 - **Staleness** records a structural fingerprint of the cited symbol plus a normalized copy for
   relocation; a note is stale only when the code is genuinely gone or changed. Rust today, via
   tree-sitter; other languages by adding grammars.
