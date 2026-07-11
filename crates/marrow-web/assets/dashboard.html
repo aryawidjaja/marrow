@@ -174,7 +174,7 @@ function tick() {
     if (n.pin) { n.vx = n.vy = 0; continue; }
     n.x += n.vx*heat; n.y += n.vy*heat; n.vx *= 0.86; n.vy *= 0.86;
   }
-  heat = Math.max(0.15, heat*0.994);
+  heat *= 0.985; if (heat < 0.03) heat = 0;
 }
 
 function draw() {
@@ -207,7 +207,7 @@ function draw() {
 function radius(n) { return n.kind === "core" ? 14 : n.kind === "project" ? 9 : 4 + Math.min(7, n.degree*0.8); }
 function neighbors(n) { const s = new Set(); if (!n) return s; for (const l of links) { if (l.s===n) s.add(l.t); if (l.t===n) s.add(l.s); } return s; }
 function match(n) { return (n.label||"").toLowerCase().includes(filter) || (n.snippet||"").toLowerCase().includes(filter); }
-function loop() { tick(); draw(); requestAnimationFrame(loop); }
+function loop() { if (heat > 0) tick(); draw(); requestAnimationFrame(loop); }
 
 function fit() {
   if (!nodes.length) return;

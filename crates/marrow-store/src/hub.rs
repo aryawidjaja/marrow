@@ -61,6 +61,16 @@ impl Hub {
             .join("hub")
     }
 
+    /// Whether a hive with at least one live project exists — checked without creating anything on
+    /// disk, so merely listing MCP tools never materializes a hub for users who don't use one.
+    pub fn active() -> bool {
+        std::fs::read_to_string(Self::home().join("registry.json"))
+            .ok()
+            .and_then(|s| serde_json::from_str::<Registry>(&s).ok())
+            .map(|r| r.projects.iter().any(|p| p.root.join(".marrow").is_dir()))
+            .unwrap_or(false)
+    }
+
     /// Open (creating if needed) the hub at its home directory.
     pub fn open() -> Result<Hub, Error> {
         let home = Self::home();
@@ -151,7 +161,9 @@ impl Hub {
     }
 
     /// Cross-project recall: union goal-relevant memories from every registered brain, tagged by
-    /// project. `per_project` bounds how many each brain contributes before the global cap.
+    /// project. Uses `search` (not `recall`) so a read-only hive query never writes a retrieval
+    /// event into another project's ledger. Results are interleaved round-robin so no single
+    /// project can starve the rest, then capped at `limit`.
     pub fn recall(&self, text: &str, per_project: usize, limit: usize) -> Vec<HubHit> {
         let query = Query {
             status: Some(marrow_memdocs::Status::Active),
@@ -160,20 +172,38 @@ impl Hub {
             hybrid_weight: Some(1.0),
             ..Query::default()
         };
+        let mut lanes: Vec<_> = self
+            .stores()
+            .into_iter()
+            .map(|(project, store)| {
+                let found = store.search(text, &query).unwrap_or_default();
+                found
+                    .into_iter()
+                    .map(move |memory| HubHit {
+                        project: project.clone(),
+                        memory,
+                    })
+                    .collect::<Vec<_>>()
+                    .into_iter()
+            })
+            .collect();
+
         let mut hits = Vec::new();
-        for (project, store) in self.stores() {
-            let found = store
-                .recall(text, &query, "hub")
-                .or_else(|_| store.search(text, &query))
-                .unwrap_or_default();
-            for memory in found {
-                hits.push(HubHit {
-                    project: project.clone(),
-                    memory,
-                });
+        loop {
+            let mut drained_any = false;
+            for lane in &mut lanes {
+                if let Some(hit) = lane.next() {
+                    hits.push(hit);
+                    drained_any = true;
+                    if hits.len() >= limit {
+                        return hits;
+                    }
+                }
+            }
+            if !drained_any {
+                break;
             }
         }
-        hits.truncate(limit);
         hits
     }
 
@@ -269,6 +299,41 @@ mod tests {
         let act = hub.activity(20);
         assert!(act.iter().any(|e| e.project == "alpha"));
         assert!(act.iter().any(|e| e.project == "beta"));
+        std::env::remove_var("MARROW_HUB");
+    }
+
+    #[test]
+    fn recall_is_read_only_and_fair_across_projects() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let (mut hub, dir) = isolated_hub();
+        let (pa, pb) = (dir.path().join("a"), dir.path().join("b"));
+        let a = Store::init(&pa).unwrap();
+        let b = Store::init(&pb).unwrap();
+        // Project A has many matches; B has one. Round-robin must still surface B.
+        for i in 0..6 {
+            a.write(&mut fact(
+                &format!("t{i}"),
+                &format!("auth token detail {i}"),
+            ))
+            .unwrap();
+        }
+        b.write(&mut fact("auth", "auth is handled by the gateway"))
+            .unwrap();
+        hub.register(&pa, Some("alpha")).unwrap();
+        hub.register(&pb, Some("beta")).unwrap();
+
+        let before = b.history().unwrap().len();
+        let hits = hub.recall("auth", 5, 4);
+        assert!(
+            hits.iter().any(|h| h.project == "beta"),
+            "round-robin should not let alpha starve beta"
+        );
+        // A read-only hive query must not append a retrieval event to a project's ledger.
+        assert_eq!(
+            b.history().unwrap().len(),
+            before,
+            "recall wrote to a project ledger"
+        );
         std::env::remove_var("MARROW_HUB");
     }
 

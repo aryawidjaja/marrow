@@ -108,12 +108,16 @@ pub fn project_graph(store: &Store, root: &Path) -> Graph {
     for members in by_tag.values() {
         star(&mut links, members, "tag");
     }
+    let live: std::collections::HashSet<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
     for [a, b] in read_overlay(&overlay_path(root)) {
-        links.push(Link {
-            source: a,
-            target: b,
-            rel: "user".into(),
-        });
+        // Skip a saved link whose memory was since deleted, so degree matches the edges drawn.
+        if live.contains(a.as_str()) && live.contains(b.as_str()) {
+            links.push(Link {
+                source: a,
+                target: b,
+                rel: "user".into(),
+            });
+        }
     }
 
     for l in &links {
@@ -153,12 +157,14 @@ pub fn hive_graph(hub: &Hub) -> Graph {
         );
     }
 
-    for p in &projects {
+    for (i, p) in projects.iter().enumerate() {
         let is_core = p.name == "core";
+        // Key hub/memory nodes by registry index, not display name — two projects can share a
+        // basename ("app"), and colliding ids would merge their neurons in the client.
         let hub_id = if is_core {
             "core".to_string()
         } else {
-            format!("proj:{}", p.name)
+            format!("proj:{i}")
         };
         if !is_core {
             nodes.push(Node {
@@ -182,7 +188,7 @@ pub fn hive_graph(hub: &Hub) -> Graph {
             if r.status != "active" {
                 continue;
             }
-            let node_id = format!("{}:{}", p.name, r.id);
+            let node_id = format!("{hub_id}#{}", r.id);
             for t in tags_of(&r.tags) {
                 tag_owners.entry(t).or_default().push(node_id.clone());
             }

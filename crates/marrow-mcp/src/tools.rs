@@ -20,10 +20,8 @@ pub fn definitions() -> Value {
         return Value::Array(all);
     }
     // The cross-project tools cost nothing until a hive exists, so advertise them only when the
-    // machine actually has registered projects to reach.
-    let hub_active = marrow_store::Hub::open()
-        .map(|h| !h.projects().is_empty())
-        .unwrap_or(false);
+    // machine actually has registered projects. `active` checks without creating anything on disk.
+    let hub_active = marrow_store::Hub::active();
     Value::Array(
         all.into_iter()
             .filter(|t| {

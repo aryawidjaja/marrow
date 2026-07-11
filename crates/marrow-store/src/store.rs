@@ -123,6 +123,9 @@ impl Store {
         };
         fs::create_dir_all(marrow.join(".index"))?;
         let conn = Connection::open(marrow.join(".index/sqlite.db"))?;
+        // Wait, don't error, when another writer (e.g. a second device on the served backbone)
+        // holds the lock.
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         index::init_schema(&conn)?;
         let key = if config.sign {
             std::env::var("MARROW_HMAC_KEY")

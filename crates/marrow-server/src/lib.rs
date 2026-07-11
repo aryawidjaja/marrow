@@ -49,11 +49,18 @@ fn safe_project(name: &str) -> Option<String> {
     ok.then(|| name.to_string())
 }
 
+/// Serializes first-touch initialization of a project so two concurrent requests can't race to
+/// create the same store. Contended only on a project's very first request; a no-op afterward.
+static INIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn store_root(cfg: &Config, project: &str) -> Result<PathBuf, String> {
     let project = safe_project(project).ok_or("invalid project name")?;
     let root = cfg.data_dir.join(project);
     if !root.join(".marrow").is_dir() {
-        marrow_store::Store::init(&root).map_err(|e| e.to_string())?;
+        let _guard = INIT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        if !root.join(".marrow").is_dir() {
+            marrow_store::Store::init(&root).map_err(|e| e.to_string())?;
+        }
     }
     Ok(root)
 }
@@ -63,10 +70,21 @@ fn authorized(cfg: &Config, auth: Option<&str>) -> bool {
         None => true,
         Some(t) => auth
             .and_then(|h| h.strip_prefix("Bearer "))
-            .map(|got| got == t)
+            .map(|got| ct_eq(got.as_bytes(), t.as_bytes()))
             .unwrap_or(false),
     }
 }
+
+/// Constant-time equality so token checks don't leak the secret through response timing.
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// A single memory is tiny; cap the request body so a giant or slow POST can't exhaust memory.
+const MAX_BODY: u64 = 1 << 20;
 
 /// Handle one request. `auth` is the Authorization header value, `body` the raw request body.
 pub fn handle(cfg: &Config, method: &str, path: &str, auth: Option<&str>, body: &str) -> Reply {
@@ -110,38 +128,59 @@ fn passthrough(text: &str) -> Value {
     serde_json::from_str(text).unwrap_or_else(|_| Value::String(text.to_string()))
 }
 
-/// Run the backbone until the process is killed.
+/// Run the backbone until the process is killed. A small thread pool serves requests concurrently
+/// so many devices don't queue behind one another; SQLite serializes writes under the hood.
 pub fn serve(cfg: Config, addr: &str) -> Result<(), String> {
-    let server = tiny_http::Server::http(addr).map_err(|e| e.to_string())?;
+    use std::sync::Arc;
+    let server = Arc::new(tiny_http::Server::http(addr).map_err(|e| e.to_string())?);
+    let cfg = Arc::new(cfg);
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .clamp(2, 8);
     let auth_note = if cfg.token.is_some() {
         "token required"
     } else {
         "OPEN (no token)"
     };
     println!(
-        "Marrow backbone on http://{addr}  (data: {}, {auth_note})",
+        "Marrow backbone on http://{addr}  (data: {}, {auth_note}, {workers} workers)",
         cfg.data_dir.display()
     );
-    for mut request in server.incoming_requests() {
-        let method = request.method().as_str().to_string();
-        let url = request.url().to_string();
-        let path = url.split('?').next().unwrap_or("/").to_string();
-        let auth = request
-            .headers()
-            .iter()
-            .find(|h| h.field.equiv("Authorization"))
-            .map(|h| h.value.as_str().to_string());
-        let mut body = String::new();
-        let _ = std::io::Read::read_to_string(request.as_reader(), &mut body);
-        let r = handle(&cfg, &method, &path, auth.as_deref(), &body);
-        let header =
-            tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap();
-        let resp = tiny_http::Response::from_string(r.body)
-            .with_status_code(r.status)
-            .with_header(header);
-        let _ = request.respond(resp);
+    let mut handles = Vec::new();
+    for _ in 0..workers {
+        let server = Arc::clone(&server);
+        let cfg = Arc::clone(&cfg);
+        handles.push(std::thread::spawn(move || {
+            while let Ok(request) = server.recv() {
+                serve_one(&cfg, request);
+            }
+        }));
+    }
+    for h in handles {
+        let _ = h.join();
     }
     Ok(())
+}
+
+fn serve_one(cfg: &Config, mut request: tiny_http::Request) {
+    let method = request.method().as_str().to_string();
+    let path = request.url().split('?').next().unwrap_or("/").to_string();
+    let auth = request
+        .headers()
+        .iter()
+        .find(|h| h.field.equiv("Authorization"))
+        .map(|h| h.value.as_str().to_string());
+    let mut body = String::new();
+    let mut reader = std::io::Read::take(request.as_reader(), MAX_BODY);
+    let _ = std::io::Read::read_to_string(&mut reader, &mut body);
+    let r = handle(cfg, &method, &path, auth.as_deref(), &body);
+    let header =
+        tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap();
+    let resp = tiny_http::Response::from_string(r.body)
+        .with_status_code(r.status)
+        .with_header(header);
+    let _ = request.respond(resp);
 }
 
 /// Resolve config from CLI-style overrides falling back to env then defaults.
@@ -216,6 +255,14 @@ mod tests {
             handle(&c, "POST", "/v1/rpc", Some("Bearer wrong"), "{}").status,
             401
         );
+    }
+
+    #[test]
+    fn constant_time_compare_matches_semantics() {
+        assert!(ct_eq(b"s3cret", b"s3cret"));
+        assert!(!ct_eq(b"s3cret", b"s3crat"));
+        assert!(!ct_eq(b"s3cret", b"s3cre")); // length mismatch
+        assert!(ct_eq(b"", b""));
     }
 
     #[test]
