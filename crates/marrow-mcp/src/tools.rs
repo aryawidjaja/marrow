@@ -7,8 +7,38 @@ use marrow_store::{knowledge_docs, ClaimScope, Query, Store};
 use serde_json::{json, Value};
 
 /// The tool catalog advertised via `tools/list`.
+///
+/// By default only the core tools an agent reaches for mid-work are advertised — the coordination
+/// tools (claim/release/claims/progress/activity) are driven by the hooks via the CLI, not the
+/// agent, and the inspection tools (audit/validate/history/…) are rarely needed. Every session
+/// pays for each advertised schema, so the lean catalog is the default. Set `MARROW_TOOLS=full`
+/// to advertise all of them. Hidden tools remain callable — [`call`] dispatches by name regardless.
 pub fn definitions() -> Value {
-    json!([
+    let full = std::env::var("MARROW_TOOLS").is_ok_and(|v| v == "full");
+    let all = all_definitions();
+    if full {
+        return Value::Array(all);
+    }
+    Value::Array(
+        all.into_iter()
+            .filter(|t| CORE_TOOLS.contains(&t["name"].as_str().unwrap_or_default()))
+            .collect(),
+    )
+}
+
+/// Tools advertised by default: what an agent actually calls while working.
+const CORE_TOOLS: &[&str] = &[
+    "mem_bootstrap",
+    "mem_recall",
+    "mem_search",
+    "mem_write",
+    "mem_read",
+    "mem_supersede",
+    "mem_ingest",
+];
+
+pub(crate) fn all_definitions() -> Vec<Value> {
+    let Value::Array(defs) = json!([
         tool("mem_write", "Write a new memory (fact, decision, entity, session, or skill). Rejects invalid writes with the reasons.", json!({
             "type": "object",
             "properties": {
@@ -144,7 +174,10 @@ pub fn definitions() -> Value {
             "type": "object",
             "properties": {}
         })),
-    ])
+    ]) else {
+        unreachable!("tool catalog is a JSON array literal")
+    };
+    defs
 }
 
 fn tool(name: &str, description: &str, input_schema: Value) -> Value {
@@ -450,7 +483,7 @@ fn bootstrap(store: &Store, args: &Value) -> Result<String, String> {
         "goal": brief.goal,
         "active_claims": claims,
         "relevant": brief.relevant.iter().map(mem_brief).collect::<Vec<_>>(),
-        "recent_decisions": brief.recent_decisions.iter().map(mem_brief).collect::<Vec<_>>(),
+        "recent_decisions": brief.recent_decisions.iter().map(mem_brief_snippet).collect::<Vec<_>>(),
         "suggest_ingest": brief.suggest_ingest,
         "suggest_consolidate": brief.suggest_consolidate,
     })
@@ -481,6 +514,24 @@ fn mem_brief(m: &Memory) -> Value {
         "kind": kind_name(m.frontmatter.kind),
         "topic": m.frontmatter.topic,
         "body": m.body.trim(),
+    })
+}
+
+/// Like [`mem_brief`] but the body is a length-capped snippet — the warm-start briefing lists
+/// recent decisions for orientation; the agent reads the full one by id only if it matters.
+fn mem_brief_snippet(m: &Memory) -> Value {
+    let body = m.body.trim();
+    let capped: String = body.chars().take(220).collect();
+    let capped = if body.chars().count() > 220 {
+        format!("{}…", capped.trim_end())
+    } else {
+        capped
+    };
+    json!({
+        "id": m.frontmatter.id,
+        "kind": kind_name(m.frontmatter.kind),
+        "topic": m.frontmatter.topic,
+        "body": capped,
     })
 }
 
@@ -579,6 +630,11 @@ fn memory_from(args: &Value) -> Result<Memory, String> {
     })
 }
 
+/// Default caps on a retrieval so an unqualified `mem_search`/`mem_recall` can't dump the whole
+/// brain into context. Generous enough to answer most questions; the caller can raise either.
+const DEFAULT_MAX_TOKENS: usize = 1200;
+const DEFAULT_LIMIT: usize = 8;
+
 fn query_from(args: &Value) -> Query {
     Query {
         kind: opt_arg(args, "kind").and_then(|k| parse_kind(&k).ok()),
@@ -587,14 +643,18 @@ fn query_from(args: &Value) -> Query {
         project_id: opt_arg(args, "project"),
         tag: opt_arg(args, "tag"),
         min_confidence: args.get("min_confidence").and_then(Value::as_f64),
-        max_tokens: args
-            .get("max_tokens")
-            .and_then(Value::as_u64)
-            .map(|n| n as usize),
-        limit: args
-            .get("limit")
-            .and_then(Value::as_u64)
-            .map(|n| n as usize),
+        max_tokens: Some(
+            args.get("max_tokens")
+                .and_then(Value::as_u64)
+                .map(|n| n as usize)
+                .unwrap_or(DEFAULT_MAX_TOKENS),
+        ),
+        limit: Some(
+            args.get("limit")
+                .and_then(Value::as_u64)
+                .map(|n| n as usize)
+                .unwrap_or(DEFAULT_LIMIT),
+        ),
         exclude_expired: !args
             .get("include_expired")
             .and_then(Value::as_bool)

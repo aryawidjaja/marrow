@@ -683,7 +683,7 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
             }
             writeln!(out, "recent decisions ({}):", brief.recent_decisions.len()).ok();
             for m in &brief.recent_decisions {
-                writeln!(out, "  {} — {}", m.frontmatter.id, first_line(&m.body)).ok();
+                writeln!(out, "  {} — {}", m.frontmatter.id, snippet(&m.body, 220)).ok();
             }
             writeln!(out, "relevant memories ({}):", brief.relevant.len()).ok();
             for m in &brief.relevant {
@@ -769,6 +769,28 @@ fn first_line(body: &str) -> &str {
     body.trim().lines().next().unwrap_or("")
 }
 
+/// A one-glance snippet for the warm-start briefing. Memories are often dense single paragraphs, so
+/// truncate by length (at a word boundary) rather than by line — the id lets the agent read the
+/// full memory on demand instead of paying for every body up front.
+fn snippet(body: &str, max_chars: usize) -> String {
+    let body = body.trim();
+    let head = first_line(body);
+    if head.chars().count() <= max_chars {
+        return head.to_string();
+    }
+    let mut cut = head
+        .char_indices()
+        .map(|(i, _)| i)
+        .nth(max_chars)
+        .unwrap_or(head.len());
+    if let Some(sp) = head[..cut].rfind(' ') {
+        if sp > max_chars / 2 {
+            cut = sp;
+        }
+    }
+    format!("{}…", head[..cut].trim_end())
+}
+
 /// Shown when `marrow` is run with no subcommand — the getting-started nudge a freshly installed
 /// package should give (cargo has no post-install hook, so the binary points the way itself).
 fn welcome(out: &mut impl Write) -> Result<(), String> {
@@ -842,6 +864,18 @@ fn watch_report(store: &Store, session: &str) -> Result<String, String> {
         .filter(|c| c.session_id != session)
         .map(|c| c.session_id)
         .collect();
+
+    // Bound a single injection: in a busy hive many events can land between two prompts, and this
+    // text becomes permanent conversation history. Keep the most recent few; count the rest.
+    const MAX_LINES: usize = 8;
+    let overflow = lines.len().saturating_sub(MAX_LINES);
+    if overflow > 0 {
+        lines = lines.split_off(overflow);
+        lines.insert(
+            0,
+            format!("  (+{overflow} earlier update(s) from other sessions)"),
+        );
+    }
 
     let mut out = String::new();
     if !lines.is_empty() || !others.is_empty() {
@@ -927,4 +961,24 @@ fn print_memories(hits: &[Memory], out: &mut impl Write) {
         writeln!(out, "{}  [{}]  {first}", m.frontmatter.id, topic).ok();
     }
     writeln!(out, "{} result(s)", hits.len()).ok();
+}
+
+#[cfg(test)]
+mod brief_tests {
+    use super::snippet;
+
+    #[test]
+    fn snippet_caps_dense_paragraphs_at_a_word_boundary() {
+        let dense = "This is a single dense paragraph with no newlines that a decision body \
+                     often is, and it keeps going well past the cap so it must be truncated.";
+        let s = snippet(dense, 40);
+        assert!(s.ends_with('…'));
+        assert!(s.chars().count() <= 41);
+        assert!(!s.contains("truncated"));
+    }
+
+    #[test]
+    fn snippet_leaves_short_bodies_intact() {
+        assert_eq!(snippet("short body", 220), "short body");
+    }
 }

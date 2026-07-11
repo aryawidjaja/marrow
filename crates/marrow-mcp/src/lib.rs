@@ -125,6 +125,23 @@ mod tests {
     }
 
     #[test]
+    fn unqualified_search_is_bounded_by_default() {
+        let dir = store_root();
+        for i in 0..20 {
+            call(
+                dir.path(),
+                "mem_write",
+                json!({"kind":"fact","topic":format!("t{i}"),"body":format!("alpha fact number {i}")}),
+            );
+        }
+        let resp = call(dir.path(), "mem_search", json!({"text":"alpha"}));
+        let text = result_text(&resp);
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        // No caller-supplied limit, yet the payload is capped, not the whole brain.
+        assert!(v["results"].as_array().unwrap().len() <= 8, "got {}", text);
+    }
+
+    #[test]
     fn initialize_reports_protocol_and_server() {
         let dir = store_root();
         let req = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}});
@@ -142,7 +159,7 @@ mod tests {
     }
 
     #[test]
-    fn tools_list_advertises_the_catalog() {
+    fn tools_list_advertises_the_lean_core_by_default() {
         let dir = store_root();
         let req = json!({"jsonrpc":"2.0","id":1,"method":"tools/list"});
         let resp = handle(dir.path(), &req).unwrap();
@@ -152,9 +169,25 @@ mod tests {
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect();
+        // Core tools an agent actually calls are advertised...
         assert!(names.contains(&"mem_write"));
+        assert!(names.contains(&"mem_recall"));
+        assert!(names.contains(&"mem_bootstrap"));
+        // ...while hook-driven coordination and rare inspection tools are hidden to save tokens.
+        assert!(!names.contains(&"mem_claim"));
+        assert!(!names.contains(&"mem_list_stale"));
+    }
+
+    #[test]
+    fn full_catalog_covers_every_dispatchable_tool() {
+        // Every advertised name in the full catalog must be dispatchable, and the full catalog
+        // must be a superset of the lean core.
+        let all = tools::all_definitions();
+        let names: Vec<&str> = all.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"mem_query"));
         assert!(names.contains(&"mem_list_stale"));
+        assert!(names.contains(&"mem_claim"));
+        assert!(names.len() > super::tools::definitions().as_array().unwrap().len());
     }
 
     #[test]
