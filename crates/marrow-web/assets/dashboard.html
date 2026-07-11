@@ -3,238 +3,309 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Marrow</title>
+<title>Marrow — brain</title>
 <style>
   :root {
-    --bg: #0f1115; --panel: #171a21; --line: #262b36; --text: #e6e9ef;
-    --muted: #9aa3b2; --accent: #6ea8fe; --stale: #ff5d5d; --ok: #46d39a; --warn: #c9a227;
+    --bg: #0d0f14; --panel: #151922; --panel2: #1b2029; --line: #262b36;
+    --text: #e6e9ef; --muted: #8b93a4; --accent: #6ea8fe; --gold: #f5c518;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text);
-    font: 14px/1.5 -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
-  header { display: flex; align-items: center; gap: 10px; padding: 12px 20px;
-    border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); flex-wrap: wrap; }
-  header h1 { font-size: 18px; margin: 0; }
-  header .spacer { flex: 1; }
-  button { background: var(--panel); color: var(--text); border: 1px solid var(--line);
-    padding: 7px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; }
-  button:hover { border-color: var(--accent); }
-  button.primary { background: var(--accent); color: #0b0d11; border-color: var(--accent); font-weight: 600; }
-  button.on { border-color: var(--accent); color: var(--accent); }
-  .pill { padding: 3px 9px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
-  .pill.ok { color: var(--ok); border-color: var(--ok); }
-  .pill.bad { color: var(--stale); border-color: var(--stale); }
-  main { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px 20px; }
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
-  .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
-    margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--line); }
-  .list { max-height: 72vh; overflow: auto; }
-  .row { padding: 12px 14px; border-bottom: 1px solid var(--line); cursor: pointer;
-    overflow: hidden; transition: max-height .35s ease, opacity .35s ease, padding .35s ease; max-height: 80px; }
-  .row:hover { background: #1c2029; }
-  .row.sel { background: #1e2530; }
-  .row.collapsing { max-height: 0; opacity: 0; padding-top: 0; padding-bottom: 0; }
-  .row .top { display: flex; align-items: center; gap: 8px; }
-  .row .topic { font-weight: 600; }
-  .row .snippet { color: var(--muted); margin-top: 3px; font-size: 13px;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tag { font-size: 11px; padding: 1px 7px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); }
-  .badge { font-size: 11px; padding: 1px 7px; border-radius: 6px; font-weight: 700; }
-  .badge.stale { background: rgba(255,93,93,.15); color: var(--stale); border: 1px solid var(--stale); }
-  .badge.status { background: #20242e; color: var(--muted); border: 1px solid var(--line); }
-  #detail { padding: 14px; }
-  #detail .meta { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
-  #detail .body { background: #12151c; border: 1px solid var(--line); border-radius: 8px; padding: 12px; white-space: pre-wrap; }
-  .prov { margin-top: 12px; font-size: 12px; }
-  .prov h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 6px; }
-  .prov .line { color: var(--muted); padding: 2px 0; }
-  .prov .ev { padding: 4px 0; border-top: 1px dashed var(--line); }
-  .prov .ev.retrieve b { color: var(--accent); }
-  .events { max-height: 26vh; overflow: auto; font-size: 12px; }
-  .events .ev { padding: 8px 14px; border-bottom: 1px solid var(--line); color: var(--muted); }
-  .events .ev b { color: var(--text); }
-  .empty { padding: 16px 14px; color: var(--muted); }
-  .toast { position: fixed; bottom: 18px; right: 18px; background: var(--panel);
-    border: 1px solid var(--accent); padding: 10px 14px; border-radius: 10px; opacity: 0; transition: opacity .2s; }
-  .toast.show { opacity: 1; }
-  .evidence { margin: 0 20px 20px; }
-  .evgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; padding: 14px; }
-  .card { background: #12151c; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
-  .card .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
-  .card .v { font-size: 20px; font-weight: 700; margin-top: 4px; }
-  .card .d { color: var(--muted); font-size: 12px; margin-top: 2px; }
-  .card .v.good { color: var(--ok); }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); overflow: hidden;
+    font: 13px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  header { display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+    border-bottom: 1px solid var(--line); background: var(--bg); z-index: 5; }
+  header h1 { font-size: 15px; margin: 0; letter-spacing: .3px; font-weight: 600; }
+  header h1 span { color: var(--muted); font-weight: 400; }
+  .spacer { flex: 1; }
+  button, .seg { background: var(--panel); color: var(--text); border: 1px solid var(--line);
+    padding: 6px 11px; border-radius: 7px; cursor: pointer; font-size: 12px; }
+  button:hover { border-color: #3a4152; }
+  button.on { background: var(--accent); border-color: var(--accent); color: #06101f; font-weight: 600; }
+  .seg { display: inline-flex; padding: 0; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; }
+  input[type=search] { background: var(--panel); border: 1px solid var(--line); color: var(--text);
+    padding: 6px 10px; border-radius: 7px; width: 190px; font-size: 12px; }
+  main { display: grid; grid-template-columns: 250px 1fr; height: calc(100vh - 49px); }
+  aside { border-right: 1px solid var(--line); background: var(--panel); overflow: auto; padding: 8px 0; }
+  .tree-group > .row { font-weight: 600; }
+  .row { display: flex; align-items: center; gap: 7px; padding: 3px 12px; cursor: pointer;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row:hover { background: var(--panel2); }
+  .row .dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+  .row .count { color: var(--muted); font-size: 11px; margin-left: auto; }
+  .kids { display: none; }
+  .kids.open { display: block; }
+  .leaf { padding-left: 30px; color: var(--muted); }
+  .leaf:hover, .leaf.sel { color: var(--text); }
+  .caret { color: var(--muted); width: 10px; display: inline-block; transition: transform .12s; }
+  .caret.open { transform: rotate(90deg); }
+  .stage { position: relative; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #detail { position: absolute; top: 12px; right: 12px; width: 300px; max-height: calc(100% - 24px);
+    overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px; display: none; box-shadow: 0 12px 40px rgba(0,0,0,.5); }
+  #detail.show { display: block; }
+  #detail .k { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+  #detail h3 { margin: 4px 0 10px; font-size: 15px; }
+  #detail .body { color: #cdd3df; white-space: pre-wrap; font-size: 12px; }
+  #detail .meta { margin-top: 10px; color: var(--muted); font-size: 11px; }
+  #detail .x { position: absolute; top: 8px; right: 10px; color: var(--muted); cursor: pointer; }
+  .legend { position: absolute; left: 12px; bottom: 12px; background: rgba(21,25,34,.85);
+    border: 1px solid var(--line); border-radius: 9px; padding: 9px 11px; font-size: 11px; max-width: 220px; }
+  .legend .li { display: flex; align-items: center; gap: 7px; padding: 1px 0; color: var(--muted); }
+  .hint { position: absolute; left: 12px; top: 12px; color: var(--muted); font-size: 11px;
+    background: rgba(21,25,34,.7); padding: 4px 9px; border-radius: 7px; }
+  #toast { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%);
+    background: var(--accent); color: #06101f; font-weight: 600; padding: 7px 14px; border-radius: 8px;
+    font-size: 12px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+  .tip { position: absolute; pointer-events: none; background: #0b0e13; border: 1px solid var(--line);
+    padding: 5px 9px; border-radius: 7px; font-size: 12px; max-width: 260px; display: none; z-index: 9; }
 </style>
 </head>
 <body>
 <header>
-  <h1>Marrow 🦴</h1>
-  <span class="pill" id="audit">audit…</span>
-  <span class="spacer"></span>
-  <button id="filter">Showing: active</button>
-  <button id="seed">Seed demo</button>
-  <button id="break">Break code</button>
-  <button class="primary" id="consolidate">Consolidate</button>
-  <button id="refresh">Refresh</button>
+  <h1>Marrow <span id="scope">· this project</span></h1>
+  <div class="seg" role="tablist">
+    <button id="tab-project" class="on">Project</button>
+    <button id="tab-hive">Hive</button>
+  </div>
+  <input id="search" type="search" placeholder="Filter neurons…" />
+  <div class="spacer"></div>
+  <button id="linkmode" title="Click two neurons to connect or disconnect them">✎ Link</button>
+  <button id="refit">Recenter</button>
 </header>
-
 <main>
-  <section class="panel">
-    <h2>Memories</h2>
-    <div class="list" id="list"><div class="empty">loading…</div></div>
-  </section>
-  <section class="panel">
-    <h2>Detail &amp; provenance</h2>
-    <div id="detail"><div class="empty">select a memory</div></div>
-    <h2>Recent activity</h2>
-    <div class="events" id="events"></div>
-  </section>
+  <aside id="tree"></aside>
+  <div class="stage">
+    <canvas id="c"></canvas>
+    <div class="hint" id="hint">drag to pan · scroll to zoom · drag a neuron to move it</div>
+    <div class="legend" id="legend"></div>
+    <div id="detail"></div>
+    <div class="tip" id="tip"></div>
+    <div id="toast"></div>
+  </div>
 </main>
-
-<section class="panel evidence">
-  <h2>Evidence</h2>
-  <div class="evgrid" id="evidence"><div class="empty">loading…</div></div>
-</section>
-
-<div class="toast" id="toast"></div>
-
 <script>
-const $ = (id) => document.getElementById(id);
-let state = { memories: [], stale: new Set(), selected: null, status: 'active' };
-
-async function getJSON(url, opts) { const r = await fetch(url, opts); return r.json(); }
-
-async function loadAll() {
-  const [mem, stale, audit, hist, evidence] = await Promise.all([
-    getJSON('/api/memories?status=' + state.status),
-    getJSON('/api/stale'),
-    getJSON('/api/audit'),
-    getJSON('/api/history'),
-    getJSON('/api/evidence'),
-  ]);
-  state.memories = mem.memories || [];
-  state.stale = new Set((stale.stale || []).map((s) => s.memory_id));
-  renderAudit(audit);
-  renderList();
-  renderEvents(hist.events || []);
-  renderEvidence(evidence);
+const palette = ["#6ea8fe","#46d39a","#ff8f5d","#c77dff","#ffd166","#4cc9f0","#f072b6","#90be6d","#e56b6f","#7bdff2"];
+const kindColor = { decision:"#6ea8fe", fact:"#46d39a", entity:"#c77dff", session:"#ffd166", skill:"#ff8f5d", project:"#8b93a4", core:"#f5c518" };
+const colorMap = {};
+function colorFor(v, node) {
+  if (node.kind === "core") return "#f5c518";
+  if (v === "project") return kindColor[node.kind] || "#8b93a4";
+  if (node.kind === "project") return "#8b93a4";
+  if (!(node.group in colorMap)) colorMap[node.group] = palette[Object.keys(colorMap).length % palette.length];
+  return colorMap[node.group];
 }
 
-function card(k, v, d, good) {
-  return '<div class="card"><div class="k">' + esc(k) + '</div><div class="v' +
-    (good ? ' good' : '') + '">' + esc(v) + '</div><div class="d">' + esc(d) + '</div></div>';
+let view = "project", raw = { nodes: [], links: [] }, nodes = [], links = [], byId = {};
+let filter = "", selected = null, linkMode = false, linkFrom = null, heat = 1;
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+let T = { k: 1, x: 0, y: 0 };
+
+async function load() {
+  const url = view === "project" ? "/api/graph" : "/api/hive";
+  raw = await (await fetch(url)).json();
+  for (const k in colorMap) delete colorMap[k];
+  byId = {};
+  nodes = raw.nodes.map(n => ({ ...n, x: (Math.random()-.5)*600, y: (Math.random()-.5)*600, vx: 0, vy: 0 }));
+  nodes.forEach(n => byId[n.id] = n);
+  links = raw.links.filter(l => byId[l.source] && byId[l.target]).map(l => ({ ...l, s: byId[l.source], t: byId[l.target] }));
+  buildTree(); buildLegend(); fit(); heat = 1;
 }
 
-function renderEvidence(e) {
-  const p = e.product || {}, s = e.store || {};
-  $('evidence').innerHTML =
-    card('Staleness (StaleEval)', p.staleeval.false_positive_pct + '% FP', p.staleeval.recall_pct + '% recall', true) +
-    card('Consolidation (ConsolEval)', p.consoleval.precision_pct + '% / ' + p.consoleval.recall_pct + '%', p.consoleval.false_merges + ' false merges', true) +
-    card('Token budget (TokenEval)', p.tokeneval.reduction_pct + '%', 'less context per query', true) +
-    card('This store', s.active + ' active', s.memories + ' total · ' + s.stale + ' stale · ' + s.duplicate_memories + ' dup', false) +
-    card('Audit', s.audit_ok ? 'intact' : 'BROKEN', 'tamper-evident ledger', s.audit_ok);
+function buildLegend() {
+  const groups = view === "project"
+    ? [...new Set(nodes.map(n => n.kind))].filter(k => k !== "core")
+    : [...new Set(nodes.map(n => n.group))];
+  const el = document.getElementById("legend");
+  el.innerHTML = groups.map(g => {
+    const c = view === "project" ? (kindColor[g] || "#8b93a4") : colorFor("hive", { group: g, kind: "x" });
+    return `<div class="li"><span class="dot" style="background:${c}"></span>${g}</div>`;
+  }).join("") + (view === "hive" ? `<div class="li"><span class="dot" style="background:#f5c518"></span>core (you)</div>` : "");
 }
 
-function renderAudit(a) {
-  const el = $('audit');
-  if (a.ok) { el.textContent = 'audit ✓ chain intact'; el.className = 'pill ok'; }
-  else { el.textContent = 'audit ✗ broken at #' + a.broken_at_seq; el.className = 'pill bad'; }
-}
-
-function renderList() {
-  const list = $('list');
-  if (!state.memories.length) { list.innerHTML = '<div class="empty">no memories — try “Seed demo”</div>'; return; }
-  list.innerHTML = '';
-  for (const m of state.memories) {
-    const row = document.createElement('div');
-    row.className = 'row' + (m.id === state.selected ? ' sel' : '');
-    row.dataset.id = m.id;
-    const isStale = state.stale.has(m.id);
-    const statusBadge = m.status !== 'active' ? '<span class="badge status">' + esc(m.status) + '</span>' : '';
-    row.innerHTML =
-      '<div class="top">' +
-        '<span class="topic">' + esc(m.topic || '—') + '</span>' +
-        '<span class="tag">' + esc(m.kind) + '</span>' +
-        (isStale ? '<span class="badge stale">STALE</span>' : '') + statusBadge +
-      '</div>' +
-      '<div class="snippet">' + esc(m.snippet || '') + '</div>';
-    row.onclick = () => selectMemory(m.id);
-    list.appendChild(row);
+function buildTree() {
+  const t = document.getElementById("tree");
+  const groups = {};
+  for (const n of nodes) {
+    if (n.kind === "core" || n.kind === "project") continue;
+    const g = view === "project" ? n.kind : n.group;
+    (groups[g] = groups[g] || []).push(n);
+  }
+  t.innerHTML = "";
+  for (const g of Object.keys(groups).sort()) {
+    const wrap = document.createElement("div"); wrap.className = "tree-group";
+    const head = document.createElement("div"); head.className = "row";
+    const c = view === "project" ? (kindColor[g] || "#8b93a4") : colorFor("hive", { group: g, kind: "x" });
+    head.innerHTML = `<span class="caret">▶</span><span class="dot" style="background:${c}"></span>${g}<span class="count">${groups[g].length}</span>`;
+    const kids = document.createElement("div"); kids.className = "kids";
+    groups[g].sort((a,b) => (a.label||"").localeCompare(b.label||"")).forEach(n => {
+      const leaf = document.createElement("div"); leaf.className = "row leaf"; leaf.textContent = n.label || n.id;
+      leaf.dataset.id = n.id;
+      leaf.onclick = () => select(n);
+      kids.appendChild(leaf);
+    });
+    head.onclick = () => { kids.classList.toggle("open"); head.firstChild.classList.toggle("open"); };
+    wrap.appendChild(head); wrap.appendChild(kids); t.appendChild(wrap);
   }
 }
 
-async function selectMemory(id) {
-  state.selected = id;
-  renderList();
-  const [m, p] = await Promise.all([getJSON('/api/memory/' + id), getJSON('/api/provenance/' + id)]);
-  const by = (m.provenance || {}).written_by || '—';
-  const sup = (p.supersedes || []).map((r) => r.id + ' [' + r.kind + ']').join(', ') || '—';
-  const supBy = (p.superseded_by || []).map((r) => r.id + ' [' + r.kind + ']').join(', ') || '—';
-  const sources = (p.sources || []).join(', ') || '—';
-  const hist = (p.history || []).map((e) =>
-    '<div class="ev ' + esc(e.kind) + '"><b>' + esc(e.kind) + '</b> — ' + esc(e.summary) + '</div>'
-  ).join('') || '<div class="line">no events</div>';
-  $('detail').innerHTML =
-    '<div class="meta"><b>' + esc(m.type) + '</b> · ' + esc(m.topic || '—') +
-    ' · status: ' + esc(m.status) + ' · confidence: ' + m.confidence + ' · by: ' + esc(by) + '</div>' +
-    '<div class="body">' + esc((m.body || '').trim()) + '</div>' +
-    '<div class="prov">' +
-      '<h3>Provenance</h3>' +
-      '<div class="line">sources: ' + esc(sources) + '</div>' +
-      '<div class="line">supersedes: ' + esc(sup) + '</div>' +
-      '<div class="line">superseded by: ' + esc(supBy) + '</div>' +
-      '<h3 style="margin-top:10px">How it has been used</h3>' + hist +
-    '</div>';
-}
-
-function renderEvents(events) {
-  const recent = events.slice(-12).reverse();
-  $('events').innerHTML = recent.map((e) =>
-    '<div class="ev"><b>' + esc(e.kind) + '</b> — ' + esc(e.summary) +
-    ' <span style="float:right">#' + e.seq + '</span></div>'
-  ).join('') || '<div class="empty">no events</div>';
-}
-
-async function consolidate() {
-  const before = new Set(state.memories.map((m) => m.id));
-  const out = await getJSON('/api/consolidate?apply=true', { method: 'POST' });
-  const after = await getJSON('/api/memories?status=' + state.status);
-  const keep = new Set((after.memories || []).map((m) => m.id));
-  // Animate the rows that are about to disappear.
-  let animated = false;
-  before.forEach((id) => {
-    if (!keep.has(id)) {
-      const el = document.querySelector('.row[data-id="' + id + '"]');
-      if (el) { el.classList.add('collapsing'); animated = true; }
+function tick() {
+  const rep = view === "project" ? 2600 : 1400;
+  for (let i = 0; i < nodes.length; i++) {
+    const a = nodes[i];
+    for (let j = i+1; j < nodes.length; j++) {
+      const b = nodes[j];
+      let dx = a.x-b.x, dy = a.y-b.y, d2 = dx*dx+dy*dy+.01;
+      const f = rep/d2, d = Math.sqrt(d2), ux = dx/d, uy = dy/d;
+      a.vx += ux*f; a.vy += uy*f; b.vx -= ux*f; b.vy -= uy*f;
     }
-  });
-  toast('merged ' + out.merged + ', conflicts ' + out.conflicts_resolved + ', retired ' + out.deprecated);
-  setTimeout(loadAll, animated ? 380 : 0);
+    a.vx -= a.x*0.0022; a.vy -= a.y*0.0022;
+  }
+  for (const l of links) {
+    let dx = l.t.x-l.s.x, dy = l.t.y-l.s.y, d = Math.hypot(dx,dy)+.01;
+    const rest = l.rel === "hub" ? 130 : l.rel === "cluster" ? 70 : 95;
+    const f = (d-rest)*0.02, ux = dx/d, uy = dy/d;
+    l.s.vx += ux*f; l.s.vy += uy*f; l.t.vx -= ux*f; l.t.vy -= uy*f;
+  }
+  for (const n of nodes) {
+    if (n.pin) { n.vx = n.vy = 0; continue; }
+    n.x += n.vx*heat; n.y += n.vy*heat; n.vx *= 0.86; n.vy *= 0.86;
+  }
+  heat = Math.max(0.15, heat*0.994);
 }
 
-async function post(url) { await fetch(url, { method: 'POST' }); await loadAll(); }
-
-function toggleFilter() {
-  state.status = state.status === 'active' ? 'all' : 'active';
-  $('filter').textContent = 'Showing: ' + state.status;
-  $('filter').className = state.status === 'all' ? 'on' : '';
-  loadAll();
+function draw() {
+  const w = cv.width = cv.clientWidth * devicePixelRatio, h = cv.height = cv.clientHeight * devicePixelRatio;
+  ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,w,h);
+  ctx.setTransform(T.k*devicePixelRatio,0,0,T.k*devicePixelRatio, T.x*devicePixelRatio, T.y*devicePixelRatio);
+  const nb = neighbors(selected);
+  for (const l of links) {
+    const active = selected && (l.s === selected || l.t === selected);
+    ctx.strokeStyle = l.rel === "user" ? "rgba(245,197,24,.55)" : active ? "rgba(150,180,255,.5)" : "rgba(120,130,150,.12)";
+    ctx.lineWidth = (l.rel === "user" ? 1.6 : active ? 1.4 : 0.7) / T.k;
+    ctx.beginPath(); ctx.moveTo(l.s.x, l.s.y); ctx.lineTo(l.t.x, l.t.y); ctx.stroke();
+  }
+  for (const n of nodes) {
+    const r = radius(n);
+    const dim = (filter && !match(n)) || (selected && n !== selected && !nb.has(n));
+    ctx.globalAlpha = dim ? 0.18 : 1;
+    ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, 7);
+    ctx.fillStyle = colorFor(view, n); ctx.fill();
+    if (n === selected || n === linkFrom) { ctx.lineWidth = 2/T.k; ctx.strokeStyle = "#fff"; ctx.stroke(); }
+    if (r*T.k > 9) {
+      ctx.globalAlpha = dim ? 0.2 : 0.9; ctx.fillStyle = "#cdd3df";
+      ctx.font = `${11/T.k}px -apple-system,Segoe UI,sans-serif`;
+      ctx.fillText((n.label||"").slice(0,22), n.x + r + 3/T.k, n.y + 3/T.k);
+    }
+  }
+  ctx.globalAlpha = 1;
 }
 
-function toast(msg) {
-  const t = $('toast'); t.textContent = msg; t.className = 'toast show';
-  setTimeout(() => (t.className = 'toast'), 2500);
+function radius(n) { return n.kind === "core" ? 14 : n.kind === "project" ? 9 : 4 + Math.min(7, n.degree*0.8); }
+function neighbors(n) { const s = new Set(); if (!n) return s; for (const l of links) { if (l.s===n) s.add(l.t); if (l.t===n) s.add(l.s); } return s; }
+function match(n) { return (n.label||"").toLowerCase().includes(filter) || (n.snippet||"").toLowerCase().includes(filter); }
+function loop() { tick(); draw(); requestAnimationFrame(loop); }
+
+function fit() {
+  if (!nodes.length) return;
+  const xs = nodes.map(n=>n.x), ys = nodes.map(n=>n.y);
+  const minx = Math.min(...xs), maxx = Math.max(...xs), miny = Math.min(...ys), maxy = Math.max(...ys);
+  const w = cv.clientWidth, h = cv.clientHeight;
+  const k = Math.min(2.2, 0.85 * Math.min(w/(maxx-minx+120), h/(maxy-miny+120)));
+  T.k = isFinite(k) && k > 0 ? k : 1;
+  T.x = w/2 - (minx+maxx)/2*T.k; T.y = h/2 - (miny+maxy)/2*T.k;
 }
 
-function esc(s) { return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+function screenToWorld(px, py) { return { x: (px - T.x)/T.k, y: (py - T.y)/T.k }; }
+function nodeAt(px, py) {
+  const p = screenToWorld(px, py);
+  let best = null, bd = 1e9;
+  for (const n of nodes) { const d = Math.hypot(n.x-p.x, n.y-p.y); if (d < radius(n)+6/T.k && d < bd) { bd = d; best = n; } }
+  return best;
+}
 
-$('refresh').onclick = loadAll;
-$('consolidate').onclick = consolidate;
-$('filter').onclick = toggleFilter;
-$('seed').onclick = () => post('/api/demo/seed');
-$('break').onclick = () => post('/api/demo/break');
-loadAll();
-setInterval(loadAll, 4000);   // live: break the code and watch STALE appear
+async function select(n) {
+  selected = n;
+  document.querySelectorAll(".leaf.sel").forEach(e => e.classList.remove("sel"));
+  const leaf = document.querySelector(`.leaf[data-id="${CSS.escape(n.id)}"]`);
+  if (leaf) { leaf.classList.add("sel"); leaf.scrollIntoView({ block: "nearest" }); leaf.parentElement.classList.add("open"); }
+  const d = document.getElementById("detail");
+  const nb = [...neighbors(n)].length;
+  let body = n.snippet || "";
+  if (view === "project" && n.kind !== "core") {
+    try { const full = await (await fetch("/api/memory/"+encodeURIComponent(n.id))).json(); if (full && full.body) body = full.body; } catch {}
+  }
+  d.innerHTML = `<span class="x" onclick="closeDetail()">✕</span>
+    <span class="k">${n.kind}${view==="hive"&&n.group?" · "+n.group:""}</span>
+    <h3>${esc(n.label || n.id)}</h3>
+    <div class="body">${esc(body)}</div>
+    <div class="meta">${nb} connection(s) · degree ${n.degree}<br>${n.id}</div>`;
+  d.classList.add("show");
+}
+function closeDetail() { document.getElementById("detail").classList.remove("show"); selected = null; }
+function esc(s){ return (s||"").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+
+async function toggleLink(a, b) {
+  const existing = links.find(l => l.rel==="user" && ((l.s===a&&l.t===b)||(l.s===b&&l.t===a)));
+  const url = (existing ? "/api/unlink" : "/api/link") + `?source=${encodeURIComponent(a.id)}&target=${encodeURIComponent(b.id)}`;
+  await fetch(url, { method: "POST" });
+  toast(existing ? "disconnected" : "connected");
+  await load();
+}
+function toast(m) { const t = document.getElementById("toast"); t.textContent = m; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"), 1200); }
+
+let drag = null, panning = null, moved = false;
+cv.addEventListener("mousedown", e => {
+  const n = nodeAt(e.offsetX, e.offsetY); moved = false;
+  if (n) drag = { n }; else panning = { x: e.offsetX - T.x, y: e.offsetY - T.y };
+});
+window.addEventListener("mousemove", e => {
+  const r = cv.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
+  if (drag) { moved = true; const p = screenToWorld(px, py); drag.n.x = p.x; drag.n.y = p.y; drag.n.pin = true; heat = Math.max(heat, .5); }
+  else if (panning) { T.x = px - panning.x; T.y = py - panning.y; }
+  else showTip(px, py, e.clientX, e.clientY);
+});
+window.addEventListener("mouseup", () => {
+  if (drag && !moved) {
+    const n = drag.n;
+    if (linkMode) { if (!linkFrom) { linkFrom = n; toast("pick a second neuron"); } else if (linkFrom !== n) { toggleLink(linkFrom, n); linkFrom = null; } }
+    else select(n);
+  }
+  drag = panning = null;
+});
+cv.addEventListener("dblclick", e => { const n = nodeAt(e.offsetX, e.offsetY); if (n) n.pin = false; });
+cv.addEventListener("wheel", e => {
+  e.preventDefault();
+  const s = e.deltaY < 0 ? 1.12 : 0.89, wx = (e.offsetX - T.x)/T.k, wy = (e.offsetY - T.y)/T.k;
+  T.k = Math.max(0.15, Math.min(5, T.k*s)); T.x = e.offsetX - wx*T.k; T.y = e.offsetY - wy*T.k;
+}, { passive: false });
+
+function showTip(px, py, cx, cy) {
+  const n = nodeAt(px, py), tip = document.getElementById("tip");
+  if (n) { tip.style.display = "block"; tip.style.left = (cx+12)+"px"; tip.style.top = (cy+12)+"px";
+    tip.innerHTML = `<b>${esc(n.label||n.id)}</b><br>${esc((n.snippet||"").slice(0,120))}`; }
+  else tip.style.display = "none";
+}
+
+document.getElementById("search").addEventListener("input", e => { filter = e.target.value.toLowerCase(); });
+document.getElementById("linkmode").onclick = e => { linkMode = !linkMode; linkFrom = null; e.target.classList.toggle("on", linkMode);
+  document.getElementById("hint").textContent = linkMode ? "link mode: click two neurons to connect or disconnect" : "drag to pan · scroll to zoom · drag a neuron to move it"; };
+document.getElementById("refit").onclick = fit;
+function setView(v) {
+  view = v; selected = null; closeDetail(); linkFrom = null;
+  document.getElementById("scope").textContent = v === "project" ? "· this project" : "· the whole hive";
+  document.getElementById("tab-project").classList.toggle("on", v==="project");
+  document.getElementById("tab-hive").classList.toggle("on", v==="hive");
+  document.getElementById("linkmode").style.display = v === "project" ? "" : "none";
+  load();
+}
+document.getElementById("tab-project").onclick = () => setView("project");
+document.getElementById("tab-hive").onclick = () => setView("hive");
+
+load(); loop();
 </script>
 </body>
 </html>

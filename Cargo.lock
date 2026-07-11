@@ -1704,6 +1704,7 @@ version = "0.1.8"
 dependencies = [
  "marrow-memdocs",
  "marrow-store",
+ "serde",
  "serde_json",
  "tempfile",
  "tiny_http",

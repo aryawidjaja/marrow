@@ -7,8 +7,10 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use marrow_memdocs::{Frontmatter, Memory, MemoryKind, Provenance, Scope, Status};
-use marrow_store::Store;
+use marrow_store::{Hub, Store};
 use serde_json::json;
+
+mod graph;
 
 /// The dashboard single-page app, embedded so the binary is self-contained.
 pub const DASHBOARD: &str = include_str!("../assets/dashboard.html");
@@ -26,6 +28,10 @@ pub fn route(store: &Store, root: &Path, method: &str, target: &str) -> Response
     let (path, query) = split_target(target);
     match (method, path.as_str()) {
         ("GET", "/") | ("GET", "/index.html") => html(DASHBOARD),
+        ("GET", "/api/graph") => graph_project(store, root),
+        ("GET", "/api/hive") => graph_hive(),
+        ("POST", "/api/link") => link(root, &query, true),
+        ("POST", "/api/unlink") => link(root, &query, false),
         ("GET", "/api/memories") => memories(store, &query),
         ("GET", "/api/stale") => stale(store, root),
         ("GET", "/api/history") => history(store),
@@ -41,6 +47,35 @@ pub fn route(store: &Store, root: &Path, method: &str, target: &str) -> Response
             provenance(store, p.trim_start_matches("/api/provenance/"))
         }
         _ => not_found(),
+    }
+}
+
+fn graph_project(store: &Store, root: &Path) -> Response {
+    Response {
+        status: 200,
+        content_type: "application/json",
+        body: graph::to_json(&graph::project_graph(store, root)),
+    }
+}
+
+fn graph_hive() -> Response {
+    match Hub::open() {
+        Ok(hub) => Response {
+            status: 200,
+            content_type: "application/json",
+            body: graph::to_json(&graph::hive_graph(&hub)),
+        },
+        Err(e) => error(&e.to_string()),
+    }
+}
+
+fn link(root: &Path, query: &HashMap<String, String>, add: bool) -> Response {
+    let (Some(source), Some(target)) = (query.get("source"), query.get("target")) else {
+        return error("link needs source and target");
+    };
+    match graph::edit_link(root, source, target, add) {
+        Ok(count) => json_ok(json!({ "ok": true, "links": count })),
+        Err(e) => error(&e.to_string()),
     }
 }
 
