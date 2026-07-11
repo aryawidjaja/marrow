@@ -1,0 +1,35 @@
+# Deploy the Marrow backbone to Fly.io.
+#   fly launch --copy-config --no-deploy      (or: fly apps create marrow-backbone)
+#   fly secrets set MARROW_TOKEN=$(openssl rand -hex 16)
+#   fly volumes create marrow_data --size 1
+#   fly deploy
+app = "marrow-backbone"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  MARROW_DATA = "/data"
+  PORT = "8787"
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/health"
+    interval = "30s"
+    timeout = "3s"
+
+[[mounts]]
+  source = "marrow_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

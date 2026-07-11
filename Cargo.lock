@@ -1666,6 +1666,7 @@ dependencies = [
  "marrow-store",
  "serde_json",
  "tempfile",
+ "ureq 2.12.1",
 ]
 
 [[package]]
@@ -1674,6 +1675,17 @@ version = "0.1.8"
 dependencies = [
  "serde",
  "serde_yaml",
+]
+
+[[package]]
+name = "marrow-server"
+version = "0.1.8"
+dependencies = [
+ "marrow-mcp",
+ "marrow-store",
+ "serde_json",
+ "tempfile",
+ "tiny_http",
 ]
 
 [[package]]

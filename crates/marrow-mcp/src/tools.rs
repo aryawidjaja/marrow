@@ -227,7 +227,16 @@ fn filter_schema(with_text: bool) -> Value {
     json!({"type": "object", "properties": props, "required": required})
 }
 
-/// Run a tool by name. `Ok` text is the result; `Err` text is a tool error message.
+/// Entry point for the stdio MCP server: forward to the shared backbone when `MARROW_REMOTE` is
+/// set, otherwise run locally. The backbone itself calls [`call`] directly, so it never recurses.
+pub fn dispatch(root: &Path, name: &str, args: &Value) -> Result<String, String> {
+    if crate::remote::endpoint().is_some() {
+        return crate::remote::forward(name, args);
+    }
+    call(root, name, args)
+}
+
+/// Run a tool by name against the local store. `Ok` text is the result; `Err` text is a tool error.
 pub fn call(root: &Path, name: &str, args: &Value) -> Result<String, String> {
     // Cross-project tools reach the whole hive, not this one store — handle them first.
     match name {

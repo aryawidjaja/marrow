@@ -1,0 +1,6 @@
+target
+.marrow
+.git
+docs
+**/*.md
+!deploy/README.md

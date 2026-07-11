@@ -10,6 +10,7 @@ use std::path::Path;
 use serde_json::{json, Value};
 
 pub mod prompts;
+pub mod remote;
 pub mod tools;
 
 const PROTOCOL_VERSION: &str = "2025-06-18";
@@ -50,7 +51,7 @@ fn handle_call(root: &Path, id: Option<Value>, params: Option<&Value>) -> Value 
         .and_then(|p| p.get("arguments"))
         .cloned()
         .unwrap_or_else(|| json!({}));
-    let result = match tools::call(root, name, &args) {
+    let result = match tools::dispatch(root, name, &args) {
         Ok(text) => tool_result(&text, false),
         Err(text) => tool_result(&text, true),
     };

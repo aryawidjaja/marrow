@@ -101,7 +101,7 @@ session="$(printf '%s\n' \
   '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"mem_list_stale","arguments":{}}}' \
   | "$marrow_mcp" --root "$proj")"
 check "MCP handshake reports the protocol version" "$session" '"protocolVersion":"2025-06-18"'
-check "MCP advertises the anchor tool" "$session" "mem_anchor"
+check "MCP advertises the lean core catalog" "$session" '"name":"mem_bootstrap"'
 check "MCP search returns the stored memory" "$session" "stored as markdown"
 check "MCP reports the stale anchor" "$session" "issue_token"
 
