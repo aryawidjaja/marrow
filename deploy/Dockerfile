@@ -8,8 +8,9 @@ COPY . .
 RUN cargo build --release -p marrow-server
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/* && useradd -m marrow
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates wget \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -m marrow && mkdir -p /data && chown marrow:marrow /data
 COPY --from=build /src/target/release/marrow-server /usr/local/bin/marrow-server
 USER marrow
 ENV MARROW_DATA=/data PORT=8787
