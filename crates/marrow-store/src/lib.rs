@@ -16,6 +16,7 @@ pub mod embed;
 pub mod embed_fastembed;
 #[cfg(feature = "embed-http")]
 pub mod embed_http;
+pub mod hub;
 pub mod index;
 pub mod integrity;
 pub mod provenance;
@@ -30,6 +31,7 @@ pub use consolidate::{
     HeuristicDistiller, Verdict,
 };
 pub use coordinate::{knowledge_docs, Briefing, Claim, ClaimScope};
+pub use hub::{Hub, HubEvent, HubHit, Project};
 
 /// Whether this binary was built with a real semantic-embedding backend (local `fastembed` or
 /// `http`). When false, only keyword search is available regardless of config.

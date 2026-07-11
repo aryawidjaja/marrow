@@ -173,6 +173,43 @@ pub enum Cmd {
         #[arg(long)]
         url: Option<String>,
     },
+    /// Cross-project hive: federate every registered brain on this machine into one second brain.
+    Hub {
+        #[command(subcommand)]
+        cmd: HubCmd,
+    },
+}
+
+/// Subcommands for the cross-project hub.
+#[derive(Debug, Subcommand)]
+pub enum HubCmd {
+    /// Register a project into the hive so its knowledge joins cross-project recall (defaults to --root).
+    Register {
+        /// Display name for the project (defaults to the directory name).
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Remove a project from the hive by name or path.
+    Forget { key: String },
+    /// List the projects currently in the hive.
+    List,
+    /// Recall across every registered brain — what does the whole hive know about this?
+    Recall {
+        text: String,
+        #[arg(long, default_value_t = 8)]
+        limit: usize,
+    },
+    /// What agents in other projects are doing right now (newest first).
+    Activity {
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
+    /// Save a shared core memory (about you, or cross-project) that every project can see.
+    Remember {
+        body: String,
+        #[arg(long)]
+        topic: Option<String>,
+    },
 }
 
 /// Arguments for `marrow claim`.
@@ -762,7 +799,69 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
             }
             Ok(())
         }
+        Cmd::Hub { cmd } => run_hub(cli.root, cmd, out),
     }
+}
+
+fn run_hub(root: PathBuf, cmd: HubCmd, out: &mut impl Write) -> Result<(), String> {
+    use marrow_store::Hub;
+    let mut hub = Hub::open().map_err(|e| e.to_string())?;
+    match cmd {
+        HubCmd::Register { name } => {
+            let p = hub
+                .register(&root, name.as_deref())
+                .map_err(|e| e.to_string())?;
+            writeln!(out, "registered '{}' -> {}", p.name, p.root.display()).ok();
+        }
+        HubCmd::Forget { key } => {
+            if hub.forget(&key).map_err(|e| e.to_string())? {
+                writeln!(out, "removed '{key}' from the hive").ok();
+            } else {
+                writeln!(out, "no project named or rooted at '{key}'").ok();
+            }
+        }
+        HubCmd::List => {
+            let projects = hub.projects();
+            writeln!(out, "hive: {} project(s)", projects.len()).ok();
+            for p in projects {
+                writeln!(out, "  {} — {}", p.name, p.root.display()).ok();
+            }
+        }
+        HubCmd::Recall { text, limit } => {
+            let hits = hub.recall(&text, limit, limit);
+            writeln!(out, "{} hit(s) across the hive:", hits.len()).ok();
+            for h in hits {
+                writeln!(
+                    out,
+                    "  [{}] {} — {}",
+                    h.project,
+                    h.memory.frontmatter.id,
+                    snippet(&h.memory.body, 200)
+                )
+                .ok();
+            }
+        }
+        HubCmd::Activity { limit } => {
+            let events = hub.activity(limit);
+            writeln!(out, "hive activity ({} event(s)):", events.len()).ok();
+            for e in events {
+                writeln!(
+                    out,
+                    "  [{}] {} — {}",
+                    e.project, e.event.kind, e.event.summary
+                )
+                .ok();
+            }
+        }
+        HubCmd::Remember { body, topic } => {
+            let core = hub.core().map_err(|e| e.to_string())?;
+            let mut memory =
+                build_memory(MemoryKind::Fact, topic, None, "hub".into(), vec![], body);
+            let id = core.write(&mut memory).map_err(|e| e.to_string())?;
+            writeln!(out, "core memory saved: {id}").ok();
+        }
+    }
+    Ok(())
 }
 
 fn first_line(body: &str) -> &str {

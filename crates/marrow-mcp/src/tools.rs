@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use marrow_memdocs::{Frontmatter, Memory, MemoryKind, Provenance, Scope, Status};
-use marrow_store::{knowledge_docs, ClaimScope, Query, Store};
+use marrow_store::{knowledge_docs, ClaimScope, Hub, Query, Store};
 use serde_json::{json, Value};
 
 /// The tool catalog advertised via `tools/list`.
@@ -19,9 +19,17 @@ pub fn definitions() -> Value {
     if full {
         return Value::Array(all);
     }
+    // The cross-project tools cost nothing until a hive exists, so advertise them only when the
+    // machine actually has registered projects to reach.
+    let hub_active = marrow_store::Hub::open()
+        .map(|h| !h.projects().is_empty())
+        .unwrap_or(false);
     Value::Array(
         all.into_iter()
-            .filter(|t| CORE_TOOLS.contains(&t["name"].as_str().unwrap_or_default()))
+            .filter(|t| {
+                let name = t["name"].as_str().unwrap_or_default();
+                CORE_TOOLS.contains(&name) || (hub_active && HUB_TOOLS.contains(&name))
+            })
             .collect(),
     )
 }
@@ -36,6 +44,9 @@ const CORE_TOOLS: &[&str] = &[
     "mem_supersede",
     "mem_ingest",
 ];
+
+/// Cross-project tools, advertised only when a hive is configured (see [`definitions`]).
+const HUB_TOOLS: &[&str] = &["mem_hub_recall", "mem_hub_activity"];
 
 pub(crate) fn all_definitions() -> Vec<Value> {
     let Value::Array(defs) = json!([
@@ -174,6 +185,18 @@ pub(crate) fn all_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {}
         })),
+        tool("mem_hub_recall", "Recall across EVERY project on this machine, not just this one — ask what the whole hive knows. Results are tagged with the project they came from.", json!({
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"},
+                "limit": {"type": "integer", "description": "max results (default 8)"}
+            },
+            "required": ["text"]
+        })),
+        tool("mem_hub_activity", "What agent sessions in OTHER projects are doing right now (newest first), tagged by project — the cross-project pulse of the hive.", json!({
+            "type": "object",
+            "properties": {"limit": {"type": "integer", "description": "max events (default 20)"}}
+        })),
     ]) else {
         unreachable!("tool catalog is a JSON array literal")
     };
@@ -206,6 +229,12 @@ fn filter_schema(with_text: bool) -> Value {
 
 /// Run a tool by name. `Ok` text is the result; `Err` text is a tool error message.
 pub fn call(root: &Path, name: &str, args: &Value) -> Result<String, String> {
+    // Cross-project tools reach the whole hive, not this one store — handle them first.
+    match name {
+        "mem_hub_recall" => return hub_recall(args),
+        "mem_hub_activity" => return hub_activity(args),
+        _ => {}
+    }
     let store = Store::open(root).map_err(|e| e.to_string())?;
     match name {
         "mem_write" => write(&store, args),
@@ -506,6 +535,52 @@ fn ingest(root: &Path) -> Result<String, String> {
             .to_string()
     };
     Ok(json!({"instruction": instruction, "docs": files, "count": docs.len()}).to_string())
+}
+
+fn hub_recall(args: &Value) -> Result<String, String> {
+    let text = str_arg(args, "text")?;
+    let limit = args
+        .get("limit")
+        .and_then(Value::as_u64)
+        .map(|n| n as usize)
+        .unwrap_or(8);
+    let hub = Hub::open().map_err(|e| e.to_string())?;
+    let items: Vec<Value> = hub
+        .recall(&text, limit, limit)
+        .iter()
+        .map(|h| {
+            json!({
+                "project": h.project,
+                "id": h.memory.frontmatter.id,
+                "kind": kind_name(h.memory.frontmatter.kind),
+                "topic": h.memory.frontmatter.topic,
+                "body": h.memory.body.trim(),
+            })
+        })
+        .collect();
+    Ok(json!({"results": items, "count": items.len()}).to_string())
+}
+
+fn hub_activity(args: &Value) -> Result<String, String> {
+    let limit = args
+        .get("limit")
+        .and_then(Value::as_u64)
+        .map(|n| n as usize)
+        .unwrap_or(20);
+    let hub = Hub::open().map_err(|e| e.to_string())?;
+    let items: Vec<Value> = hub
+        .activity(limit)
+        .iter()
+        .map(|e| {
+            json!({
+                "project": e.project,
+                "ts": e.event.ts,
+                "kind": e.event.kind,
+                "summary": e.event.summary,
+            })
+        })
+        .collect();
+    Ok(json!({"events": items, "count": items.len()}).to_string())
 }
 
 fn mem_brief(m: &Memory) -> Value {
