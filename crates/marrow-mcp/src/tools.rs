@@ -43,8 +43,15 @@ const CORE_TOOLS: &[&str] = &[
     "mem_ingest",
 ];
 
-/// Cross-project tools, advertised only when a hive is configured (see [`definitions`]).
-const HUB_TOOLS: &[&str] = &["mem_hub_recall", "mem_hub_activity"];
+/// Hive tools — cross-project recall/awareness and the agent channel — advertised only when a hive
+/// is configured (see [`definitions`]).
+const HUB_TOOLS: &[&str] = &[
+    "mem_hub_recall",
+    "mem_hub_activity",
+    "mem_ask",
+    "mem_inbox",
+    "mem_reply",
+];
 
 pub(crate) fn all_definitions() -> Vec<Value> {
     let Value::Array(defs) = json!([
@@ -195,6 +202,32 @@ pub(crate) fn all_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {"limit": {"type": "integer", "description": "max events (default 20)"}}
         })),
+        tool("mem_ask", "Ask another agent (in this or another project) a question, or share a note — a message in the shared channel. `to` is who: a session id, a name, a project, or \"all\". Non-destructive; the human can read it.", json!({
+            "type": "object",
+            "properties": {
+                "to": {"type": "string", "description": "recipient: session id, name, project, or \"all\""},
+                "body": {"type": "string"},
+                "by": {"type": "string", "description": "your name/session"}
+            },
+            "required": ["to","body"]
+        })),
+        tool("mem_inbox", "Messages waiting for you from other agents (newest first) — check this to see if anyone asked you something. Pass your session/name so it knows what's addressed to you.", json!({
+            "type": "object",
+            "properties": {
+                "session": {"type": "string"},
+                "by": {"type": "string"},
+                "project": {"type": "string"}
+            }
+        })),
+        tool("mem_reply", "Reply to a message thread (from mem_inbox). The reply goes back to whoever asked.", json!({
+            "type": "object",
+            "properties": {
+                "thread": {"type": "string"},
+                "body": {"type": "string"},
+                "by": {"type": "string"}
+            },
+            "required": ["thread","body"]
+        })),
     ]) else {
         unreachable!("tool catalog is a JSON array literal")
     };
@@ -240,6 +273,9 @@ pub fn call(root: &Path, name: &str, args: &Value) -> Result<String, String> {
     match name {
         "mem_hub_recall" => return hub_recall(args),
         "mem_hub_activity" => return hub_activity(args),
+        "mem_ask" => return ask(root, args),
+        "mem_inbox" => return inbox(root, args),
+        "mem_reply" => return reply(root, args),
         _ => {}
     }
     let store = Store::open(root).map_err(|e| e.to_string())?;
@@ -598,6 +634,67 @@ fn hub_recall(args: &Value) -> Result<String, String> {
         })
         .collect();
     Ok(json!({"results": items, "count": items.len()}).to_string())
+}
+
+/// The message channel lives in the shared hub `core` store when a hive exists (so agents in
+/// different projects share it), otherwise in this project's store.
+fn channel_store(root: &Path) -> Result<Store, String> {
+    if marrow_store::Hub::active() {
+        Hub::open()
+            .and_then(|h| h.core())
+            .map_err(|e| e.to_string())
+    } else {
+        Store::open(root).map_err(|e| e.to_string())
+    }
+}
+
+fn ask(root: &Path, args: &Value) -> Result<String, String> {
+    let to = str_arg(args, "to")?;
+    let body = str_arg(args, "body")?;
+    let by = opt_arg(args, "by").unwrap_or_else(|| "mcp".into());
+    let thread = channel_store(root)?
+        .post_message(&by, &to, None, "ask", &body)
+        .map_err(|e| e.to_string())?;
+    Ok(json!({"posted": true, "thread": thread}).to_string())
+}
+
+fn reply(root: &Path, args: &Value) -> Result<String, String> {
+    let thread = str_arg(args, "thread")?;
+    let body = str_arg(args, "body")?;
+    let by = opt_arg(args, "by").unwrap_or_else(|| "mcp".into());
+    let store = channel_store(root)?;
+    // A reply goes back to whoever started the thread (unless a recipient is named).
+    let to = opt_arg(args, "to").or_else(|| {
+        store
+            .thread(&thread)
+            .ok()
+            .and_then(|ms| ms.into_iter().map(|m| m.from).find(|f| f != &by))
+    });
+    let to = to.unwrap_or_else(|| "all".into());
+    let t = store
+        .post_message(&by, &to, Some(&thread), "reply", &body)
+        .map_err(|e| e.to_string())?;
+    Ok(json!({"posted": true, "thread": t}).to_string())
+}
+
+fn inbox(root: &Path, args: &Value) -> Result<String, String> {
+    let me: Vec<String> = ["session", "by", "project"]
+        .iter()
+        .filter_map(|k| opt_arg(args, k))
+        .collect();
+    let me = if me.is_empty() {
+        vec!["mcp".into()]
+    } else {
+        me
+    };
+    let msgs = channel_store(root)?
+        .inbox(&me, 10)
+        .map_err(|e| e.to_string())?;
+    let items: Vec<Value> = msgs
+        .iter()
+        .map(|m| json!({"thread": m.thread, "from": m.from, "role": m.role, "body": m.body}))
+        .collect();
+    Ok(json!({"messages": items, "count": items.len()}).to_string())
 }
 
 fn hub_activity(args: &Value) -> Result<String, String> {

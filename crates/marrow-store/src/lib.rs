@@ -6,6 +6,7 @@
 //! staleness-checked against live code via marrow-core's S3∧S4 hybrid.
 
 pub mod associative;
+pub mod channel;
 pub mod config;
 pub mod consolidate;
 pub mod convert;
@@ -27,6 +28,7 @@ pub mod store;
 pub mod util;
 
 pub use associative::{ConnectedRecall, Neighbor};
+pub use channel::Message;
 pub use config::Config;
 pub use consolidate::{
     Cluster, ClusterAction, ConsolidationOutcome, ConsolidationReport, Distiller,
