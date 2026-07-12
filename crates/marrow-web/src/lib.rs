@@ -30,6 +30,7 @@ pub fn route(store: &Store, root: &Path, method: &str, target: &str) -> Response
         ("GET", "/") | ("GET", "/index.html") => html(DASHBOARD),
         ("GET", "/api/graph") => graph_project(store, root),
         ("GET", "/api/hive") => graph_hive(),
+        ("GET", "/api/hive/memory") => hive_memory(&query),
         ("POST", "/api/link") => link(root, &query, true),
         ("POST", "/api/unlink") => link(root, &query, false),
         ("GET", "/api/memories") => memories(store, &query),
@@ -66,6 +67,30 @@ fn graph_hive() -> Response {
             body: graph::to_json(&graph::hive_graph(&hub)),
         },
         Err(e) => error(&e.to_string()),
+    }
+}
+
+/// Read one memory in full from any registered project (or the shared core), so the hive view can
+/// show a whole memory that lives in a different store than the one this dashboard was opened on.
+fn hive_memory(query: &HashMap<String, String>) -> Response {
+    let (Some(project), Some(id)) = (query.get("project"), query.get("id")) else {
+        return error("hive memory needs project and id");
+    };
+    let hub = match Hub::open() {
+        Ok(h) => h,
+        Err(e) => return error(&e.to_string()),
+    };
+    let root = if project == "core" {
+        hub.core().ok().map(|s| s.root().to_path_buf())
+    } else {
+        hub.projects()
+            .into_iter()
+            .find(|p| &p.name == project)
+            .map(|p| p.root)
+    };
+    match root.and_then(|r| Store::open(&r).ok()) {
+        Some(store) => memory(&store, id),
+        None => not_found(),
     }
 }
 

@@ -235,8 +235,11 @@ async function select(n) {
   const d = document.getElementById("detail");
   const nb = [...neighbors(n)].length;
   let body = n.snippet || "";
-  if (view === "project" && n.kind !== "core") {
-    try { const full = await (await fetch("/api/memory/"+encodeURIComponent(n.id))).json(); if (full && full.body) body = full.body; } catch {}
+  const url = view === "project"
+    ? (n.kind !== "core" ? "/api/memory/" + encodeURIComponent(n.id) : null)
+    : (n.id.includes("#") ? `/api/hive/memory?project=${encodeURIComponent(n.group)}&id=${encodeURIComponent(n.id.split("#")[1])}` : null);
+  if (url) {
+    try { const full = await (await fetch(url)).json(); if (full && full.body) body = full.body; } catch {}
   }
   d.innerHTML = `<span class="x" onclick="closeDetail()">✕</span>
     <span class="k">${n.kind}${view==="hive"&&n.group?" · "+n.group:""}</span>
