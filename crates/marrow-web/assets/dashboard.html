@@ -13,8 +13,8 @@
   html, body { height: 100%; margin: 0; }
   body { background: var(--bg); color: var(--text); overflow: hidden;
     font: 13px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-  header { display: flex; align-items: center; gap: 10px; padding: 10px 16px;
-    border-bottom: 1px solid var(--line); background: var(--bg); z-index: 5; }
+  header { display: flex; align-items: center; gap: 10px; padding: 10px 16px; flex-wrap: wrap;
+    row-gap: 8px; border-bottom: 1px solid var(--line); background: var(--bg); z-index: 5; }
   header h1 { font-size: 15px; margin: 0; letter-spacing: .3px; font-weight: 600; }
   header h1 span { color: var(--muted); font-weight: 400; }
   .spacer { flex: 1; }
@@ -174,7 +174,25 @@ async function load() {
   nodes = raw.nodes.map(n => ({ ...n, x: (Math.random()-.5)*600, y: (Math.random()-.5)*600, vx: 0, vy: 0 }));
   nodes.forEach(n => byId[n.id] = n);
   links = raw.links.filter(l => byId[l.source] && byId[l.target]).map(l => ({ ...l, s: byId[l.source], t: byId[l.target] }));
+  assignAnchors();
   buildTree(); buildLegend(); fit(); heat = 1;
+}
+
+// In hive view, give each project its own region on a ring around the core so clusters separate
+// instead of piling on top of each other. Nodes start near their anchor and a gentle force holds
+// them there while links still pull related neurons together.
+function assignAnchors() {
+  if (view !== "hive") { nodes.forEach(n => { n.ax = n.ay = null; }); return; }
+  const groups = [...new Set(nodes.map(n => n.group))].filter(g => g !== "core");
+  const R = 380 + groups.length * 60;
+  const ang = {};
+  groups.forEach((g, i) => ang[g] = (i / Math.max(1, groups.length)) * Math.PI * 2);
+  for (const n of nodes) {
+    if (n.group === "core") { n.ax = 0; n.ay = 0; }
+    else { n.ax = Math.cos(ang[n.group]) * R; n.ay = Math.sin(ang[n.group]) * R; }
+    n.x = n.ax + (Math.random() - .5) * 160;
+    n.y = n.ay + (Math.random() - .5) * 160;
+  }
 }
 
 function buildLegend() {
@@ -257,6 +275,7 @@ function tick() {
     l.s.vx += ux*f; l.s.vy += uy*f; l.t.vx -= ux*f; l.t.vy -= uy*f;
   }
   for (const n of nodes) {
+    if (n.ax != null) { n.vx += (n.ax - n.x) * 0.02; n.vy += (n.ay - n.y) * 0.02; }
     if (n.pin) { n.vx = n.vy = 0; continue; }
     n.x += n.vx*heat; n.y += n.vy*heat; n.vx *= 0.86; n.vy *= 0.86;
   }
