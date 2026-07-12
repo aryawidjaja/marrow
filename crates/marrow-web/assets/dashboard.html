@@ -204,7 +204,32 @@ async function load() {
   nodes.forEach(n => byId[n.id] = n);
   links = raw.links.filter(l => byId[l.source] && byId[l.target]).map(l => ({ ...l, s: byId[l.source], t: byId[l.target] }));
   assignAnchors();
+  detectCommunities();
   buildTree(); buildLegend(); fit(); heat = 1;
+}
+
+// Group densely-connected neurons into communities (label propagation over content links only, not
+// the structural hive spokes), so the layout can pull each community into its own tight bubble the
+// way Obsidian does.
+function detectCommunities() {
+  const adj = {};
+  for (const n of nodes) { adj[n.id] = []; n.comm = n.id; }
+  for (const l of links) {
+    if (l.rel === "hub" || l.rel === "cluster") continue;
+    adj[l.source].push(l.target); adj[l.target].push(l.source);
+  }
+  for (let iter = 0; iter < 8; iter++) {
+    let changed = false;
+    for (const n of nodes) {
+      const nb = adj[n.id]; if (!nb.length) continue;
+      const counts = {};
+      for (const m of nb) { const c = byId[m].comm; counts[c] = (counts[c] || 0) + 1; }
+      let best = n.comm, bc = -1;
+      for (const c in counts) if (counts[c] > bc || (counts[c] === bc && c < best)) { bc = counts[c]; best = c; }
+      if (best !== n.comm) { n.comm = best; changed = true; }
+    }
+    if (!changed) break;
+  }
 }
 
 // In hive view, give each project its own region on a ring around the core so clusters separate
@@ -286,7 +311,7 @@ function buildTree() {
 }
 
 function tick() {
-  const rep = view === "project" ? 2600 : 1400;
+  const rep = view === "project" ? 3200 : 1800;
   for (let i = 0; i < nodes.length; i++) {
     const a = nodes[i];
     for (let j = i+1; j < nodes.length; j++) {
@@ -295,18 +320,25 @@ function tick() {
       const f = rep/d2, d = Math.sqrt(d2), ux = dx/d, uy = dy/d;
       a.vx += ux*f; a.vy += uy*f; b.vx -= ux*f; b.vy -= uy*f;
     }
-    a.vx -= a.x*0.0022; a.vy -= a.y*0.0022;
+    a.vx -= a.x*0.0016; a.vy -= a.y*0.0016;
   }
+  // Short, firm links so connected neurons hug into a tight bundle; hive spokes stay long/loose.
   for (const l of links) {
     let dx = l.t.x-l.s.x, dy = l.t.y-l.s.y, d = Math.hypot(dx,dy)+.01;
-    const rest = l.rel === "hub" ? 130 : l.rel === "cluster" ? 70 : 95;
-    const f = (d-rest)*0.02, ux = dx/d, uy = dy/d;
+    const rest = l.rel === "hub" ? 160 : l.rel === "cluster" ? 55 : l.rel === "semantic" ? 68 : 46;
+    const k = (l.rel === "hub" || l.rel === "cluster") ? 0.014 : 0.045;
+    const f = (d-rest)*k, ux = dx/d, uy = dy/d;
     l.s.vx += ux*f; l.s.vy += uy*f; l.t.vx -= ux*f; l.t.vy -= uy*f;
   }
+  // Pull each community toward its own centre -> Obsidian-style bubbles.
+  const cx = {}, cy = {}, cc = {};
+  for (const n of nodes) { cx[n.comm] = (cx[n.comm]||0)+n.x; cy[n.comm] = (cy[n.comm]||0)+n.y; cc[n.comm] = (cc[n.comm]||0)+1; }
   for (const n of nodes) {
+    const k = cc[n.comm];
+    if (k > 1) { n.vx += (cx[n.comm]/k - n.x) * 0.06; n.vy += (cy[n.comm]/k - n.y) * 0.06; }
     if (n.ax != null) { n.vx += (n.ax - n.x) * 0.02; n.vy += (n.ay - n.y) * 0.02; }
     if (n.pin) { n.vx = n.vy = 0; continue; }
-    n.x += n.vx*heat; n.y += n.vy*heat; n.vx *= 0.86; n.vy *= 0.86;
+    n.x += n.vx*heat; n.y += n.vy*heat; n.vx *= 0.85; n.vy *= 0.85;
   }
   heat *= 0.985; if (heat < 0.03) heat = 0;
 }

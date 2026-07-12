@@ -114,7 +114,7 @@ fn star(links: &mut Vec<Link>, members: &[String], rel: &str) {
 
 /// How many meaning-neighbours each memory keeps, and how close they must be. bge-m3 cosine puts
 /// genuinely related notes around 0.5–0.75; a top-k cap keeps the graph readable, not a hairball.
-const SEMANTIC_TOP_K: usize = 4;
+const SEMANTIC_TOP_K: usize = 3;
 const SEMANTIC_MIN_SIM: f32 = 0.55;
 
 fn ordered(a: &str, b: &str) -> (String, String) {
