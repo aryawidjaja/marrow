@@ -258,9 +258,21 @@ fn filter_schema(with_text: bool) -> Value {
     json!({"type": "object", "properties": props, "required": required})
 }
 
-/// Entry point for the stdio MCP server: forward to the shared backbone when `MARROW_REMOTE` is
-/// set, otherwise run locally. The backbone itself calls [`call`] directly, so it never recurses.
+/// Entry point for the stdio MCP server. Routing is per project: if *this* project has been shared
+/// (`.marrow/remote.toml`), its calls go to that gateway space; otherwise, if the whole machine is
+/// wired remote (`MARROW_REMOTE`), calls go there; otherwise they run against the local store. So a
+/// shared project reaches its shared brain while every other project stays local and private. The
+/// backbone itself calls [`call`] directly, so it never recurses.
 pub fn dispatch(root: &Path, name: &str, args: &Value) -> Result<String, String> {
+    if let Some(remote) = marrow_store::SharedRemote::load(root) {
+        return crate::remote::forward_to(
+            &remote.url,
+            remote.token.as_deref(),
+            &remote.space,
+            name,
+            args,
+        );
+    }
     if crate::remote::endpoint().is_some() {
         return crate::remote::forward(name, args);
     }

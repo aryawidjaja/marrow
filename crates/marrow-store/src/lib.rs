@@ -23,6 +23,7 @@ pub mod index;
 pub mod integrity;
 pub mod provenance;
 pub mod query;
+pub mod sharing;
 pub mod staleness;
 pub mod store;
 pub mod util;
@@ -45,5 +46,6 @@ pub fn semantic_supported() -> bool {
 pub use embed::{EmbedError, Embedder, HashEmbedder};
 pub use provenance::{MemoryRef, ProvenanceTrail};
 pub use query::Query;
+pub use sharing::SharedRemote;
 pub use staleness::StaleHit;
 pub use store::{Error, Store};

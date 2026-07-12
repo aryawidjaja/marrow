@@ -178,6 +178,22 @@ pub enum Cmd {
         #[command(subcommand)]
         cmd: HubCmd,
     },
+    /// Share THIS project to a gateway "space" so its memory is shared with other machines or
+    /// teammates. Every other project stays local and private. Machines using the same gateway +
+    /// space + token share one brain. Nothing local is deleted.
+    Share {
+        /// Gateway base URL, e.g. https://team.fly.dev.
+        #[arg(long)]
+        gateway: String,
+        /// The space (shared-brain key) on the gateway. Same name on every machine = same brain.
+        #[arg(long)]
+        space: String,
+        /// Bearer token / API key for the gateway.
+        #[arg(long)]
+        token: Option<String>,
+    },
+    /// Stop sharing this project — make it local and private again. Nothing is deleted.
+    Unshare,
 }
 
 /// Subcommands for the cross-project hub.
@@ -487,6 +503,16 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
             Ok(())
         }
         Cmd::Status => {
+            if let Some(remote) = marrow_store::SharedRemote::load(&cli.root) {
+                writeln!(
+                    out,
+                    "sharing: shared to space '{}' on {} (agents here use that shared brain; counts below are the local cache). `marrow unshare` to go local.",
+                    remote.space, remote.url
+                )
+                .ok();
+            } else {
+                writeln!(out, "sharing: local (private to this machine).").ok();
+            }
             let store = open(&cli.root)?;
             let rows = store.list().map_err(|e| e.to_string())?;
             writeln!(out, "total: {}", rows.len()).ok();
@@ -709,6 +735,14 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
             max_tokens,
             by,
         } => {
+            if let Some(remote) = marrow_store::SharedRemote::load(&cli.root) {
+                writeln!(
+                    out,
+                    "sharing: THIS PROJECT IS SHARED to space '{}' on {} — your mem_* tools read and write that shared brain (recall from it before answering). Other machines on the same space see your writes. File claims stay per-machine for now.",
+                    remote.space, remote.url
+                )
+                .ok();
+            }
             let store = open(&cli.root)?;
             let brief = store
                 .bootstrap(&goal, &project, &by, max_tokens)
@@ -800,6 +834,42 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
             Ok(())
         }
         Cmd::Hub { cmd } => run_hub(cli.root, cmd, out),
+        Cmd::Share {
+            gateway,
+            space,
+            token,
+        } => {
+            let remote = marrow_store::SharedRemote {
+                url: gateway.trim_end_matches('/').to_string(),
+                space,
+                token: token.filter(|t| !t.is_empty()),
+            };
+            remote.save(&cli.root).map_err(|e| e.to_string())?;
+            writeln!(
+                out,
+                "shared: this project now routes to space '{}' on {}.",
+                remote.space, remote.url
+            )
+            .ok();
+            writeln!(
+                out,
+                "agents here read and write that shared brain; every other project stays local. Run `marrow unshare` to go back to local (nothing is deleted)."
+            )
+            .ok();
+            Ok(())
+        }
+        Cmd::Unshare => {
+            if marrow_store::SharedRemote::remove(&cli.root).map_err(|e| e.to_string())? {
+                writeln!(
+                    out,
+                    "unshared: this project is local and private again. Your local memories are untouched."
+                )
+                .ok();
+            } else {
+                writeln!(out, "this project wasn't shared — nothing to do.").ok();
+            }
+            Ok(())
+        }
     }
 }
 
