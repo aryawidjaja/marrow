@@ -41,6 +41,9 @@
   .modal-card textarea { resize: vertical; font-family: inherit; line-height: 1.5; }
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
   .modal-card hr { border: 0; border-top: 1px solid var(--line); margin: 18px 0; }
+  .modal-card p { margin: 8px 0; line-height: 1.55; }
+  .modal-card .dim { color: var(--muted); }
+  .modal-card code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
   .row-item { display: flex; align-items: center; gap: 8px; padding: 5px 0; }
   .row-item .dim { color: var(--muted); font-size: 11px; flex: 1; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap; }
@@ -116,6 +119,7 @@
   <button id="sem" class="on" title="Show 'related meaning' links inferred from embeddings">✧ Meaning</button>
   <button id="linkmode" title="Click two neurons to connect or disconnect them">✎ Link</button>
   <button id="refit">Recenter</button>
+  <button id="help" title="What is all this?">?</button>
 </header>
 <main>
   <aside id="tree"></aside>
@@ -497,6 +501,40 @@ async function forgetProj(name) {
 }
 document.getElementById("add").onclick = () => memForm(null);
 document.getElementById("manage").onclick = manageProjects;
+
+function helpModal() {
+  const kinds = [
+    ["fact", "Something true about the project — \"the rate limit is 100 req/min\"."],
+    ["decision", "A choice made, and why — \"we use JWT for auth\". Marrow keeps one active decision per topic."],
+    ["entity", "A person, service, or thing — a teammate, an external API, a database."],
+    ["session", "A checkpoint or summary of a work session, so the next one starts warm."],
+    ["skill", "A reusable how-to the agent learned — a procedure worth remembering."],
+  ];
+  const terms = [
+    ["neuron", "One memory, shown as a dot. Bigger = more connections."],
+    ["topic", "A short label that groups related memories."],
+    ["tag", "A keyword for cross-cutting themes; tags bridge topics."],
+    ["connection", "How two memories relate: shared <b>topic</b>, shared <b>tag</b>, <b>related meaning</b> (from embeddings), or a link <b>you drew</b>. Real, never random."],
+    ["related meaning", "Links inferred from AI embeddings — memories that mean similar things. Needs semantic search on (✧ Meaning)."],
+    ["project", "One codebase's brain. Switch between them with the dropdown up top."],
+    ["hive", "All your registered projects federated into one brain. The Hive tab shows it."],
+    ["core (you)", "Shared memory about you — the gold neuron at the center of the hive."],
+  ];
+  const li = arr => arr.map(([t, d]) => `<div style="margin:7px 0"><b style="color:var(--text)">${t}</b> — <span class="dim">${d}</span></div>`).join("");
+  modal(`<h3>What is Marrow?</h3>
+    <p class="dim">Marrow is a shared memory for your AI coding agents. Every dot here is one thing an agent
+    remembered about your project; lines connect memories that relate. A new agent session starts already
+    knowing all of it, so it doesn't re-read your codebase or repeat decisions.</p>
+    <hr><h3>The five kinds of memory</h3>${li(kinds)}
+    <hr><h3>Terms on this graph</h3>${li(terms)}
+    <hr><h3>Your data is yours</h3>
+    <p class="dim">Your memories are plain markdown files on <b>your own computer</b>, under <code>.marrow/</code>
+    in each project. Nothing is uploaded or collected — no account, no telemetry. You can read, edit, or delete
+    them by hand or right here. (Only if you choose to run the optional shared server does data go anywhere, and
+    then only to the server <b>you</b> control.)</p>
+    <div class="modal-actions"><button class="on" onclick="closeModal()">Got it</button></div>`);
+}
+document.getElementById("help").onclick = helpModal;
 
 loadProjects().then(load); loop();
 </script>
