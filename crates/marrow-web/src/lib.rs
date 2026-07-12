@@ -498,12 +498,17 @@ pub fn serve(root: Option<PathBuf>, addr: &str) -> Result<(), String> {
             let _ = std::io::Read::read_to_string(&mut reader, &mut body);
         }
         let resp = route(root.as_deref(), &method, &target, &body);
-        let header =
+        let ctype =
             tiny_http::Header::from_bytes(&b"Content-Type"[..], resp.content_type.as_bytes())
                 .unwrap();
+        // Never cache: the dashboard is a single-file app, and a cached copy after an upgrade is a
+        // real source of "it's broken after I refreshed" confusion.
+        let nocache =
+            tiny_http::Header::from_bytes(&b"Cache-Control"[..], &b"no-store"[..]).unwrap();
         let http = tiny_http::Response::from_string(resp.body)
             .with_status_code(resp.status)
-            .with_header(header);
+            .with_header(ctype)
+            .with_header(nocache);
         let _ = request.respond(http);
     }
     Ok(())

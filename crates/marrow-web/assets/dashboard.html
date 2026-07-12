@@ -75,6 +75,7 @@
   #detail .k { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
   #detail h3 { margin: 4px 0 10px; font-size: 15px; }
   #detail .body { color: #cdd3df; white-space: pre-wrap; font-size: 12px; }
+  #detail .more { background: none; border: 0; color: var(--accent); cursor: pointer; padding: 3px 0; font-size: 12px; }
   #detail .meta { margin-top: 10px; color: var(--muted); font-size: 11px; }
   #detail .x { position: absolute; top: 8px; right: 10px; color: var(--muted); cursor: pointer; }
   .legend { position: absolute; left: 12px; bottom: 12px; background: rgba(21,25,34,.9);
@@ -348,13 +349,22 @@ async function select(n) {
   if (url) {
     try { const full = await (await fetch(url)).json(); if (full && full.body) body = full.body; } catch {}
   }
+  selectedBody = body;
+  const long = body.length > 420;
+  const shown = long ? esc(body.slice(0, 420)).trimEnd() + "…" : esc(body);
   d.innerHTML = `<span class="x" onclick="closeDetail()">✕</span>
     <span class="k">${n.kind}${view==="hive"&&n.group?" · "+n.group:""}</span>
     <h3>${esc(n.label || n.id)}</h3>
-    <div class="body">${esc(body)}</div>
-    <div class="meta">${nb} connection(s) · degree ${n.degree}<br>${n.id}</div>` +
+    <div class="body">${shown}</div>` +
+    (long ? `<button class="more" onclick="expandBody(this)">read more</button>` : "") +
+    `<div class="meta">${nb} connection(s) · degree ${n.degree}<br>${n.id}</div>` +
     (editable ? `<div class="acts"><button onclick="editMem('${n.id}')">Edit</button><button class="danger" onclick="delMem('${n.id}')">Delete</button></div>` : "");
   d.classList.add("show");
+}
+let selectedBody = "";
+function expandBody(btn) {
+  btn.parentElement.querySelector(".body").textContent = selectedBody;
+  btn.remove();
 }
 function closeDetail() { document.getElementById("detail").classList.remove("show"); selected = null; }
 function esc(s){ return (s||"").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
@@ -408,7 +418,6 @@ document.getElementById("refit").onclick = fit;
 document.getElementById("sem").onclick = e => { showSemantic = !showSemantic; e.target.classList.toggle("on", showSemantic); buildLegend(); };
 function setView(v) {
   view = v; selected = null; closeDetail(); linkFrom = null;
-  document.getElementById("scope").textContent = v === "project" ? "· this project" : "· the whole hive";
   document.getElementById("tab-project").classList.toggle("on", v==="project");
   document.getElementById("tab-hive").classList.toggle("on", v==="hive");
   document.getElementById("linkmode").style.display = v === "project" ? "" : "none";
