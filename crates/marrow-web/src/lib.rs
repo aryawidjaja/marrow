@@ -41,6 +41,8 @@ pub fn route(default_root: Option<&Path>, method: &str, target: &str, body: &str
         ("POST", "/api/project/register") => return hub_register(body),
         ("POST", "/api/project/forget") => return hub_forget(body),
         ("POST", "/api/project/init") => return hub_init(body),
+        ("POST", "/api/project/share") => return project_share(body),
+        ("POST", "/api/project/unshare") => return project_unshare(body),
         _ => {}
     }
 
@@ -106,23 +108,37 @@ fn mem_id<'a>(path: &'a str, suffix: &str) -> &'a str {
 }
 
 /// The projects the switcher offers: every registered project, plus the served store when it isn't
-/// itself registered.
+/// itself registered. Each carries its sharing state (local, or shared to a gateway space) so the
+/// dashboard can show a badge and manage it.
 fn projects_list(default_root: Option<&Path>) -> Response {
     let mut items = Vec::new();
     let registered = Hub::open().map(|h| h.projects()).unwrap_or_default();
     if let Some(r) = default_root {
         let canon = r.canonicalize().unwrap_or_else(|_| r.to_path_buf());
         if !registered.iter().any(|p| p.root == canon) {
-            items.push(
-                json!({"name": "· this project", "project": "", "root": r.display().to_string()}),
-            );
+            items.push(project_item("· this project", "", r));
         }
     }
     for p in &registered {
-        items
-            .push(json!({"name": p.name, "project": p.name, "root": p.root.display().to_string()}));
+        items.push(project_item(&p.name, &p.name, &p.root));
     }
     json_ok(json!({ "projects": items }))
+}
+
+/// One project row for the switcher / manager, with its sharing state folded in.
+fn project_item(name: &str, project: &str, root: &Path) -> Value {
+    let mut item = json!({
+        "name": name,
+        "project": project,
+        "root": root.display().to_string(),
+        "shared": false,
+    });
+    if let Some(remote) = marrow_store::SharedRemote::load(root) {
+        item["shared"] = json!(true);
+        item["gateway"] = json!(remote.url);
+        item["space"] = json!(remote.space);
+    }
+    item
 }
 
 /// List sub-directories of a path so the UI can navigate the filesystem to add a project. Local
@@ -215,6 +231,57 @@ fn hub_forget(body: &str) -> Response {
     };
     match Hub::open().and_then(|mut h| h.forget(key)) {
         Ok(removed) => json_ok(json!({ "ok": removed })),
+        Err(e) => error(&e.to_string()),
+    }
+}
+
+/// Share a project to a gateway space (external connection + API key), or fail with a clear reason.
+fn project_share(body: &str) -> Response {
+    let v = parse_body(body);
+    let Some(path) = v
+        .get("path")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+    else {
+        return error("share needs a project path");
+    };
+    let gateway = v
+        .get("gateway")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    let space = v.get("space").and_then(Value::as_str).unwrap_or("").trim();
+    if gateway.is_empty() || space.is_empty() {
+        return error("share needs a gateway URL and a space name");
+    }
+    let remote = marrow_store::SharedRemote {
+        url: gateway.trim_end_matches('/').to_string(),
+        space: space.to_string(),
+        token: v
+            .get("token")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from),
+    };
+    match remote.save(Path::new(path)) {
+        Ok(()) => json_ok(json!({ "ok": true, "space": remote.space, "gateway": remote.url })),
+        Err(e) => error(&e.to_string()),
+    }
+}
+
+/// Make a project local and private again. Nothing stored is deleted.
+fn project_unshare(body: &str) -> Response {
+    let v = parse_body(body);
+    let Some(path) = v
+        .get("path")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+    else {
+        return error("unshare needs a project path");
+    };
+    match marrow_store::SharedRemote::remove(Path::new(path)) {
+        Ok(was_shared) => json_ok(json!({ "ok": was_shared })),
         Err(e) => error(&e.to_string()),
     }
 }

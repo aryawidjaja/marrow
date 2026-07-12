@@ -50,3 +50,27 @@ impl SharedRemote {
         Ok(false)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn save_load_remove_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        assert!(SharedRemote::load(root).is_none(), "unshared by default");
+
+        let remote = SharedRemote {
+            url: "https://team.fly.dev".into(),
+            space: "app".into(),
+            token: Some("secret".into()),
+        };
+        remote.save(root).unwrap();
+        assert_eq!(SharedRemote::load(root).as_ref(), Some(&remote));
+
+        assert!(SharedRemote::remove(root).unwrap(), "was shared");
+        assert!(SharedRemote::load(root).is_none(), "local again");
+        assert!(!SharedRemote::remove(root).unwrap(), "nothing to remove");
+    }
+}

@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Marrow — brain</title>
+<title>Ⰶ Marrow — brain</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d0f14'/%3E%3Ctext x='16' y='24' font-size='22' text-anchor='middle' fill='%23f5c518'%3E&%23x2C16;%3C/text%3E%3C/svg%3E" />
 <style>
   :root {
     --bg: #0d0f14; --panel: #151922; --panel2: #1b2029; --line: #262b36;
@@ -17,6 +18,7 @@
     row-gap: 8px; border-bottom: 1px solid var(--line); background: var(--bg); z-index: 5; }
   header h1 { font-size: 15px; margin: 0; letter-spacing: .3px; font-weight: 600; }
   header h1 span { color: var(--muted); font-weight: 400; }
+  header h1 .mark { color: var(--gold); font-weight: 700; font-size: 17px; margin-right: 1px; }
   .spacer { flex: 1; }
   button, .seg { background: var(--panel); color: var(--text); border: 1px solid var(--line);
     padding: 6px 11px; border-radius: 7px; cursor: pointer; font-size: 12px; }
@@ -55,6 +57,15 @@
   #detail .acts { display: flex; gap: 8px; margin-top: 12px; }
   #detail .acts button { font-size: 11px; padding: 4px 10px; }
   .danger { color: #ff6b6b; }
+  .pill { font-size: 10px; padding: 1px 7px; border-radius: 9px; background: var(--panel2);
+    color: var(--muted); border: 1px solid var(--line); vertical-align: middle; }
+  .pill.on { background: rgba(110,168,254,.14); color: var(--accent); border-color: transparent; }
+  .sharebox:empty { display: none; }
+  .sharebox { padding: 2px 0 8px; }
+  .sharegrid { display: flex; flex-direction: column; gap: 6px; }
+  .sharegrid input { background: var(--panel2); border: 1px solid var(--line); color: var(--text);
+    border-radius: 6px; padding: 6px 8px; font-size: 12px; }
+  .sharebtns { display: flex; gap: 8px; }
   main { display: grid; grid-template-columns: 250px 1fr; height: calc(100vh - 49px); }
   aside { border-right: 1px solid var(--line); background: var(--panel); overflow: auto; padding: 8px 0; }
   .tree-group > .row { font-weight: 600; }
@@ -126,7 +137,7 @@
 </head>
 <body>
 <header>
-  <h1>Marrow</h1>
+  <h1><span class="mark">&#x2C16;</span> Marrow</h1>
   <div class="seg" role="tablist">
     <button id="tab-project" class="on">Project</button>
     <button id="tab-hive">Hive</button>
@@ -578,15 +589,57 @@ async function delMem(id) {
 }
 
 // project management + folder browser
+let projCache = [];
 async function manageProjects() {
   const d = await (await fetch("/api/projects")).json();
-  const rows = (d.projects || []).filter(p => p.project).map(p =>
-    `<div class="row-item"><span>${esc(p.name)}</span><span class="dim">${esc(p.root)}</span><button class="danger" onclick="forgetProj('${esc(p.project)}')">remove</button></div>`).join("");
-  modal(`<h3>Projects in the hive</h3>${rows || "<p class='dim'>None yet — add one below.</p>"}
+  projCache = (d.projects || []).filter(p => p.root);
+  const rows = projCache.map((p, i) => {
+    const badge = p.shared
+      ? `<span class="pill on" title="shared to ${esc(p.gateway||"")}">shared → ${esc(p.space)}</span>`
+      : `<span class="pill">local</span>`;
+    const rm = p.project ? `<button class="danger" onclick="forgetProj('${esc(p.project)}')">remove</button>` : "";
+    return `<div class="row-item"><span>${esc(p.name)} ${badge}</span>
+        <span class="dim">${esc(p.root)}</span>
+        <button onclick="shareForm(${i})">${p.shared ? "manage sharing" : "share…"}</button>${rm}</div>
+      <div id="sf-${i}" class="sharebox"></div>`;
+  }).join("");
+  modal(`<h3>Projects</h3>
+    <p class="dim">Every project is local and private by default. Share one to a gateway space to sync it across your machines or with teammates — the rest stay local.</p>
+    ${rows || "<p class='dim'>None yet — add one below.</p>"}
     <hr><h3>Add a project</h3><p class="dim">Browse to a folder. 🧠 already has a Marrow brain; 📁 will get one.</p>
     <div id="browser">loading…</div>
     <div class="modal-actions"><button onclick="closeModal()">Done</button></div>`);
   browseTo("");
+}
+function shareForm(i) {
+  const box = document.getElementById("sf-" + i);
+  if (box.innerHTML) { box.innerHTML = ""; return; }
+  const p = projCache[i];
+  box.innerHTML = `
+    <div class="sharegrid">
+      <input id="gw-${i}" placeholder="gateway URL — https://your-backbone" value="${esc(p.gateway || "")}">
+      <input id="sp-${i}" placeholder="space name (the shared-brain key)" value="${esc(p.space || "")}">
+      <input id="tok-${i}" type="password" placeholder="API key / token (optional)">
+      <div class="sharebtns">
+        <button onclick="doShare(${i})">${p.shared ? "update" : "share this project"}</button>
+        ${p.shared ? `<button class="danger" onclick="doUnshare(${i})">unshare</button>` : ""}
+      </div>
+    </div>
+    <p class="dim">Machines using the same gateway + space + key share one brain. Nothing local is deleted; unshare any time.</p>`;
+}
+async function doShare(i) {
+  const p = projCache[i];
+  const gateway = document.getElementById("gw-" + i).value.trim();
+  const space = document.getElementById("sp-" + i).value.trim();
+  const token = document.getElementById("tok-" + i).value.trim();
+  if (!gateway || !space) { toast("gateway URL and space are required"); return; }
+  const r = await (await fetch("/api/project/share", { method: "POST", body: JSON.stringify({ path: p.root, gateway, space, token }) })).json();
+  if (r.error) { toast(r.error); return; }
+  toast("shared → " + space); manageProjects();
+}
+async function doUnshare(i) {
+  await fetch("/api/project/unshare", { method: "POST", body: JSON.stringify({ path: projCache[i].root }) });
+  toast("now local"); manageProjects();
 }
 async function browseTo(path) {
   const d = await (await fetch("/api/browse?path=" + encodeURIComponent(path))).json();
