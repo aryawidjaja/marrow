@@ -102,6 +102,12 @@
   #toast.show { opacity: 1; }
   .tip { position: absolute; pointer-events: none; background: #0b0e13; border: 1px solid var(--line);
     padding: 5px 9px; border-radius: 7px; font-size: 12px; max-width: 260px; display: none; z-index: 9; }
+  #edgemenu { position: absolute; display: none; z-index: 12; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 9px; padding: 6px; box-shadow: 0 12px 32px rgba(0,0,0,.5); min-width: 180px; }
+  #edgemenu .em-title { font-size: 11px; color: var(--muted); padding: 4px 8px 6px; text-transform: capitalize; }
+  #edgemenu button { display: block; width: 100%; text-align: left; border: 0; background: none;
+    padding: 6px 8px; border-radius: 6px; font-size: 12px; }
+  #edgemenu button:hover { background: var(--panel2); }
 </style>
 </head>
 <body>
@@ -125,10 +131,11 @@
   <aside id="tree"></aside>
   <div class="stage">
     <canvas id="c"></canvas>
-    <div class="hint" id="hint">drag to pan · scroll to zoom · drag a neuron to move it</div>
+    <div class="hint" id="hint">drag to pan · scroll to zoom · drag a neuron · click a link to edit it</div>
     <div class="legend" id="legend"></div>
     <div id="detail"></div>
     <div class="tip" id="tip"></div>
+    <div id="edgemenu"></div>
     <div id="toast"></div>
   </div>
 </main>
@@ -339,7 +346,7 @@ function nodeAt(px, py) {
 }
 
 async function select(n) {
-  selected = n;
+  selected = n; closeEdgeMenu();
   document.querySelectorAll(".leaf.sel").forEach(e => e.classList.remove("sel"));
   const leaf = document.querySelector(`.leaf[data-id="${CSS.escape(n.id)}"]`);
   if (leaf) { leaf.classList.add("sel"); leaf.scrollIntoView({ block: "nearest" }); leaf.parentElement.classList.add("open"); }
@@ -382,25 +389,74 @@ async function toggleLink(a, b) {
 }
 function toast(m) { const t = document.getElementById("toast"); t.textContent = m; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"), 1200); }
 
-let drag = null, panning = null, moved = false;
+let drag = null, panning = null, moved = false, downXY = null;
+let selectedEdge = null, reconnect = null, pendingInsert = null;
 cv.addEventListener("mousedown", e => {
-  const n = nodeAt(e.offsetX, e.offsetY); moved = false;
+  const n = nodeAt(e.offsetX, e.offsetY); moved = false; downXY = { x: e.offsetX, y: e.offsetY };
   if (n) drag = { n }; else panning = { x: e.offsetX - T.x, y: e.offsetY - T.y };
 });
 window.addEventListener("mousemove", e => {
   const r = cv.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
   if (drag) { moved = true; const p = screenToWorld(px, py); drag.n.x = p.x; drag.n.y = p.y; drag.n.pin = true; heat = Math.max(heat, .5); }
-  else if (panning) { T.x = px - panning.x; T.y = py - panning.y; }
+  else if (panning) { if (downXY && Math.hypot(px - downXY.x, py - downXY.y) > 3) moved = true; T.x = px - panning.x; T.y = py - panning.y; }
   else showTip(px, py, e.clientX, e.clientY);
 });
 window.addEventListener("mouseup", () => {
   if (drag && !moved) {
     const n = drag.n;
-    if (linkMode) { if (!linkFrom) { linkFrom = n; toast("pick a second neuron"); } else if (linkFrom !== n) { toggleLink(linkFrom, n); linkFrom = null; } }
+    if (reconnect) finishReconnect(n);
+    else if (linkMode) { if (!linkFrom) { linkFrom = n; toast("pick a second neuron"); } else if (linkFrom !== n) { toggleLink(linkFrom, n); linkFrom = null; } }
     else select(n);
+  } else if (panning && !moved && downXY) {
+    if (reconnect) { reconnect = null; setHint(); toast("reconnect cancelled"); }
+    else { const l = edgeAt(downXY.x, downXY.y); if (l) openEdgeMenu(l, downXY.x, downXY.y); else closeEdgeMenu(); }
   }
   drag = panning = null;
 });
+
+// --- editing the links themselves (project view) ---
+function distToSeg(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1, len2 = dx*dx + dy*dy;
+  let t = len2 ? ((px-x1)*dx + (py-y1)*dy) / len2 : 0; t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (x1 + t*dx), py - (y1 + t*dy));
+}
+function edgeAt(px, py) {
+  if (view !== "project") return null;
+  const p = screenToWorld(px, py); let best = null, bd = 7 / T.k;
+  for (const l of links) {
+    if (l.rel === "semantic" && !showSemantic) continue;
+    const d = distToSeg(p.x, p.y, l.s.x, l.s.y, l.t.x, l.t.y);
+    if (d < bd) { bd = d; best = l; }
+  }
+  return best;
+}
+const enc = encodeURIComponent;
+async function post(kind, s, t) { await fetch(`/api/${kind}?source=${enc(s)}&target=${enc(t)}` + pq("&"), { method: "POST" }); }
+async function removeLink(l) { await (l.rel === "user" ? post("unlink", l.source, l.target) : post("hide", l.source, l.target)); }
+
+function openEdgeMenu(l, px, py) {
+  closeDetail(); selectedEdge = l;
+  const label = (edgeStyle[l.rel] || {}).label || l.rel;
+  const em = document.getElementById("edgemenu");
+  em.innerHTML = `<div class="em-title">${label}</div>
+    <button onclick="removeEdge()">✕ Remove this link</button>
+    <button onclick="insertBetween()">＋ Insert memory in the middle</button>
+    <button onclick="startReconnect()">↳ Reconnect an end…</button>`;
+  em.style.left = Math.min(px, cv.clientWidth - 200) + "px";
+  em.style.top = py + "px"; em.style.display = "block";
+}
+function closeEdgeMenu() { document.getElementById("edgemenu").style.display = "none"; selectedEdge = null; }
+async function removeEdge() { const l = selectedEdge; closeEdgeMenu(); if (!l) return; await removeLink(l); toast("link removed"); await load(); }
+function insertBetween() { const l = selectedEdge; closeEdgeMenu(); if (!l) return; pendingInsert = { source: l.source, target: l.target, rel: l.rel }; memForm(null); }
+function startReconnect() { const l = selectedEdge; closeEdgeMenu(); if (!l) return; reconnect = { keep: l.source, drop: l.target, rel: l.rel }; setHint(); toast("click the memory to connect this end to"); }
+async function finishReconnect(n) {
+  const rc = reconnect; reconnect = null; setHint();
+  if (!rc || n.id === rc.keep) { toast("reconnect cancelled"); return; }
+  await removeLink({ rel: rc.rel, source: rc.keep, target: rc.drop });
+  await post("link", rc.keep, n.id);
+  toast("reconnected"); await load();
+}
+function setHint() { document.getElementById("hint").textContent = reconnect ? "reconnect: click the memory to connect this end to" : linkMode ? "link mode: click two neurons to connect or disconnect" : "drag to pan · scroll to zoom · drag a neuron · click a link to edit it"; }
 cv.addEventListener("dblclick", e => { const n = nodeAt(e.offsetX, e.offsetY); if (n) n.pin = false; });
 cv.addEventListener("wheel", e => {
   e.preventDefault();
@@ -416,12 +472,11 @@ function showTip(px, py, cx, cy) {
 }
 
 document.getElementById("search").addEventListener("input", e => { filter = e.target.value.toLowerCase(); });
-document.getElementById("linkmode").onclick = e => { linkMode = !linkMode; linkFrom = null; e.target.classList.toggle("on", linkMode);
-  document.getElementById("hint").textContent = linkMode ? "link mode: click two neurons to connect or disconnect" : "drag to pan · scroll to zoom · drag a neuron to move it"; };
+document.getElementById("linkmode").onclick = e => { linkMode = !linkMode; linkFrom = null; reconnect = null; closeEdgeMenu(); e.target.classList.toggle("on", linkMode); setHint(); };
 document.getElementById("refit").onclick = fit;
 document.getElementById("sem").onclick = e => { showSemantic = !showSemantic; e.target.classList.toggle("on", showSemantic); buildLegend(); };
 function setView(v) {
-  view = v; selected = null; closeDetail(); linkFrom = null;
+  view = v; selected = null; closeDetail(); closeEdgeMenu(); linkFrom = null; reconnect = null; setHint();
   document.getElementById("tab-project").classList.toggle("on", v==="project");
   document.getElementById("tab-hive").classList.toggle("on", v==="hive");
   document.getElementById("linkmode").style.display = v === "project" ? "" : "none";
@@ -433,7 +488,7 @@ document.getElementById("proj").onchange = e => { project = e.target.value; if (
 
 // modal + memory management
 function modal(html) { const m = document.getElementById("modal"); m.querySelector(".modal-card").innerHTML = html; m.classList.add("show"); }
-function closeModal() { document.getElementById("modal").classList.remove("show"); }
+function closeModal() { document.getElementById("modal").classList.remove("show"); pendingInsert = null; }
 document.getElementById("modal").onclick = e => { if (e.target.id === "modal") closeModal(); };
 
 const KINDS = ["fact", "decision", "entity", "session", "skill"];
@@ -457,6 +512,13 @@ async function saveMem(id) {
   const url = id ? `/api/memory/${encodeURIComponent(id)}/edit${pq()}` : `/api/memory${pq()}`;
   const r = await (await fetch(url, { method: "POST", body: payload })).json();
   if (r.ok === false || r.error) { toast(r.error || "could not save"); return; }
+  // Inserting a memory in the middle of a link: connect it to both ends, drop the original.
+  if (!id && pendingInsert && r.id) {
+    await post("link", pendingInsert.source, r.id);
+    await post("link", pendingInsert.target, r.id);
+    await removeLink({ rel: pendingInsert.rel, source: pendingInsert.source, target: pendingInsert.target });
+    pendingInsert = null;
+  }
   closeModal(); toast(id ? "saved" : "added"); await load();
 }
 async function editMem(id) {

@@ -146,17 +146,27 @@ pub fn project_graph(store: &Store, root: &Path) -> Graph {
         star(&mut links, members, "tag");
     }
     let live: std::collections::HashSet<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
-    for [a, b] in read_overlay(&overlay_path(root)) {
+    let overlay = read_overlay(&overlay_path(root));
+    for [a, b] in &overlay.links {
         // Skip a saved link whose memory was since deleted, so degree matches the edges drawn.
         if live.contains(a.as_str()) && live.contains(b.as_str()) {
             links.push(Link {
-                source: a,
-                target: b,
+                source: a.clone(),
+                target: b.clone(),
                 rel: "user".into(),
             });
         }
     }
     add_semantic(store, &mut links, |id| id.to_string());
+    // Drop any link the user explicitly removed from the graph.
+    if !overlay.hidden.is_empty() {
+        links.retain(|l| {
+            !overlay
+                .hidden
+                .iter()
+                .any(|h| same_pair(h, &l.source, &l.target))
+        });
+    }
 
     for l in &links {
         *degree.entry(l.source.clone()).or_default() += 1;
@@ -335,44 +345,75 @@ fn add_hive_semantic(nodes: &[(String, usize, Vec<f32>)], links: &mut Vec<Link>)
 
 #[derive(Serialize, Deserialize, Default)]
 struct Overlay {
+    /// Links the user drew by hand.
     #[serde(default)]
     links: Vec<[String; 2]>,
+    /// Links (of any kind) the user removed from the graph — a topic/tag/meaning line they don't
+    /// want, hidden without touching the memories themselves.
+    #[serde(default)]
+    hidden: Vec<[String; 2]>,
 }
 
 fn overlay_path(root: &Path) -> PathBuf {
     root.join(".marrow").join(".graph").join("links.json")
 }
 
-fn read_overlay(path: &Path) -> Vec<[String; 2]> {
+fn read_overlay(path: &Path) -> Overlay {
     std::fs::read_to_string(path)
         .ok()
         .and_then(|s| serde_json::from_str::<Overlay>(&s).ok())
         .unwrap_or_default()
-        .links
 }
 
-/// Add or remove a user-drawn link in the overlay. Returns the resulting link count.
-pub fn edit_link(root: &Path, source: &str, target: &str, add: bool) -> std::io::Result<usize> {
-    let path = overlay_path(root);
-    let mut links = read_overlay(&path);
-    let matches =
-        |l: &[String; 2]| (l[0] == source && l[1] == target) || (l[0] == target && l[1] == source);
-    if add {
-        if !links.iter().any(matches) {
-            links.push([source.to_string(), target.to_string()]);
-        }
-    } else {
-        links.retain(|l| !matches(l));
-    }
+fn same_pair(l: &[String; 2], a: &str, b: &str) -> bool {
+    (l[0] == a && l[1] == b) || (l[0] == b && l[1] == a)
+}
+
+fn write_overlay(path: &Path, overlay: &Overlay) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let body = serde_json::to_string_pretty(&Overlay {
-        links: links.clone(),
-    })
-    .unwrap_or_default();
-    std::fs::write(&path, body)?;
-    Ok(links.len())
+    std::fs::write(
+        path,
+        serde_json::to_string_pretty(overlay).unwrap_or_default(),
+    )
+}
+
+/// Add or remove a user-drawn link in the overlay. Returns the resulting user-link count.
+pub fn edit_link(root: &Path, source: &str, target: &str, add: bool) -> std::io::Result<usize> {
+    let path = overlay_path(root);
+    let mut o = read_overlay(&path);
+    if add {
+        if !o.links.iter().any(|l| same_pair(l, source, target)) {
+            o.links.push([source.to_string(), target.to_string()]);
+        }
+        // Drawing a link un-hides it, if it was previously hidden.
+        o.hidden.retain(|l| !same_pair(l, source, target));
+    } else {
+        o.links.retain(|l| !same_pair(l, source, target));
+    }
+    let n = o.links.len();
+    write_overlay(&path, &o)?;
+    Ok(n)
+}
+
+/// Hide (or unhide) any link from the graph without touching the underlying memories. Returns the
+/// resulting hidden count.
+pub fn edit_hidden(root: &Path, source: &str, target: &str, hide: bool) -> std::io::Result<usize> {
+    let path = overlay_path(root);
+    let mut o = read_overlay(&path);
+    if hide {
+        if !o.hidden.iter().any(|l| same_pair(l, source, target)) {
+            o.hidden.push([source.to_string(), target.to_string()]);
+        }
+        // Hiding a hand-drawn link also removes it from the drawn set.
+        o.links.retain(|l| !same_pair(l, source, target));
+    } else {
+        o.hidden.retain(|l| !same_pair(l, source, target));
+    }
+    let n = o.hidden.len();
+    write_overlay(&path, &o)?;
+    Ok(n)
 }
 
 /// JSON body for the graph endpoints.
@@ -509,5 +550,44 @@ mod tests {
         let g2 = project_graph(&store, dir.path());
         assert!(g2.links.iter().any(|l| l.rel == "user"));
         assert_eq!(edit_link(dir.path(), &ids[0], &ids[2], false).unwrap(), 0);
+    }
+
+    #[test]
+    fn hiding_a_link_removes_it_from_the_graph() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::init(dir.path()).unwrap();
+        store
+            .write(&mut mem(MemoryKind::Decision, "auth", "Use JWT.", &[]))
+            .unwrap();
+        store
+            .write(&mut mem(
+                MemoryKind::Fact,
+                "auth",
+                "JWT rotates hourly.",
+                &[],
+            ))
+            .unwrap();
+
+        let g = project_graph(&store, dir.path());
+        let (a, b) = (g.nodes[0].id.clone(), g.nodes[1].id.clone());
+        assert!(
+            g.links.iter().any(|l| l.rel == "topic"),
+            "expected a topic link"
+        );
+
+        edit_hidden(dir.path(), &a, &b, true).unwrap();
+        assert!(
+            project_graph(&store, dir.path()).links.is_empty(),
+            "hidden link should be gone"
+        );
+
+        edit_hidden(dir.path(), &a, &b, false).unwrap();
+        assert!(
+            project_graph(&store, dir.path())
+                .links
+                .iter()
+                .any(|l| l.rel == "topic"),
+            "unhidden"
+        );
     }
 }

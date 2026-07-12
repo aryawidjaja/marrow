@@ -62,6 +62,8 @@ pub fn route(default_root: Option<&Path>, method: &str, target: &str, body: &str
         ("POST", "/api/memory") => create_memory(&store, body),
         ("POST", "/api/link") => link(&root, &query, true),
         ("POST", "/api/unlink") => link(&root, &query, false),
+        ("POST", "/api/hide") => hide(&root, &query, true),
+        ("POST", "/api/unhide") => hide(&root, &query, false),
         ("POST", "/api/consolidate") => consolidate(&store, &root, &query),
         ("POST", "/api/demo/seed") => demo_seed(&store, &root),
         ("POST", "/api/demo/break") => demo_break(&root),
@@ -379,6 +381,16 @@ fn link(root: &Path, query: &HashMap<String, String>, add: bool) -> Response {
     };
     match graph::edit_link(root, source, target, add) {
         Ok(count) => json_ok(json!({ "ok": true, "links": count })),
+        Err(e) => error(&e.to_string()),
+    }
+}
+
+fn hide(root: &Path, query: &HashMap<String, String>, hide: bool) -> Response {
+    let (Some(source), Some(target)) = (query.get("source"), query.get("target")) else {
+        return error("hide needs source and target");
+    };
+    match graph::edit_hidden(root, source, target, hide) {
+        Ok(count) => json_ok(json!({ "ok": true, "hidden": count })),
         Err(e) => error(&e.to_string()),
     }
 }
