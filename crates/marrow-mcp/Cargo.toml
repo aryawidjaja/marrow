@@ -1,6 +1,6 @@
 [package]
 name = "marrow-mcp"
-version = "0.1.8"
+version = "0.2.0"
 edition = "2021"
 description = "Model Context Protocol server exposing the Marrow memory store to agents."
 license = "AGPL-3.0-only"

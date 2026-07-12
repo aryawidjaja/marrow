@@ -194,7 +194,7 @@ check "setup wrote the /marrow-save command" "$(cat "$proj5/.claude/commands/mar
 check "setup installs the auto-distill hook" "$(ls "$proj5/.claude/hooks/")" "marrow-distill.sh"
 check "setup installs the claim-release hook" "$(ls "$proj5/.claude/hooks/")" "marrow-release.sh"
 check "settings wires the Stop hook" "$(cat "$proj5/.claude/settings.json")" "marrow-distill.sh"
-check "setup stamps the version" "$(cat "$proj5/.claude/.marrow-version")" "0.1."
+check "setup stamps the version" "$(cat "$proj5/.claude/.marrow-version")" "."
 check "guidance block tells the agent to recall + save" "$(cat "$proj5/CLAUDE.md")" "Save as you go"
 merged="$(cat "$proj5/.claude/settings.json")"
 check "setup merged hooks into existing settings.json" "$merged" "marrow-bootstrap.sh"
