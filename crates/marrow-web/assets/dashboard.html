@@ -24,8 +24,34 @@
   button.on { background: var(--accent); border-color: var(--accent); color: #06101f; font-weight: 600; }
   .seg { display: inline-flex; padding: 0; overflow: hidden; }
   .seg button { border: 0; border-radius: 0; }
-  input[type=search] { background: var(--panel); border: 1px solid var(--line); color: var(--text);
-    padding: 6px 10px; border-radius: 7px; width: 190px; font-size: 12px; }
+  input[type=search], select, .modal-card input, .modal-card textarea, .modal-card select {
+    background: var(--panel); border: 1px solid var(--line); color: var(--text);
+    padding: 6px 10px; border-radius: 7px; font-size: 12px; }
+  input[type=search] { width: 190px; }
+  select#proj { max-width: 190px; cursor: pointer; }
+  #modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none;
+    align-items: center; justify-content: center; z-index: 20; }
+  #modal.show { display: flex; }
+  .modal-card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 20px; width: 480px; max-width: 92vw; max-height: 86vh; overflow: auto;
+    box-shadow: 0 20px 60px rgba(0,0,0,.6); }
+  .modal-card h3 { margin: 0 0 12px; font-size: 15px; }
+  .modal-card label { display: block; color: var(--muted); font-size: 11px; margin: 10px 0 4px; }
+  .modal-card input, .modal-card textarea, .modal-card select { width: 100%; }
+  .modal-card textarea { resize: vertical; font-family: inherit; line-height: 1.5; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  .modal-card hr { border: 0; border-top: 1px solid var(--line); margin: 18px 0; }
+  .row-item { display: flex; align-items: center; gap: 8px; padding: 5px 0; }
+  .row-item .dim { color: var(--muted); font-size: 11px; flex: 1; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .brow { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 5px 8px; border-radius: 6px; cursor: pointer; }
+  .brow:hover { background: var(--panel2); }
+  .brow .nav { flex: 1; cursor: pointer; }
+  .brow small { color: var(--accent); }
+  #detail .acts { display: flex; gap: 8px; margin-top: 12px; }
+  #detail .acts button { font-size: 11px; padding: 4px 10px; }
+  .danger { color: #ff6b6b; }
   main { display: grid; grid-template-columns: 250px 1fr; height: calc(100vh - 49px); }
   aside { border-right: 1px solid var(--line); background: var(--panel); overflow: auto; padding: 8px 0; }
   .tree-group > .row { font-weight: 600; }
@@ -76,13 +102,16 @@
 </head>
 <body>
 <header>
-  <h1>Marrow <span id="scope">· this project</span></h1>
+  <h1>Marrow</h1>
   <div class="seg" role="tablist">
     <button id="tab-project" class="on">Project</button>
     <button id="tab-hive">Hive</button>
   </div>
+  <select id="proj" title="Which brain to view"></select>
   <input id="search" type="search" placeholder="Filter neurons…" />
   <div class="spacer"></div>
+  <button id="add" title="Add a memory to this project">+ Add</button>
+  <button id="manage" title="Add or remove projects in the hive">Projects</button>
   <button id="sem" class="on" title="Show 'related meaning' links inferred from embeddings">✧ Meaning</button>
   <button id="linkmode" title="Click two neurons to connect or disconnect them">✎ Link</button>
   <button id="refit">Recenter</button>
@@ -98,6 +127,7 @@
     <div id="toast"></div>
   </div>
 </main>
+<div id="modal"><div class="modal-card"></div></div>
 <script>
 const palette = ["#6ea8fe","#46d39a","#ff8f5d","#c77dff","#ffd166","#4cc9f0","#f072b6","#90be6d","#e56b6f","#7bdff2"];
 const kindColor = { decision:"#6ea8fe", fact:"#46d39a", entity:"#c77dff", session:"#ffd166", skill:"#ff8f5d", project:"#8b93a4", core:"#f5c518" };
@@ -121,11 +151,23 @@ function colorFor(v, node) {
 
 let view = "project", raw = { nodes: [], links: [] }, nodes = [], links = [], byId = {};
 let filter = "", selected = null, linkMode = false, linkFrom = null, heat = 1, showSemantic = true;
+let project = "", projects = [];
+const pq = (lead) => project ? (lead || "?") + "project=" + encodeURIComponent(project) : "";
 const cv = document.getElementById("c"), ctx = cv.getContext("2d");
 let T = { k: 1, x: 0, y: 0 };
 
+async function loadProjects() {
+  const d = await (await fetch("/api/projects")).json();
+  projects = d.projects || [];
+  const sel = document.getElementById("proj");
+  sel.innerHTML = projects.map(p => `<option value="${esc(p.project)}">${esc(p.name)}</option>`).join("")
+    + `<option value="core">core (you)</option>`;
+  if (!projects.some(p => p.project === project) && project !== "core") project = projects[0] ? projects[0].project : "";
+  sel.value = project;
+}
+
 async function load() {
-  const url = view === "project" ? "/api/graph" : "/api/hive";
+  const url = view === "project" ? "/api/graph" + pq() : "/api/hive";
   raw = await (await fetch(url)).json();
   for (const k in colorMap) delete colorMap[k];
   byId = {};
@@ -280,8 +322,9 @@ async function select(n) {
   const d = document.getElementById("detail");
   const nb = [...neighbors(n)].length;
   let body = n.snippet || "";
+  const editable = view === "project" && n.kind !== "core";
   const url = view === "project"
-    ? (n.kind !== "core" ? "/api/memory/" + encodeURIComponent(n.id) : null)
+    ? (n.kind !== "core" ? "/api/memory/" + encodeURIComponent(n.id) + pq() : null)
     : (n.id.includes("#") ? `/api/hive/memory?project=${encodeURIComponent(n.group)}&id=${encodeURIComponent(n.id.split("#")[1])}` : null);
   if (url) {
     try { const full = await (await fetch(url)).json(); if (full && full.body) body = full.body; } catch {}
@@ -290,7 +333,8 @@ async function select(n) {
     <span class="k">${n.kind}${view==="hive"&&n.group?" · "+n.group:""}</span>
     <h3>${esc(n.label || n.id)}</h3>
     <div class="body">${esc(body)}</div>
-    <div class="meta">${nb} connection(s) · degree ${n.degree}<br>${n.id}</div>`;
+    <div class="meta">${nb} connection(s) · degree ${n.degree}<br>${n.id}</div>` +
+    (editable ? `<div class="acts"><button onclick="editMem('${n.id}')">Edit</button><button class="danger" onclick="delMem('${n.id}')">Delete</button></div>` : "");
   d.classList.add("show");
 }
 function closeDetail() { document.getElementById("detail").classList.remove("show"); selected = null; }
@@ -298,7 +342,7 @@ function esc(s){ return (s||"").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",
 
 async function toggleLink(a, b) {
   const existing = links.find(l => l.rel==="user" && ((l.s===a&&l.t===b)||(l.s===b&&l.t===a)));
-  const url = (existing ? "/api/unlink" : "/api/link") + `?source=${encodeURIComponent(a.id)}&target=${encodeURIComponent(b.id)}`;
+  const url = (existing ? "/api/unlink" : "/api/link") + `?source=${encodeURIComponent(a.id)}&target=${encodeURIComponent(b.id)}` + pq("&");
   await fetch(url, { method: "POST" });
   toast(existing ? "disconnected" : "connected");
   await load();
@@ -353,8 +397,80 @@ function setView(v) {
 }
 document.getElementById("tab-project").onclick = () => setView("project");
 document.getElementById("tab-hive").onclick = () => setView("hive");
+document.getElementById("proj").onchange = e => { project = e.target.value; if (view !== "project") setView("project"); else load(); };
 
-load(); loop();
+// modal + memory management
+function modal(html) { const m = document.getElementById("modal"); m.querySelector(".modal-card").innerHTML = html; m.classList.add("show"); }
+function closeModal() { document.getElementById("modal").classList.remove("show"); }
+document.getElementById("modal").onclick = e => { if (e.target.id === "modal") closeModal(); };
+
+const KINDS = ["fact", "decision", "entity", "session", "skill"];
+function memForm(e) {
+  const isEdit = !!e;
+  modal(`<h3>${isEdit ? "Edit memory" : "Add memory"}</h3>
+    <label>Kind</label>
+    <select id="f-kind" ${isEdit ? "disabled" : ""}>${KINDS.map(k => `<option ${e && e.kind === k ? "selected" : ""}>${k}</option>`).join("")}</select>
+    <label>Topic</label><input id="f-topic" value="${esc(e ? e.topic : "")}" placeholder="a short label, e.g. auth-strategy">
+    <label>Memory</label><textarea id="f-body" rows="7" placeholder="what should be remembered…">${esc(e ? e.body : "")}</textarea>
+    <label>Tags (comma-separated)</label><input id="f-tags" value="${esc(e ? (e.tags || []).join(", ") : "")}">
+    <div class="modal-actions"><button onclick="closeModal()">Cancel</button><button class="on" onclick="saveMem(${e ? `'${e.id}'` : "null"})">Save</button></div>`);
+}
+async function saveMem(id) {
+  const kind = document.getElementById("f-kind").value;
+  const topic = document.getElementById("f-topic").value.trim();
+  const body = document.getElementById("f-body").value.trim();
+  const tags = document.getElementById("f-tags").value.split(",").map(s => s.trim()).filter(Boolean);
+  if (!body) { toast("a memory needs a body"); return; }
+  const payload = JSON.stringify(id ? { topic, body, tags } : { kind, topic, body, tags });
+  const url = id ? `/api/memory/${encodeURIComponent(id)}/edit${pq()}` : `/api/memory${pq()}`;
+  const r = await (await fetch(url, { method: "POST", body: payload })).json();
+  if (r.ok === false || r.error) { toast(r.error || "could not save"); return; }
+  closeModal(); toast(id ? "saved" : "added"); await load();
+}
+async function editMem(id) {
+  const m = await (await fetch(`/api/memory/${encodeURIComponent(id)}${pq()}`)).json();
+  memForm({ id, kind: m.type, topic: m.topic || "", body: m.body || "", tags: m.tags || [] });
+}
+async function delMem(id) {
+  if (!confirm("Delete this memory permanently?")) return;
+  await fetch(`/api/memory/${encodeURIComponent(id)}/delete${pq()}`, { method: "POST" });
+  closeModal(); closeDetail(); toast("deleted"); await load();
+}
+
+// project management + folder browser
+async function manageProjects() {
+  const d = await (await fetch("/api/projects")).json();
+  const rows = (d.projects || []).filter(p => p.project).map(p =>
+    `<div class="row-item"><span>${esc(p.name)}</span><span class="dim">${esc(p.root)}</span><button class="danger" onclick="forgetProj('${esc(p.project)}')">remove</button></div>`).join("");
+  modal(`<h3>Projects in the hive</h3>${rows || "<p class='dim'>None yet — add one below.</p>"}
+    <hr><h3>Add a project</h3><p class="dim">Browse to a folder. 🧠 already has a Marrow brain; 📁 will get one.</p>
+    <div id="browser">loading…</div>
+    <div class="modal-actions"><button onclick="closeModal()">Done</button></div>`);
+  browseTo("");
+}
+async function browseTo(path) {
+  const d = await (await fetch("/api/browse?path=" + encodeURIComponent(path))).json();
+  const esc2 = s => (s || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  const up = d.parent != null ? `<div class="brow"><span class="nav" onclick="browseTo('${esc2(d.parent)}')">⬆ ..</span></div>` : "";
+  const rows = d.dirs.map(dir =>
+    `<div class="brow"><span class="nav" onclick="browseTo('${esc2(dir.path)}')">${dir.marrow ? "🧠" : "📁"} ${esc(dir.name)}</span>
+       <button onclick="addProj('${esc2(dir.path)}','${esc2(dir.name)}',${dir.marrow})"><small>${dir.marrow ? "add" : "init + add"}</small></button></div>`).join("");
+  document.getElementById("browser").innerHTML = `<div class="dim" style="margin-bottom:6px">${esc(d.path)}</div>${up}${rows || "<div class='dim'>no sub-folders</div>"}`;
+}
+async function addProj(path, name, hasMarrow) {
+  const ep = hasMarrow ? "/api/project/register" : "/api/project/init";
+  const r = await (await fetch(ep, { method: "POST", body: JSON.stringify({ path, name }) })).json();
+  if (r.error) { toast(r.error); return; }
+  toast("added " + name); await loadProjects(); manageProjects();
+}
+async function forgetProj(name) {
+  await fetch("/api/project/forget", { method: "POST", body: JSON.stringify({ name }) });
+  toast("removed"); await loadProjects(); manageProjects();
+}
+document.getElementById("add").onclick = () => memForm(null);
+document.getElementById("manage").onclick = manageProjects;
+
+loadProjects().then(load); loop();
 </script>
 </body>
 </html>

@@ -314,6 +314,57 @@ impl Store {
         self.write(memory)
     }
 
+    /// Edit a memory in place, keeping its id and lineage: update topic, body, and/or tags, then
+    /// rewrite the markdown, re-index, and re-embed. Returns false if there is no such memory.
+    pub fn update(
+        &self,
+        id: &str,
+        topic: Option<String>,
+        body: Option<String>,
+        tags: Option<Vec<String>>,
+    ) -> Result<bool, Error> {
+        let Some(mut memory) = self.read(id)? else {
+            return Ok(false);
+        };
+        if let Some(t) = topic {
+            memory.frontmatter.topic = (!t.trim().is_empty()).then_some(t);
+        }
+        if let Some(b) = body {
+            memory.body = b;
+        }
+        if let Some(tg) = tags {
+            memory.frontmatter.tags = tg;
+        }
+        memory.frontmatter.updated_at = util::now_rfc3339();
+        validate(&memory).map_err(Error::Invalid)?;
+        if self.config.sign {
+            let key = self.key.as_ref().ok_or(Error::Unsigned)?;
+            memory.frontmatter.hmac = Some(integrity::sign(&memory, key));
+        }
+        let rel = self.rel_path(&memory);
+        atomic_write(&self.memory_dir().join(&rel), &to_markdown(&memory))?;
+        index::upsert(&self.conn, &self.row_of(&memory, &rel))?;
+        self.embed_memory(&memory)?;
+        let summary = format!(
+            "edited '{}'",
+            memory.frontmatter.topic.as_deref().unwrap_or(id)
+        );
+        self.record(NewEvent::new("edit", "web", &summary).memory(id))?;
+        Ok(true)
+    }
+
+    /// Delete a memory outright: remove its markdown file, index row, and embedding. Returns false
+    /// if there is no such memory.
+    pub fn delete(&self, id: &str) -> Result<bool, Error> {
+        let Some(rel) = index::path_of(&self.conn, id)? else {
+            return Ok(false);
+        };
+        let _ = fs::remove_file(self.memory_dir().join(rel));
+        index::delete(&self.conn, id)?;
+        self.record(NewEvent::new("delete", "web", &format!("deleted {id}")).memory(id))?;
+        Ok(true)
+    }
+
     /// Embed a memory's topic+body and store the vector, if an embedder is configured.
     fn embed_memory(&self, memory: &Memory) -> Result<(), Error> {
         if let Some(embedder) = &self.embedder {

@@ -4,11 +4,11 @@
 //! the whole API is testable without binding a socket. [`serve`] runs the tiny_http loop.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use marrow_memdocs::{Frontmatter, Memory, MemoryKind, Provenance, Scope, Status};
 use marrow_store::{Hub, Store};
-use serde_json::json;
+use serde_json::{json, Value};
 
 mod graph;
 
@@ -22,32 +22,311 @@ pub struct Response {
     pub body: String,
 }
 
-/// Route one request against the store. `root` is the project the store lives in (used for
-/// staleness and consolidation, which look at the live code).
-pub fn route(store: &Store, root: &Path, method: &str, target: &str) -> Response {
+/// Route one request. The dashboard is hub-aware: hive and project-management endpoints need no
+/// store, and project-scoped endpoints resolve their store from `?project=<name>` (falling back to
+/// `default_root`, the store `marrow-serve --root` was started on, if any). `body` is the request
+/// body for POSTs.
+pub fn route(default_root: Option<&Path>, method: &str, target: &str, body: &str) -> Response {
     let (path, query) = split_target(target);
-    match (method, path.as_str()) {
-        ("GET", "/") | ("GET", "/index.html") => html(DASHBOARD),
-        ("GET", "/api/graph") => graph_project(store, root),
-        ("GET", "/api/hive") => graph_hive(),
-        ("GET", "/api/hive/memory") => hive_memory(&query),
-        ("POST", "/api/link") => link(root, &query, true),
-        ("POST", "/api/unlink") => link(root, &query, false),
-        ("GET", "/api/memories") => memories(store, &query),
-        ("GET", "/api/stale") => stale(store, root),
-        ("GET", "/api/history") => history(store),
-        ("GET", "/api/audit") => audit(store),
-        ("GET", "/api/evidence") => evidence(store, root),
-        ("POST", "/api/consolidate") => consolidate(store, root, &query),
-        ("POST", "/api/demo/seed") => demo_seed(store, root),
-        ("POST", "/api/demo/break") => demo_break(root),
-        ("GET", p) if p.starts_with("/api/memory/") => {
-            memory(store, p.trim_start_matches("/api/memory/"))
+    let p = path.as_str();
+
+    // Global endpoints — no single project store.
+    match (method, p) {
+        ("GET", "/") | ("GET", "/index.html") => return html(DASHBOARD),
+        ("GET", "/api/hive") => return graph_hive(),
+        ("GET", "/api/hive/memory") => return hive_memory(&query),
+        ("GET", "/api/projects") => return projects_list(default_root),
+        ("GET", "/api/browse") => return browse(&query),
+        ("POST", "/api/project/register") => return hub_register(body),
+        ("POST", "/api/project/forget") => return hub_forget(body),
+        ("POST", "/api/project/init") => return hub_init(body),
+        _ => {}
+    }
+
+    // Project-scoped endpoints.
+    let Some(root) = project_root(default_root, query.get("project").map(String::as_str)) else {
+        return error("no project — pass ?project=<name> or start marrow-serve with --root");
+    };
+    let store = match Store::open(&root) {
+        Ok(s) => s,
+        Err(e) => return error(&e.to_string()),
+    };
+    match (method, p) {
+        ("GET", "/api/graph") => graph_project(&store, &root),
+        ("GET", "/api/search") => search_memories(&store, &query),
+        ("GET", "/api/memories") => memories(&store, &query),
+        ("GET", "/api/stale") => stale(&store, &root),
+        ("GET", "/api/history") => history(&store),
+        ("GET", "/api/audit") => audit(&store),
+        ("GET", "/api/evidence") => evidence(&store, &root),
+        ("POST", "/api/memory") => create_memory(&store, body),
+        ("POST", "/api/link") => link(&root, &query, true),
+        ("POST", "/api/unlink") => link(&root, &query, false),
+        ("POST", "/api/consolidate") => consolidate(&store, &root, &query),
+        ("POST", "/api/demo/seed") => demo_seed(&store, &root),
+        ("POST", "/api/demo/break") => demo_break(&root),
+        ("POST", pp) if pp.starts_with("/api/memory/") && pp.ends_with("/edit") => {
+            edit_memory(&store, mem_id(pp, "/edit"), body)
         }
-        ("GET", p) if p.starts_with("/api/provenance/") => {
-            provenance(store, p.trim_start_matches("/api/provenance/"))
+        ("POST", pp) if pp.starts_with("/api/memory/") && pp.ends_with("/delete") => {
+            delete_memory(&store, mem_id(pp, "/delete"))
+        }
+        ("GET", pp) if pp.starts_with("/api/memory/") => {
+            memory(&store, pp.trim_start_matches("/api/memory/"))
+        }
+        ("GET", pp) if pp.starts_with("/api/provenance/") => {
+            provenance(&store, pp.trim_start_matches("/api/provenance/"))
         }
         _ => not_found(),
+    }
+}
+
+/// Resolve which store a request targets: a named registered project, the shared `core`, or the
+/// store the server was started on.
+fn project_root(default_root: Option<&Path>, project: Option<&str>) -> Option<PathBuf> {
+    match project {
+        Some("core") => Hub::open()
+            .ok()
+            .and_then(|h| h.core().ok())
+            .map(|s| s.root().to_path_buf()),
+        Some(name) if !name.is_empty() => Hub::open()
+            .ok()
+            .and_then(|h| h.projects().into_iter().find(|p| p.name == name))
+            .map(|p| p.root),
+        _ => default_root.map(Path::to_path_buf),
+    }
+}
+
+fn mem_id<'a>(path: &'a str, suffix: &str) -> &'a str {
+    path.trim_start_matches("/api/memory/")
+        .trim_end_matches(suffix)
+}
+
+/// The projects the switcher offers: every registered project, plus the served store when it isn't
+/// itself registered.
+fn projects_list(default_root: Option<&Path>) -> Response {
+    let mut items = Vec::new();
+    let registered = Hub::open().map(|h| h.projects()).unwrap_or_default();
+    if let Some(r) = default_root {
+        let canon = r.canonicalize().unwrap_or_else(|_| r.to_path_buf());
+        if !registered.iter().any(|p| p.root == canon) {
+            items.push(
+                json!({"name": "· this project", "project": "", "root": r.display().to_string()}),
+            );
+        }
+    }
+    for p in &registered {
+        items
+            .push(json!({"name": p.name, "project": p.name, "root": p.root.display().to_string()}));
+    }
+    json_ok(json!({ "projects": items }))
+}
+
+/// List sub-directories of a path so the UI can navigate the filesystem to add a project. Local
+/// dashboard only, so browsing the user's own machine is fine.
+fn browse(query: &HashMap<String, String>) -> Response {
+    let path = query
+        .get("path")
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(home_dir);
+    let mut dirs = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(&path) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') || !e.path().is_dir() {
+                continue;
+            }
+            dirs.push(json!({
+                "name": name,
+                "path": e.path().display().to_string(),
+                "marrow": e.path().join(".marrow").is_dir(),
+            }));
+        }
+    }
+    dirs.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+    json_ok(json!({
+        "path": path.display().to_string(),
+        "parent": path.parent().map(|p| p.display().to_string()),
+        "dirs": dirs,
+    }))
+}
+
+fn home_dir() -> PathBuf {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/"))
+}
+
+fn hub_register(body: &str) -> Response {
+    let v = parse_body(body);
+    let Some(path) = v.get("path").and_then(Value::as_str) else {
+        return error("register needs a path");
+    };
+    let name = v.get("name").and_then(Value::as_str);
+    match Hub::open().and_then(|mut h| h.register(Path::new(path), name)) {
+        Ok(p) => json_ok(json!({ "ok": true, "name": p.name })),
+        Err(e) => error(&e.to_string()),
+    }
+}
+
+fn hub_forget(body: &str) -> Response {
+    let v = parse_body(body);
+    let Some(key) = v.get("name").and_then(Value::as_str) else {
+        return error("forget needs a name");
+    };
+    match Hub::open().and_then(|mut h| h.forget(key)) {
+        Ok(removed) => json_ok(json!({ "ok": removed })),
+        Err(e) => error(&e.to_string()),
+    }
+}
+
+fn hub_init(body: &str) -> Response {
+    let v = parse_body(body);
+    let Some(path) = v.get("path").and_then(Value::as_str) else {
+        return error("init needs a path");
+    };
+    let name = v.get("name").and_then(Value::as_str);
+    if let Err(e) = Store::init(path) {
+        return error(&e.to_string());
+    }
+    match Hub::open().and_then(|mut h| h.register(Path::new(path), name)) {
+        Ok(p) => json_ok(json!({ "ok": true, "name": p.name })),
+        Err(e) => error(&e.to_string()),
+    }
+}
+
+fn create_memory(store: &Store, body: &str) -> Response {
+    let v = parse_body(body);
+    let kind = match v.get("kind").and_then(Value::as_str).map(parse_kind) {
+        Some(Ok(k)) => k,
+        _ => return error("memory needs a valid kind (fact|decision|entity|session|skill)"),
+    };
+    let Some(text) = v.get("body").and_then(Value::as_str) else {
+        return error("memory needs a body");
+    };
+    let mut memory = new_memory(
+        kind,
+        v.get("topic").and_then(Value::as_str),
+        text,
+        str_list(&v, "tags"),
+    );
+    match store.write(&mut memory) {
+        Ok(id) => json_ok(json!({ "ok": true, "id": id })),
+        Err(e) => error(&e.to_string()),
+    }
+}
+
+fn edit_memory(store: &Store, id: &str, body: &str) -> Response {
+    let v = parse_body(body);
+    let topic = v.get("topic").and_then(Value::as_str).map(String::from);
+    let text = v.get("body").and_then(Value::as_str).map(String::from);
+    let tags = v.get("tags").map(|_| str_list(&v, "tags"));
+    match store.update(id, topic, text, tags) {
+        Ok(true) => json_ok(json!({ "ok": true })),
+        Ok(false) => not_found(),
+        Err(e) => error(&e.to_string()),
+    }
+}
+
+fn delete_memory(store: &Store, id: &str) -> Response {
+    match store.delete(id) {
+        Ok(true) => json_ok(json!({ "ok": true })),
+        Ok(false) => not_found(),
+        Err(e) => error(&e.to_string()),
+    }
+}
+
+fn search_memories(store: &Store, query: &HashMap<String, String>) -> Response {
+    let q = query.get("q").map(String::as_str).unwrap_or_default();
+    let found = store
+        .search(
+            q,
+            &marrow_store::Query {
+                limit: Some(30),
+                ..Default::default()
+            },
+        )
+        .unwrap_or_default();
+    let items: Vec<Value> = found
+        .iter()
+        .map(|m| {
+            json!({
+                "id": m.frontmatter.id,
+                "kind": kind_str(m.frontmatter.kind),
+                "topic": m.frontmatter.topic,
+                "snippet": m.body.lines().next().unwrap_or("").trim(),
+            })
+        })
+        .collect();
+    json_ok(json!({ "results": items, "count": items.len() }))
+}
+
+fn parse_body(body: &str) -> Value {
+    serde_json::from_str(body).unwrap_or_else(|_| json!({}))
+}
+
+fn str_list(v: &Value, key: &str) -> Vec<String> {
+    v.get(key)
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_kind(s: &str) -> Result<MemoryKind, ()> {
+    match s {
+        "fact" => Ok(MemoryKind::Fact),
+        "decision" => Ok(MemoryKind::Decision),
+        "entity" => Ok(MemoryKind::Entity),
+        "session" => Ok(MemoryKind::Session),
+        "skill" => Ok(MemoryKind::Skill),
+        _ => Err(()),
+    }
+}
+
+fn kind_str(k: MemoryKind) -> &'static str {
+    match k {
+        MemoryKind::Fact => "fact",
+        MemoryKind::Decision => "decision",
+        MemoryKind::Entity => "entity",
+        MemoryKind::Session => "session",
+        MemoryKind::Skill => "skill",
+    }
+}
+
+fn new_memory(kind: MemoryKind, topic: Option<&str>, body: &str, tags: Vec<String>) -> Memory {
+    Memory {
+        frontmatter: Frontmatter {
+            id: String::new(),
+            kind,
+            status: Status::Active,
+            topic: topic.filter(|t| !t.is_empty()).map(String::from),
+            scope: Scope {
+                user_id: None,
+                agent_id: None,
+                project_id: String::new(),
+                org_id: None,
+            },
+            refs: vec![],
+            code_anchors: vec![],
+            confidence: 1.0,
+            decay: None,
+            provenance: Provenance {
+                written_by: "web".into(),
+                session_id: None,
+                sources: vec![],
+            },
+            supersedes: vec![],
+            tags,
+            created_at: String::new(),
+            updated_at: String::new(),
+            hmac: None,
+        },
+        body: body.into(),
     }
 }
 
@@ -197,18 +476,28 @@ fn demo_break(root: &Path) -> Response {
     }
 }
 
-/// Run the dashboard server until the process is killed.
-pub fn serve(root: &Path, addr: &str) -> Result<(), String> {
-    let store = Store::open(root).map_err(|e| e.to_string())?;
+/// Run the dashboard server until the process is killed. With `root = None` it opens centralized:
+/// the hive and any registered project, no single served store.
+pub fn serve(root: Option<PathBuf>, addr: &str) -> Result<(), String> {
     let server = tiny_http::Server::http(addr).map_err(|e| e.to_string())?;
-    println!(
-        "Marrow dashboard on http://{addr}  (store: {})",
-        root.display()
-    );
-    for request in server.incoming_requests() {
+    match &root {
+        Some(r) => println!(
+            "Marrow dashboard on http://{addr}  (store: {})",
+            r.display()
+        ),
+        None => {
+            println!("Marrow dashboard on http://{addr}  (centralized — every registered project)")
+        }
+    }
+    for mut request in server.incoming_requests() {
         let method = request.method().as_str().to_string();
         let target = request.url().to_string();
-        let resp = route(&store, root, &method, &target);
+        let mut body = String::new();
+        if method == "POST" {
+            let mut reader = std::io::Read::take(request.as_reader(), 1 << 20);
+            let _ = std::io::Read::read_to_string(&mut reader, &mut body);
+        }
+        let resp = route(root.as_deref(), &method, &target, &body);
         let header =
             tiny_http::Header::from_bytes(&b"Content-Type"[..], resp.content_type.as_bytes())
                 .unwrap();
@@ -357,11 +646,31 @@ fn split_target(target: &str) -> (String, HashMap<String, String>) {
     if let Some(qs) = parts.next() {
         for pair in qs.split('&') {
             if let Some((k, v)) = pair.split_once('=') {
-                query.insert(k.to_string(), v.to_string());
+                query.insert(k.to_string(), pct_decode(v));
             }
         }
     }
     (path, query)
+}
+
+/// Minimal percent + `+` decoding so query values (a search phrase, a filesystem path) survive.
+fn pct_decode(s: &str) -> String {
+    let bytes = s.replace('+', " ");
+    let bytes = bytes.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(b) = u8::from_str_radix(&String::from_utf8_lossy(&bytes[i + 1..i + 3]), 16) {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 fn html(body: &str) -> Response {

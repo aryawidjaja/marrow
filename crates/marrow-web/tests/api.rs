@@ -38,8 +38,8 @@ fn mem(kind: MemoryKind, topic: &str, body: &str) -> Memory {
     }
 }
 
-fn get(store: &Store, root: &Path, target: &str) -> serde_json::Value {
-    let resp = route(store, root, "GET", target);
+fn get(root: &Path, target: &str) -> serde_json::Value {
+    let resp = route(Some(root), "GET", target, "");
     assert_eq!(resp.status, 200, "GET {target}");
     serde_json::from_str(&resp.body).unwrap()
 }
@@ -47,8 +47,8 @@ fn get(store: &Store, root: &Path, target: &str) -> serde_json::Value {
 #[test]
 fn serves_the_dashboard_html() {
     let dir = tempfile::tempdir().unwrap();
-    let store = Store::init(dir.path()).unwrap();
-    let resp = route(&store, dir.path(), "GET", "/");
+    Store::init(dir.path()).unwrap();
+    let resp = route(Some(dir.path()), "GET", "/", "");
     assert_eq!(resp.status, 200);
     assert!(resp.content_type.starts_with("text/html"));
     assert!(resp.body.contains("Marrow"));
@@ -61,7 +61,7 @@ fn lists_active_memories_with_snippets() {
     let mut a = mem(MemoryKind::Fact, "auth", "We rotate keys every 90 days.");
     let id = store.write(&mut a).unwrap();
 
-    let v = get(&store, dir.path(), "/api/memories");
+    let v = get(dir.path(), "/api/memories");
     assert_eq!(v["count"], 1);
     assert_eq!(v["memories"][0]["id"], id);
     assert_eq!(v["memories"][0]["topic"], "auth");
@@ -79,14 +79,14 @@ fn reads_one_memory_with_body() {
     );
     let id = store.write(&mut a).unwrap();
 
-    let v = get(&store, dir.path(), &format!("/api/memory/{id}"));
+    let v = get(dir.path(), &format!("/api/memory/{id}"));
     assert_eq!(v["type"], "decision");
     assert_eq!(
         v["body"].as_str().unwrap().trim(),
         "Markdown is the source of truth."
     );
 
-    let missing = route(&store, dir.path(), "GET", "/api/memory/nope");
+    let missing = route(Some(dir.path()), "GET", "/api/memory/nope", "");
     assert_eq!(missing.status, 404);
 }
 
@@ -97,19 +97,19 @@ fn reports_history_and_audit() {
     let mut a = mem(MemoryKind::Fact, "x", "a fact");
     store.write(&mut a).unwrap();
 
-    let hist = get(&store, dir.path(), "/api/history");
+    let hist = get(dir.path(), "/api/history");
     assert_eq!(hist["count"], 1);
     assert_eq!(hist["events"][0]["kind"], "write");
 
-    let audit = get(&store, dir.path(), "/api/audit");
+    let audit = get(dir.path(), "/api/audit");
     assert_eq!(audit["ok"], true);
 }
 
 #[test]
 fn stale_endpoint_returns_empty_without_anchors() {
     let dir = tempfile::tempdir().unwrap();
-    let store = Store::init(dir.path()).unwrap();
-    let v = get(&store, dir.path(), "/api/stale");
+    Store::init(dir.path()).unwrap();
+    let v = get(dir.path(), "/api/stale");
     assert_eq!(v["count"], 0);
 }
 
@@ -122,16 +122,16 @@ fn consolidate_endpoint_merges_duplicates() {
     let mut b = mem(MemoryKind::Fact, "b", "the cache is invalidated on write");
     store.write(&mut b).unwrap();
 
-    let report = route(&store, dir.path(), "POST", "/api/consolidate");
+    let report = route(Some(dir.path()), "POST", "/api/consolidate", "");
     let rv: serde_json::Value = serde_json::from_str(&report.body).unwrap();
     assert_eq!(rv["related_memories"], 1);
 
-    let applied = route(&store, dir.path(), "POST", "/api/consolidate?apply=true");
+    let applied = route(Some(dir.path()), "POST", "/api/consolidate?apply=true", "");
     let av: serde_json::Value = serde_json::from_str(&applied.body).unwrap();
     assert_eq!(av["merged"], 1);
 
     // The superseded duplicate drops out of the active list.
-    let v = get(&store, dir.path(), "/api/memories?status=active");
+    let v = get(dir.path(), "/api/memories?status=active");
     assert_eq!(v["count"], 1);
 }
 
@@ -144,7 +144,7 @@ fn provenance_endpoint_returns_trail() {
     let mut b = mem(MemoryKind::Decision, "auth", "Use opaque tokens.");
     let new = store.supersede(&old, &mut b).unwrap();
 
-    let v = get(&store, dir.path(), &format!("/api/provenance/{new}"));
+    let v = get(dir.path(), &format!("/api/provenance/{new}"));
     assert_eq!(v["written_by"], "agent");
     assert!(v["supersedes"]
         .as_array()
@@ -157,29 +157,68 @@ fn provenance_endpoint_returns_trail() {
 #[test]
 fn demo_seed_break_drives_the_full_story() {
     let dir = tempfile::tempdir().unwrap();
-    let store = Store::init(dir.path()).unwrap();
+    Store::init(dir.path()).unwrap();
 
-    let seeded = route(&store, dir.path(), "POST", "/api/demo/seed");
+    let seeded = route(Some(dir.path()), "POST", "/api/demo/seed", "");
     assert_eq!(seeded.status, 200);
 
     // 3 memories seeded; nothing stale yet.
-    let mem_v = get(&store, dir.path(), "/api/memories?status=active");
+    let mem_v = get(dir.path(), "/api/memories?status=active");
     assert_eq!(mem_v["count"], 3);
-    assert_eq!(get(&store, dir.path(), "/api/stale")["count"], 0);
+    assert_eq!(get(dir.path(), "/api/stale")["count"], 0);
 
     // Break the demo code -> the anchored memory goes stale.
-    let broke = route(&store, dir.path(), "POST", "/api/demo/break");
+    let broke = route(Some(dir.path()), "POST", "/api/demo/break", "");
     assert_eq!(broke.status, 200);
-    assert_eq!(get(&store, dir.path(), "/api/stale")["count"], 1);
+    assert_eq!(get(dir.path(), "/api/stale")["count"], 1);
 
     // Consolidate collapses the duplicate pair.
-    let applied = route(&store, dir.path(), "POST", "/api/consolidate?apply=true");
+    let applied = route(Some(dir.path()), "POST", "/api/consolidate?apply=true", "");
     let av: serde_json::Value = serde_json::from_str(&applied.body).unwrap();
     assert_eq!(av["merged"], 1);
-    assert_eq!(
-        get(&store, dir.path(), "/api/memories?status=active")["count"],
-        2
+    assert_eq!(get(dir.path(), "/api/memories?status=active")["count"], 2);
+}
+
+#[test]
+fn create_edit_delete_memory_round_trip() {
+    let dir = tempfile::tempdir().unwrap();
+    Store::init(dir.path()).unwrap();
+
+    // Create via the dashboard.
+    let created = route(
+        Some(dir.path()),
+        "POST",
+        "/api/memory",
+        r#"{"kind":"fact","topic":"cache","body":"Cache clears on write.","tags":["perf"]}"#,
     );
+    let cv: serde_json::Value = serde_json::from_str(&created.body).unwrap();
+    assert_eq!(cv["ok"], true);
+    let id = cv["id"].as_str().unwrap().to_string();
+
+    // Edit it.
+    let edited = route(
+        Some(dir.path()),
+        "POST",
+        &format!("/api/memory/{id}/edit"),
+        r#"{"body":"Cache clears on every write, always."}"#,
+    );
+    assert_eq!(edited.status, 200);
+    let v = get(dir.path(), &format!("/api/memory/{id}"));
+    assert!(v["body"].as_str().unwrap().contains("always"));
+
+    // Search finds it.
+    let s = get(dir.path(), "/api/search?q=cache");
+    assert!(s["count"].as_u64().unwrap() >= 1);
+
+    // Delete it.
+    let del = route(
+        Some(dir.path()),
+        "POST",
+        &format!("/api/memory/{id}/delete"),
+        "",
+    );
+    assert_eq!(del.status, 200);
+    assert_eq!(get(dir.path(), "/api/memories")["count"], 0);
 }
 
 #[test]
@@ -189,7 +228,7 @@ fn evidence_endpoint_reports_product_and_store() {
     let mut a = mem(MemoryKind::Fact, "x", "a fact");
     store.write(&mut a).unwrap();
 
-    let v = get(&store, dir.path(), "/api/evidence");
+    let v = get(dir.path(), "/api/evidence");
     assert_eq!(v["product"]["consoleval"]["precision_pct"], 100.0);
     assert_eq!(v["product"]["tokeneval"]["reduction_pct"], 82.5);
     assert!(v["store"]["memories"].as_u64().unwrap() >= 1);
