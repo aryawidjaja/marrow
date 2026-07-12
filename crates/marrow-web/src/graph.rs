@@ -22,7 +22,7 @@ pub struct Node {
     pub degree: usize,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct Link {
     pub source: String,
     pub target: String,
@@ -169,7 +169,8 @@ pub fn project_graph(store: &Store, root: &Path) -> Graph {
 }
 
 /// The whole-machine hive: a central `core` neuron, a hub per registered project, each project's
-/// memories orbiting its hub, and cross-project bridges where two projects share a tag.
+/// memories orbiting its hub, and cross-project bridges by shared *meaning* (mutual nearest
+/// neighbours in embedding space) or a rare, specific shared tag — never a generic convention tag.
 pub fn hive_graph(hub: &Hub) -> Graph {
     let mut nodes = vec![Node {
         id: "core".into(),
@@ -181,6 +182,7 @@ pub fn hive_graph(hub: &Hub) -> Graph {
     }];
     let mut links = Vec::new();
     let mut tag_owners: HashMap<String, Vec<String>> = HashMap::new();
+    let mut sem_nodes: Vec<(String, usize, Vec<f32>)> = Vec::new();
     let mut degree: HashMap<String, usize> = HashMap::new();
 
     let mut projects = hub.projects();
@@ -222,6 +224,8 @@ pub fn hive_graph(hub: &Hub) -> Graph {
         let Ok(store) = Store::open(&p.root) else {
             continue;
         };
+        let vecs: HashMap<String, Vec<f32>> =
+            store.vectors().unwrap_or_default().into_iter().collect();
         for r in store.list().unwrap_or_default() {
             if r.status != "active" {
                 continue;
@@ -229,6 +233,9 @@ pub fn hive_graph(hub: &Hub) -> Graph {
             let node_id = format!("{hub_id}#{}", r.id);
             for t in tags_of(&r.tags) {
                 tag_owners.entry(t).or_default().push(node_id.clone());
+            }
+            if let Some(v) = vecs.get(&r.id) {
+                sem_nodes.push((node_id.clone(), i, v.clone()));
             }
             nodes.push(Node {
                 id: node_id.clone(),
@@ -250,10 +257,17 @@ pub fn hive_graph(hub: &Hub) -> Graph {
         }
     }
 
-    // Bridge memories that share a tag (the cross-project neural links).
+    // Cross-project links must be meaningful, not coincidental. A shared tag only bridges when it's
+    // distinctive (a handful of memories) AND spans projects — generic convention tags like
+    // "gotcha" or "frontend" would otherwise wire together unrelated work across every project.
     for members in tag_owners.values() {
-        star(&mut links, members, "tag");
+        if (2..=TAG_BRIDGE_FANOUT).contains(&members.len()) && spans_projects(members) {
+            star(&mut links, members, "tag");
+        }
     }
+    // The real cross-project bridges: memories whose meaning is close (embedding cosine), across
+    // different projects. Silent for projects without embeddings.
+    add_hive_semantic(&sem_nodes, &mut links);
 
     for l in &links {
         *degree.entry(l.source.clone()).or_default() += 1;
@@ -263,6 +277,60 @@ pub fn hive_graph(hub: &Hub) -> Graph {
         n.degree = degree.get(&n.id).copied().unwrap_or(0);
     }
     Graph { nodes, links }
+}
+
+/// A shared tag only bridges projects if it's this distinctive or rarer (used by at most this many
+/// memories). The data shows nearly every cross-project tag is a generic convention ("gotcha",
+/// "frontend"); only an ultra-specific tag shared by two memories is a real link.
+const TAG_BRIDGE_FANOUT: usize = 2;
+/// Size of each memory's nearest-neighbour set for the mutual-NN meaning test, and a floor so we
+/// never bridge in a degenerate low-similarity region.
+const HIVE_NN_K: usize = 6;
+const HIVE_SEM_FLOOR: f32 = 0.5;
+
+fn project_of(node_id: &str) -> &str {
+    node_id.split('#').next().unwrap_or("")
+}
+
+fn spans_projects(members: &[String]) -> bool {
+    let first = members.first().map(|m| project_of(m));
+    members.iter().any(|m| Some(project_of(m)) != first)
+}
+
+/// Bridge two memories in different projects only when they are **mutual** nearest neighbours by
+/// embedding — each is among the other's closest. This is robust to the high baseline cosine of
+/// small embedding models (a fixed threshold links unrelated notes; mutual-NN does not), so
+/// unrelated projects get few or no bridges and only genuinely-related memories connect.
+fn add_hive_semantic(nodes: &[(String, usize, Vec<f32>)], links: &mut Vec<Link>) {
+    let cosine = marrow_store::embed::cosine;
+    let nn: Vec<Vec<usize>> = (0..nodes.len())
+        .map(|i| {
+            let va = &nodes[i].2;
+            let mut sims: Vec<(usize, f32)> = (0..nodes.len())
+                .filter(|&j| j != i && nodes[j].2.len() == va.len())
+                .map(|j| (j, cosine(va, &nodes[j].2)))
+                .filter(|(_, s)| *s >= HIVE_SEM_FLOOR)
+                .collect();
+            sims.sort_by(|a, b| b.1.total_cmp(&a.1));
+            sims.into_iter().take(HIVE_NN_K).map(|(j, _)| j).collect()
+        })
+        .collect();
+
+    let mut seen = std::collections::HashSet::new();
+    for (i, neighbours) in nn.iter().enumerate() {
+        for &j in neighbours {
+            if nodes[i].1 != nodes[j].1 && nn[j].contains(&i) {
+                let (lo, hi) = ordered(&nodes[i].0, &nodes[j].0);
+                if seen.insert((lo.clone(), hi.clone())) {
+                    links.push(Link {
+                        source: lo,
+                        target: hi,
+                        rel: "semantic".into(),
+                    });
+                }
+            }
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -347,6 +415,29 @@ mod tests {
             },
             body: body.into(),
         }
+    }
+
+    #[test]
+    fn hive_semantic_bridges_only_mutual_cross_project_neighbours() {
+        // A (proj 0) and B (proj 1) point the same way — mutual nearest neighbours across projects.
+        // C (proj 1) is orthogonal. Expect exactly one bridge, A<->B, and none to C.
+        let nodes = vec![
+            ("p0#a".to_string(), 0usize, vec![1.0, 0.0, 0.0]),
+            ("p1#b".to_string(), 1usize, vec![0.98, 0.20, 0.0]),
+            ("p1#c".to_string(), 1usize, vec![0.0, 0.0, 1.0]),
+        ];
+        let mut links = Vec::new();
+        add_hive_semantic(&nodes, &mut links);
+        assert_eq!(links.len(), 1, "{links:?}");
+        assert_eq!(links[0].rel, "semantic");
+        let pair = ordered(&links[0].source, &links[0].target);
+        assert_eq!(pair, ("p0#a".into(), "p1#b".into()));
+    }
+
+    #[test]
+    fn spans_projects_detects_cross_project_groups() {
+        assert!(spans_projects(&["p0#a".into(), "p1#b".into()]));
+        assert!(!spans_projects(&["p0#a".into(), "p0#b".into()]));
     }
 
     #[test]

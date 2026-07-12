@@ -430,6 +430,18 @@ impl Store {
         self.load_budgeted(rows, q.max_tokens)
     }
 
+    /// The stored embedding vector for every active memory, so meaning can be compared across
+    /// stores (e.g. cross-project links in the hive). Empty when the store has no embeddings.
+    pub fn vectors(&self) -> Result<Vec<(String, Vec<f32>)>, Error> {
+        let ids: Vec<String> = self
+            .list()?
+            .into_iter()
+            .filter(|r| r.status == "active")
+            .map(|r| r.id)
+            .collect();
+        Ok(index::vectors_for(&self.conn, &ids)?)
+    }
+
     /// Semantic neighbours: for each active memory, up to `top_k` others whose embedding cosine is
     /// at least `min_sim`. Each pair appears once. Empty when the store has no real (non-hash)
     /// embeddings — meaning-based links need a semantic backend.
