@@ -81,7 +81,7 @@ pub(crate) fn all_definitions() -> Vec<Value> {
         })),
         tool("mem_query", "Structured query over memories with an optional token budget.", filter_schema(false)),
         tool("mem_search", "Hybrid keyword+semantic search over memories.", filter_schema(true)),
-        tool("mem_recall", "Like search, but records the retrieval so the answer it informs stays traceable.", filter_schema(true)),
+        tool("mem_recall", "Recall memories AND the ones connected to them (explicit links, shared topic/tag, related meaning) in one call — the related cluster, not just the matches. Records the retrieval so answers stay traceable.", filter_schema(true)),
         tool("mem_provenance", "Trace a memory's origin, lineage, and how it has been used.", json!({
             "type": "object",
             "properties": {"id": {"type": "string"}},
@@ -313,10 +313,42 @@ fn search(store: &Store, args: &Value) -> Result<String, String> {
 fn recall(store: &Store, args: &Value) -> Result<String, String> {
     let text = str_arg(args, "text")?;
     let by = opt_arg(args, "by").unwrap_or_else(|| "mcp".into());
-    let hits = store
-        .recall(&text, &query_from(args), &by)
+    // Associative recall: the matches plus the memories connected to them (one fetch, the related
+    // cluster). `connect` caps the extras (0 turns it off); neighbours come back terse.
+    let max_neighbors = args
+        .get("connect")
+        .and_then(Value::as_u64)
+        .map(|n| n as usize)
+        .unwrap_or(8);
+    let r = store
+        .recall_connected(&text, &query_from(args), &by, max_neighbors)
         .map_err(|e| e.to_string())?;
-    Ok(summaries(&hits))
+    let results: Vec<Value> = r
+        .seeds
+        .iter()
+        .map(|m| {
+            json!({
+                "id": m.frontmatter.id,
+                "kind": kind_name(m.frontmatter.kind),
+                "topic": m.frontmatter.topic,
+                "body": m.body.trim(),
+            })
+        })
+        .collect();
+    let connected: Vec<Value> = r
+        .neighbors
+        .iter()
+        .map(|n| {
+            json!({
+                "id": n.memory.frontmatter.id,
+                "kind": kind_name(n.memory.frontmatter.kind),
+                "topic": n.memory.frontmatter.topic,
+                "via": n.via,
+                "snippet": n.memory.body.trim().lines().next().unwrap_or("").chars().take(140).collect::<String>(),
+            })
+        })
+        .collect();
+    Ok(json!({"results": results, "count": results.len(), "connected": connected}).to_string())
 }
 
 fn provenance(store: &Store, args: &Value) -> Result<String, String> {

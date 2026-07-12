@@ -5,6 +5,7 @@
 //! memdocs schemas, optionally HMAC-signed, and persisted atomically. Code anchors are
 //! staleness-checked against live code via marrow-core's S3∧S4 hybrid.
 
+pub mod associative;
 pub mod config;
 pub mod consolidate;
 pub mod convert;
@@ -25,6 +26,7 @@ pub mod staleness;
 pub mod store;
 pub mod util;
 
+pub use associative::{ConnectedRecall, Neighbor};
 pub use config::Config;
 pub use consolidate::{
     Cluster, ClusterAction, ConsolidationOutcome, ConsolidationReport, Distiller,
