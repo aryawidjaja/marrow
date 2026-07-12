@@ -108,6 +108,20 @@
   #edgemenu button { display: block; width: 100%; text-align: left; border: 0; background: none;
     padding: 6px 8px; border-radius: 6px; font-size: 12px; }
   #edgemenu button:hover { background: var(--panel2); }
+  #channel { position: absolute; inset: 0; display: none; overflow: auto; background: var(--bg); padding: 22px; }
+  #channel.show { display: block; }
+  #channel .wrap { max-width: 720px; margin: 0 auto; }
+  #channel .ch-head { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+  #channel .thread { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px 16px; margin-bottom: 14px; }
+  #channel .msg { display: flex; flex-direction: column; margin: 8px 0; max-width: 82%; }
+  #channel .msg .who { font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+  #channel .msg .bubble { padding: 8px 12px; border-radius: 12px; font-size: 13px; line-height: 1.45; }
+  #channel .msg.ask { align-self: flex-start; }
+  #channel .msg.ask .bubble { background: var(--panel2); border-top-left-radius: 4px; }
+  #channel .msg.reply { align-self: flex-end; align-items: flex-end; }
+  #channel .msg.reply .bubble { background: #24406b; border-top-right-radius: 4px; }
+  #channel .empty { color: var(--muted); text-align: center; margin-top: 60px; }
 </style>
 </head>
 <body>
@@ -116,6 +130,7 @@
   <div class="seg" role="tablist">
     <button id="tab-project" class="on">Project</button>
     <button id="tab-hive">Hive</button>
+    <button id="tab-channel">Channel</button>
   </div>
   <select id="proj" title="Which brain to view"></select>
   <input id="search" type="search" placeholder="Filter neurons…" />
@@ -136,6 +151,7 @@
     <div id="detail"></div>
     <div class="tip" id="tip"></div>
     <div id="edgemenu"></div>
+    <div id="channel"></div>
     <div id="toast"></div>
   </div>
 </main>
@@ -478,13 +494,34 @@ document.getElementById("refit").onclick = fit;
 document.getElementById("sem").onclick = e => { showSemantic = !showSemantic; e.target.classList.toggle("on", showSemantic); buildLegend(); };
 function setView(v) {
   view = v; selected = null; closeDetail(); closeEdgeMenu(); linkFrom = null; reconnect = null; setHint();
-  document.getElementById("tab-project").classList.toggle("on", v==="project");
-  document.getElementById("tab-hive").classList.toggle("on", v==="hive");
+  for (const t of ["project", "hive", "channel"]) document.getElementById("tab-" + t).classList.toggle("on", v === t);
+  const graph = v === "project" || v === "hive";
+  document.getElementById("channel").classList.toggle("show", v === "channel");
+  for (const id of ["proj", "add", "sem", "refit"]) document.getElementById(id).style.display = graph ? "" : "none";
   document.getElementById("linkmode").style.display = v === "project" ? "" : "none";
-  load();
+  document.getElementById("legend").style.display = graph ? "" : "none";
+  document.getElementById("hint").style.display = graph ? "" : "none";
+  if (v === "channel") loadChannel(); else load();
+}
+async function loadChannel() {
+  const el = document.getElementById("channel");
+  let threads = [];
+  try { threads = (await (await fetch("/api/channel")).json()).threads || []; } catch {}
+  if (!threads.length) {
+    el.innerHTML = `<div class="empty">No agent messages yet.<br><br>This is where your agents talk to each other — one project's agent can ask another
+      "how's the training going?" and get a reply, all with you able to read along. Agents use mem_ask / mem_inbox / mem_reply.</div>`;
+    return;
+  }
+  el.innerHTML = `<div class="wrap"><div class="ch-head">${threads.length} conversation(s) between your agents — newest first.</div>` +
+    threads.map(t => `<div class="thread">` + t.messages.map(m => `
+      <div class="msg ${m.role === "reply" ? "reply" : "ask"}">
+        <div class="who">${esc(m.from)} ${m.role === "ask" ? "asked " + esc(m.to) : "replied"}</div>
+        <div class="bubble">${esc(m.body)}</div>
+      </div>`).join("") + `</div>`).join("") + `</div>`;
 }
 document.getElementById("tab-project").onclick = () => setView("project");
 document.getElementById("tab-hive").onclick = () => setView("hive");
+document.getElementById("tab-channel").onclick = () => setView("channel");
 document.getElementById("proj").onchange = e => { project = e.target.value; if (view !== "project") setView("project"); else load(); };
 
 // modal + memory management

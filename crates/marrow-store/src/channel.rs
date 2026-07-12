@@ -72,6 +72,31 @@ impl Store {
         Ok(out)
     }
 
+    /// Every conversation, most-recently-active first, each with its messages oldest-first — for
+    /// showing the channel. Capped at `limit` threads.
+    pub fn channel_threads(&self, limit: usize) -> Result<Vec<Vec<Message>>, Error> {
+        let mut order: Vec<String> = Vec::new();
+        let mut by_thread: std::collections::HashMap<String, Vec<Message>> =
+            std::collections::HashMap::new();
+        for m in self.messages()? {
+            // messages() is newest-first, so first sighting of a thread = its latest activity.
+            if !by_thread.contains_key(&m.thread) {
+                order.push(m.thread.clone());
+            }
+            by_thread.entry(m.thread.clone()).or_default().push(m);
+        }
+        Ok(order
+            .into_iter()
+            .take(limit)
+            .filter_map(|t| {
+                by_thread.remove(&t).map(|mut ms| {
+                    ms.reverse(); // oldest-first within the thread
+                    ms
+                })
+            })
+            .collect())
+    }
+
     /// Every message in a thread, oldest first.
     pub fn thread(&self, thread: &str) -> Result<Vec<Message>, Error> {
         let mut msgs: Vec<Message> = self

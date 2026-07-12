@@ -36,6 +36,7 @@ pub fn route(default_root: Option<&Path>, method: &str, target: &str, body: &str
         ("GET", "/api/hive") => return graph_hive(),
         ("GET", "/api/hive/memory") => return hive_memory(&query),
         ("GET", "/api/projects") => return projects_list(default_root),
+        ("GET", "/api/channel") => return channel(default_root),
         ("GET", "/api/browse") => return browse(&query),
         ("POST", "/api/project/register") => return hub_register(body),
         ("POST", "/api/project/forget") => return hub_forget(body),
@@ -152,6 +153,41 @@ fn browse(query: &HashMap<String, String>) -> Response {
         "parent": path.parent().map(|p| p.display().to_string()),
         "dirs": dirs,
     }))
+}
+
+/// The agent channel: conversation threads from the shared `core` bus (or the served store if
+/// there's no hive), for the dashboard's Channel view.
+fn channel(default_root: Option<&Path>) -> Response {
+    let store = if Hub::active() {
+        Hub::open().and_then(|h| h.core())
+    } else if let Some(r) = default_root {
+        Store::open(r)
+    } else {
+        return json_ok(json!({ "threads": [] }));
+    };
+    let store = match store {
+        Ok(s) => s,
+        Err(e) => return error(&e.to_string()),
+    };
+    match store.channel_threads(50) {
+        Ok(threads) => {
+            let items: Vec<Value> = threads
+                .iter()
+                .filter_map(|ms| {
+                    ms.first().map(|first| {
+                        json!({
+                            "thread": first.thread,
+                            "messages": ms.iter().map(|m| json!({
+                                "from": m.from, "to": m.to, "role": m.role, "body": m.body, "ts": m.ts
+                            })).collect::<Vec<_>>(),
+                        })
+                    })
+                })
+                .collect();
+            json_ok(json!({ "threads": items }))
+        }
+        Err(e) => error(&e.to_string()),
+    }
 }
 
 fn home_dir() -> PathBuf {
