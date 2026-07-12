@@ -51,9 +51,19 @@
   #detail .body { color: #cdd3df; white-space: pre-wrap; font-size: 12px; }
   #detail .meta { margin-top: 10px; color: var(--muted); font-size: 11px; }
   #detail .x { position: absolute; top: 8px; right: 10px; color: var(--muted); cursor: pointer; }
-  .legend { position: absolute; left: 12px; bottom: 12px; background: rgba(21,25,34,.85);
-    border: 1px solid var(--line); border-radius: 9px; padding: 9px 11px; font-size: 11px; max-width: 220px; }
-  .legend .li { display: flex; align-items: center; gap: 7px; padding: 1px 0; color: var(--muted); }
+  .legend { position: absolute; left: 12px; bottom: 12px; background: rgba(21,25,34,.9);
+    border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 11px; width: 232px; }
+  .legend .li { display: flex; align-items: center; gap: 8px; padding: 2px 0; color: var(--muted); }
+  .legend .lg-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+    color: var(--text); font-weight: 600; margin-bottom: 5px; }
+  .legend .lg-sub { color: var(--text); font-weight: 600; margin: 9px 0 3px; }
+  .legend .lg-help { color: var(--accent); cursor: pointer; font-weight: 400; font-size: 10px; white-space: nowrap; }
+  .legend .dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+  .legend .edge { width: 18px; height: 3px; border-radius: 2px; flex: 0 0 auto; }
+  .legend .lg-note { display: none; margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--line);
+    color: var(--muted); line-height: 1.5; }
+  .legend .lg-note.show { display: block; }
+  .legend .lg-note b { color: var(--text); font-weight: 600; }
   .hint { position: absolute; left: 12px; top: 12px; color: var(--muted); font-size: 11px;
     background: rgba(21,25,34,.7); padding: 4px 9px; border-radius: 7px; }
   #toast { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%);
@@ -90,6 +100,14 @@
 <script>
 const palette = ["#6ea8fe","#46d39a","#ff8f5d","#c77dff","#ffd166","#4cc9f0","#f072b6","#90be6d","#e56b6f","#7bdff2"];
 const kindColor = { decision:"#6ea8fe", fact:"#46d39a", entity:"#c77dff", session:"#ffd166", skill:"#ff8f5d", project:"#8b93a4", core:"#f5c518" };
+// Edge types are real relationships, each its own colour so the graph is legible.
+const edgeStyle = {
+  topic:   { color: "rgba(110,168,254,0.30)", label: "shared topic" },
+  tag:     { color: "rgba(70,211,154,0.32)",  label: "shared tag" },
+  user:    { color: "rgba(245,197,24,0.65)",  label: "you linked" },
+  hub:     { color: "rgba(245,197,24,0.30)",  label: "core ↔ project" },
+  cluster: { color: "rgba(120,130,150,0.18)", label: "in project" },
+};
 const colorMap = {};
 function colorFor(v, node) {
   if (node.kind === "core") return "#f5c518";
@@ -116,14 +134,37 @@ async function load() {
 }
 
 function buildLegend() {
-  const groups = view === "project"
-    ? [...new Set(nodes.map(n => n.kind))].filter(k => k !== "core")
-    : [...new Set(nodes.map(n => n.group))];
   const el = document.getElementById("legend");
-  el.innerHTML = groups.map(g => {
-    const c = view === "project" ? (kindColor[g] || "#8b93a4") : colorFor("hive", { group: g, kind: "x" });
-    return `<div class="li"><span class="dot" style="background:${c}"></span>${g}</div>`;
-  }).join("") + (view === "hive" ? `<div class="li"><span class="dot" style="background:#f5c518"></span>core (you)</div>` : "");
+  const dot = (c, label) => `<div class="li"><span class="dot" style="background:${c}"></span>${label}</div>`;
+  const edge = (c, label) => `<div class="li"><span class="edge" style="background:${c}"></span>${label}</div>`;
+
+  let neurons;
+  if (view === "project") {
+    neurons = [...new Set(nodes.map(n => n.kind))].filter(k => k !== "core")
+      .map(k => dot(kindColor[k] || "#8b93a4", k)).join("");
+  } else {
+    neurons = dot("#f5c518", "core (you)") +
+      [...new Set(nodes.map(n => n.group))].filter(g => g !== "core")
+        .map(g => dot(colorFor("hive", { group: g, kind: "x" }), g)).join("");
+  }
+
+  const present = new Set(links.map(l => l.rel));
+  const conns = ["topic", "tag", "hub", "cluster", "user"].filter(r => present.has(r)).map(r => {
+    const label = r === "tag" && view === "hive" ? "shared tag (bridge)" : edgeStyle[r].label;
+    return edge(edgeStyle[r].color, label);
+  }).join("");
+
+  const how = view === "hive"
+    ? "Every neuron is a memory. Links are real, not random: two memories connect when they share a <b>topic</b> or a <b>tag</b> the agent saved. Memories also link to their <b>project</b>, and two projects bridge when they share a tag. Bigger neuron = more connections."
+    : "Every neuron is a memory. Links are real, not random: two memories connect when they share a <b>topic</b> or a <b>tag</b> the agent saved on them. Draw your own with ✎ Link. Bigger neuron = more connections.";
+
+  el.innerHTML =
+    `<div class="lg-head">Neurons<span class="lg-help" id="lg-toggle">ⓘ how it works</span></div>` +
+    neurons +
+    `<div class="lg-sub">Connections</div>` + conns +
+    `<div class="lg-note" id="lg-note">${how}</div>`;
+  document.getElementById("lg-toggle").onclick = () =>
+    document.getElementById("lg-note").classList.toggle("show");
 }
 
 function buildTree() {
@@ -184,8 +225,8 @@ function draw() {
   const nb = neighbors(selected);
   for (const l of links) {
     const active = selected && (l.s === selected || l.t === selected);
-    ctx.strokeStyle = l.rel === "user" ? "rgba(245,197,24,.55)" : active ? "rgba(150,180,255,.5)" : "rgba(120,130,150,.12)";
-    ctx.lineWidth = (l.rel === "user" ? 1.6 : active ? 1.4 : 0.7) / T.k;
+    ctx.strokeStyle = active ? "rgba(150,180,255,.6)" : (edgeStyle[l.rel]?.color || "rgba(120,130,150,.14)");
+    ctx.lineWidth = (l.rel === "user" ? 1.6 : active ? 1.4 : 0.8) / T.k;
     ctx.beginPath(); ctx.moveTo(l.s.x, l.s.y); ctx.lineTo(l.t.x, l.t.y); ctx.stroke();
   }
   for (const n of nodes) {
