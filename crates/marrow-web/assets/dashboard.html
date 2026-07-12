@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Ⰶ Marrow — brain</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d0f14'/%3E%3Ctext x='16' y='24' font-size='22' text-anchor='middle' fill='%23f5c518'%3E&%23x2C16;%3C/text%3E%3C/svg%3E" />
+<link rel="icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAABmJLR0QA/wD/AP+gvaeTAAAEmElEQVRoge1aXWxTZRj+zk932i5b2fhpYYvDtSnNIm4BpMtmMnSWyBI2AWNiDIGEi414oQGJN2gI3mhcQmYWHBcLcyKJQsLkx2xgDBLlR9xQcEFglDno2GDQlnZt1/acz4stzfzOT893eo5nhPNcPu973vd9zvv99TsloP9t8DSD1LuAXGEI0BuGAL1hCNAbNO4DZs8RCGFeHmUrYEoWF5bYmRfchTUritd4F5gZSn4cjoO/XQ2fHwj+dSv691BodDwaDMdjsSQA4PqPja4yq1YCkqk0hCCZYqOTycBYBABwrBcAAAgCNK0t/7DZXV1VJB1hOJBoPxTY/9Uf8URSOEUyJb8ebAFigBD09Pl7+vx11aWdn65wPpfP93kSTX/UNvJF5yXpUBSF0Un158DPF+8tqz/ZfSyA8P2DUXf96azVAwAIEqMqTSYxy3Jbdp7b13U3w/w6EPG+cWr8YVj1XNhDqK7GAyGAEIYjMf/ww0g0Iea5Y+8vS0t8G3wLbo/EX3unj2U5MU+TiXI9by+eZzWZaAgBk4fxWokcT6OpNLx2c/LU2WDrgf4nkThiZfLoobONjc2Xr1y7i5hIkmjZvGrj2vnVVYX5FoxBjyBXARnE4uzOz+50dF9G+OJ51sehGELW1bgOtb5Y6mByz6vaKmS1UF/ucTEm2Nb5+2yeX/0rta6+gytNtDrTL7uAf0YTR3vH/7weejARZzko7cyy2VNGoomGbVJrEUEAE01bzXBZecH6eoe3UmpjyTKE9h0c3vHJhexFaYlGX3lPh5cghK1Sfbx5Z1L36gEAx8/4O4+MiFmlBHz7w30N6lGCb76/J2aSEnBlMKhBMUpwoR/d1zOQmsSPw8KHLf5whEJzG3GT4yPmNpVMC1YCpAXEYlMIs3Gd82j7an7WjsP+7bv/s7CUldqGzzXMZlp2Dxw4fGM2s2WTq+vzl/h527r87+/NfmSaBt5iXOHMF1wN+CRJohTBc+Iz01i13Ca/JDwBNC2ckl+JMmYmCyViEIKUALEEcwp4HRBruo7Q6kc9AbJLVeVtPPW3Ev+fAI1Gn9GBHCC46eICdxVSIaW60YwhpDcMAXrDEKA3DAEaAGt/mIsCsGAIAADIO/1rhGesA2LnRwhQA5/RCFIC+OVCEQXKDsairwMnmjodSKez5xR4HSLZORwFeB0IR4VDhyJKWvAoJHxhOBFU6Tsxxbtg2t89OPpgiibTBDGz3UAIOMD09A4hnlaLGWEYxoQwJ87cbmohC/MBADPf/yAELEf+dH5MHQFFNgvCJFPsdyduCDojsDCoeKtZoNvHT9+SE01ib5YaQh4nxh0l79kChHGVoYx8VLgXiZmkBDSscShOub5+McL4Xl6oOFqTr0TMJCXAV1u07lWPgny1q5e++foShCx1mHdt9yqIZl9Y8ME2p5iV2vPecomH32qw2+2Lxia4++Oy/iWwsrJsV3Nl+8cewXtsX21RhXvJozA5EgjKWSrdTse7Wyu/bq0qtqELQAYYH7qn/2EgGojAu/lFok0/nGHkR8P40E0Qat5OC0ZTEP8ZO8zNQRgC9IYhQG/8CzUZeQDmncsMAAAAAElFTkSuQmCC" />
 <style>
   :root {
     --bg: #0d0f14; --panel: #151922; --panel2: #1b2029; --line: #262b36;
@@ -16,9 +16,10 @@
     font: 13px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
   header { display: flex; align-items: center; gap: 10px; padding: 10px 16px; flex-wrap: wrap;
     row-gap: 8px; border-bottom: 1px solid var(--line); background: var(--bg); z-index: 5; }
-  header h1 { font-size: 15px; margin: 0; letter-spacing: .3px; font-weight: 600; }
+  header h1 { font-size: 15px; margin: 0; letter-spacing: .3px; font-weight: 600; display: flex; align-items: center; }
   header h1 span { color: var(--muted); font-weight: 400; }
   header h1 .mark { color: var(--gold); font-weight: 700; font-size: 17px; margin-right: 1px; }
+  .brand-wm { height: 18px; width: auto; display: block; }
   .spacer { flex: 1; }
   button, .seg { background: var(--panel); color: var(--text); border: 1px solid var(--line);
     padding: 6px 11px; border-radius: 7px; cursor: pointer; font-size: 12px; }
@@ -137,7 +138,7 @@
 </head>
 <body>
 <header>
-  <h1><span class="mark">&#x2C16;</span> Marrow</h1>
+  <h1 class="brand"><svg class="brand-wm" role="img" aria-label="Marrow" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="235 599 1030 301" fill="#ffffff"><defs><g/><clipPath id="d255232927"><rect x="0" width="1000" y="0" height="271"/></clipPath></defs><g transform="matrix(1, 0, 0, 1, 250, 614)"><g clip-path="url(#d255232927)"><g fill="#ffffff" fill-opacity="1"><g transform="translate(0.928044, 206.334398)"><g><path d="M 219.078125 -5.953125 C 219.078125 -4.515625 218.535156 -3.160156 217.453125 -1.890625 C 216.367188 -0.628906 215.101562 0 213.65625 0 L 180.625 0 C 179.175781 0 177.910156 -0.628906 176.828125 -1.890625 C 175.742188 -3.160156 175.203125 -4.515625 175.203125 -5.953125 L 175.203125 -101.546875 C 175.203125 -109.304688 173.984375 -114.539062 171.546875 -117.25 C 169.109375 -119.957031 165.003906 -121.3125 159.234375 -121.3125 L 154.078125 -121.3125 C 147.398438 -121.3125 143.203125 -119.503906 141.484375 -115.890625 C 139.773438 -112.285156 138.921875 -107.503906 138.921875 -101.546875 L 138.921875 -5.953125 C 138.921875 -4.515625 138.421875 -3.160156 137.421875 -1.890625 C 136.429688 -0.628906 135.21875 0 133.78125 0 L 100.46875 0 C 99.019531 0 97.753906 -0.628906 96.671875 -1.890625 C 95.585938 -3.160156 95.046875 -4.515625 95.046875 -5.953125 L 95.046875 -101.546875 C 95.046875 -107.503906 94.234375 -112.285156 92.609375 -115.890625 C 90.984375 -119.503906 86.742188 -121.3125 79.890625 -121.3125 L 74.46875 -121.3125 C 68.875 -121.3125 64.859375 -119.957031 62.421875 -117.25 C 59.984375 -114.539062 58.765625 -109.304688 58.765625 -101.546875 L 58.765625 -5.953125 C 58.765625 -4.515625 58.222656 -3.160156 57.140625 -1.890625 C 56.054688 -0.628906 54.789062 0 53.34375 0 L 20.3125 0 C 18.863281 0 17.597656 -0.628906 16.515625 -1.890625 C 15.429688 -3.160156 14.890625 -4.515625 14.890625 -5.953125 L 14.890625 -101.546875 C 14.890625 -120.679688 20.078125 -134.757812 30.453125 -143.78125 C 40.835938 -152.8125 55.507812 -157.328125 74.46875 -157.328125 L 79.890625 -157.328125 C 87.828125 -157.328125 94.863281 -156.289062 101 -154.21875 C 107.144531 -152.144531 112.472656 -149.300781 116.984375 -145.6875 C 121.492188 -149.300781 126.816406 -152.144531 132.953125 -154.21875 C 139.097656 -156.289062 146.140625 -157.328125 154.078125 -157.328125 L 159.234375 -157.328125 C 178.179688 -157.328125 192.890625 -152.8125 203.359375 -143.78125 C 213.835938 -134.757812 219.078125 -120.679688 219.078125 -101.546875 Z M 219.078125 -5.953125 "/></g></g></g><g fill="#ffffff" fill-opacity="1"><g transform="translate(234.891877, 206.334398)"><g><path d="M 145.6875 -12.453125 C 145.6875 -10.285156 145.1875 -8.660156 144.1875 -7.578125 C 143.195312 -6.492188 140.898438 -5.503906 137.296875 -4.609375 C 129.535156 -2.796875 120.644531 -1.171875 110.625 0.265625 C 100.601562 1.710938 90.359375 2.4375 79.890625 2.4375 C 58.046875 2.4375 41.253906 -3.65625 29.515625 -15.84375 C 17.785156 -28.03125 11.921875 -45.046875 11.921875 -66.890625 L 11.921875 -88.015625 C 11.921875 -110.035156 17.785156 -127.09375 29.515625 -139.1875 C 41.253906 -151.28125 58.046875 -157.328125 79.890625 -157.328125 C 90.359375 -157.328125 100.601562 -156.648438 110.625 -155.296875 C 120.644531 -153.941406 129.535156 -152.273438 137.296875 -150.296875 C 140.898438 -149.566406 143.195312 -148.613281 144.1875 -147.4375 C 145.1875 -146.269531 145.6875 -144.601562 145.6875 -142.4375 Z M 102.09375 -35.203125 L 102.09375 -119.6875 C 96.3125 -120.59375 88.910156 -121.046875 79.890625 -121.046875 C 70.316406 -121.046875 63.859375 -117.929688 60.515625 -111.703125 C 57.179688 -105.472656 55.515625 -97.578125 55.515625 -88.015625 L 55.515625 -66.890625 C 55.515625 -57.316406 57.179688 -49.367188 60.515625 -43.046875 C 63.859375 -36.734375 70.316406 -33.578125 79.890625 -33.578125 C 84.398438 -33.578125 88.59375 -33.753906 92.46875 -34.109375 C 96.351562 -34.472656 99.5625 -34.835938 102.09375 -35.203125 Z M 102.09375 -35.203125 "/></g></g></g><g fill="#ffffff" fill-opacity="1"><g transform="translate(396.825186, 206.334398)"><g><path d="M 97.21875 -125.921875 C 97.21875 -122.492188 94.78125 -120.78125 89.90625 -120.78125 C 87.375 -120.78125 84.125 -120.734375 80.15625 -120.640625 C 76.1875 -120.546875 72.347656 -120.363281 68.640625 -120.09375 C 64.941406 -119.820312 62.097656 -119.507812 60.109375 -119.15625 L 60.109375 -5.6875 C 60.109375 -4.238281 59.566406 -2.925781 58.484375 -1.75 C 57.410156 -0.582031 56.148438 0 54.703125 0 L 21.9375 0 C 20.488281 0 19.175781 -0.582031 18 -1.75 C 16.832031 -2.925781 16.25 -4.238281 16.25 -5.6875 L 16.25 -140.8125 C 16.25 -142.800781 16.878906 -144.472656 18.140625 -145.828125 C 19.398438 -147.179688 21.566406 -148.398438 24.640625 -149.484375 C 33.304688 -152.367188 43.144531 -154.394531 54.15625 -155.5625 C 65.164062 -156.738281 77.082031 -157.328125 89.90625 -157.328125 C 91.53125 -157.328125 93.15625 -156.96875 94.78125 -156.25 C 96.40625 -155.53125 97.21875 -154.175781 97.21875 -152.1875 Z M 97.21875 -125.921875 "/></g></g></g><g fill="#ffffff" fill-opacity="1"><g transform="translate(500.267545, 206.334398)"><g><path d="M 97.21875 -125.921875 C 97.21875 -122.492188 94.78125 -120.78125 89.90625 -120.78125 C 87.375 -120.78125 84.125 -120.734375 80.15625 -120.640625 C 76.1875 -120.546875 72.347656 -120.363281 68.640625 -120.09375 C 64.941406 -119.820312 62.097656 -119.507812 60.109375 -119.15625 L 60.109375 -5.6875 C 60.109375 -4.238281 59.566406 -2.925781 58.484375 -1.75 C 57.410156 -0.582031 56.148438 0 54.703125 0 L 21.9375 0 C 20.488281 0 19.175781 -0.582031 18 -1.75 C 16.832031 -2.925781 16.25 -4.238281 16.25 -5.6875 L 16.25 -140.8125 C 16.25 -142.800781 16.878906 -144.472656 18.140625 -145.828125 C 19.398438 -147.179688 21.566406 -148.398438 24.640625 -149.484375 C 33.304688 -152.367188 43.144531 -154.394531 54.15625 -155.5625 C 65.164062 -156.738281 77.082031 -157.328125 89.90625 -157.328125 C 91.53125 -157.328125 93.15625 -156.96875 94.78125 -156.25 C 96.40625 -155.53125 97.21875 -154.175781 97.21875 -152.1875 Z M 97.21875 -125.921875 "/></g></g></g><g fill="#ffffff" fill-opacity="1"><g transform="translate(601.001796, 206.334398)"><g><path d="M 147.578125 -67.96875 C 147.578125 -46.488281 141.800781 -29.382812 130.25 -16.65625 C 118.695312 -3.925781 101.910156 2.4375 79.890625 2.4375 C 58.046875 2.4375 41.253906 -3.925781 29.515625 -16.65625 C 17.785156 -29.382812 11.921875 -46.488281 11.921875 -67.96875 L 11.921875 -86.921875 C 11.921875 -108.410156 17.785156 -125.515625 29.515625 -138.234375 C 41.253906 -150.960938 58.046875 -157.328125 79.890625 -157.328125 C 101.910156 -157.328125 118.695312 -150.960938 130.25 -138.234375 C 141.800781 -125.515625 147.578125 -108.410156 147.578125 -86.921875 Z M 103.984375 -67.96875 L 103.984375 -86.921875 C 103.984375 -108.953125 95.953125 -119.96875 79.890625 -119.96875 C 63.640625 -119.96875 55.515625 -108.953125 55.515625 -86.921875 L 55.515625 -67.96875 C 55.515625 -45.757812 63.640625 -34.65625 79.890625 -34.65625 C 95.953125 -34.65625 103.984375 -45.757812 103.984375 -67.96875 Z M 103.984375 -67.96875 "/></g></g></g><g fill="#ffffff" fill-opacity="1"><g transform="translate(756.977553, 206.334398)"><g><path d="M 225.84375 -65.796875 C 225.84375 -49.015625 222.953125 -35.65625 217.171875 -25.71875 C 211.398438 -15.789062 203.773438 -8.613281 194.296875 -4.1875 C 184.816406 0.226562 174.390625 2.4375 163.015625 2.4375 C 155.429688 2.4375 148.253906 1.847656 141.484375 0.671875 C 134.722656 -0.492188 127.910156 -2.972656 121.046875 -6.765625 C 114.367188 -2.972656 107.597656 -0.492188 100.734375 0.671875 C 93.878906 1.847656 86.660156 2.4375 79.078125 2.4375 C 67.878906 2.4375 57.492188 0.226562 47.921875 -4.1875 C 38.359375 -8.613281 30.6875 -15.789062 24.90625 -25.71875 C 19.132812 -35.65625 16.25 -49.015625 16.25 -65.796875 L 16.25 -149.75 C 16.25 -151.195312 16.832031 -152.460938 18 -153.546875 C 19.175781 -154.628906 20.488281 -155.171875 21.9375 -155.171875 L 54.4375 -155.171875 C 55.875 -155.171875 57.132812 -154.628906 58.21875 -153.546875 C 59.300781 -152.460938 59.84375 -151.195312 59.84375 -149.75 L 59.84375 -65.796875 C 59.84375 -57.492188 60.832031 -51.222656 62.8125 -46.984375 C 64.800781 -42.742188 67.601562 -39.945312 71.21875 -38.59375 C 74.832031 -37.238281 78.984375 -36.5625 83.671875 -36.5625 C 86.566406 -36.5625 89.273438 -36.695312 91.796875 -36.96875 C 94.328125 -37.238281 96.765625 -37.734375 99.109375 -38.453125 L 99.109375 -149.484375 C 99.109375 -150.921875 99.648438 -152.226562 100.734375 -153.40625 C 101.816406 -154.582031 103.082031 -155.171875 104.53125 -155.171875 L 137.828125 -155.171875 C 139.273438 -155.171875 140.539062 -154.582031 141.625 -153.40625 C 142.707031 -152.226562 143.25 -150.921875 143.25 -149.484375 L 142.984375 -38.453125 C 145.503906 -37.734375 147.984375 -37.238281 150.421875 -36.96875 C 152.859375 -36.695312 155.523438 -36.5625 158.421875 -36.5625 C 163.109375 -36.5625 167.253906 -37.238281 170.859375 -38.59375 C 174.472656 -39.945312 177.273438 -42.742188 179.265625 -46.984375 C 181.253906 -51.222656 182.25 -57.492188 182.25 -65.796875 L 182.25 -149.75 C 182.25 -151.195312 182.789062 -152.460938 183.875 -153.546875 C 184.957031 -154.628906 186.21875 -155.171875 187.65625 -155.171875 L 220.15625 -155.171875 C 221.601562 -155.171875 222.910156 -154.628906 224.078125 -153.546875 C 225.253906 -152.460938 225.84375 -151.195312 225.84375 -149.75 Z M 225.84375 -65.796875 "/></g></g></g></g></g></svg></h1>
   <div class="seg" role="tablist">
     <button id="tab-project" class="on">Project</button>
     <button id="tab-hive">Hive</button>
@@ -215,6 +216,7 @@ async function load() {
   nodes.forEach(n => byId[n.id] = n);
   links = raw.links.filter(l => byId[l.source] && byId[l.target]).map(l => ({ ...l, s: byId[l.source], t: byId[l.target] }));
   assignAnchors();
+  detectCommunities();
   buildTree(); buildLegend(); fit(); heat = 1;
 }
 
@@ -297,9 +299,9 @@ function buildTree() {
 }
 
 function tick() {
-  // Obsidian's recipe: strong repulsion spreads everything out to fill the space, firm short links
-  // pull connected neurons into tight stars, and only a weak pull keeps it centred. Clusters emerge
-  // on their own — no artificial grouping force (that just collapses the graph into blobs).
+  // Obsidian-style: strong repulsion fills the space, firm short links make tight stars, and a
+  // GENTLE pull of each community toward its own centre carves the sub-clusters apart into visible
+  // bubbles. The community pull is weak on purpose — strong enough to group, too weak to collapse.
   const rep = view === "project" ? 4500 : 2600;
   for (let i = 0; i < nodes.length; i++) {
     const a = nodes[i];
@@ -320,7 +322,10 @@ function tick() {
     const f = (d-rest)*k, ux = dx/d, uy = dy/d;
     l.s.vx += ux*f; l.s.vy += uy*f; l.t.vx -= ux*f; l.t.vy -= uy*f;
   }
+  const cx = {}, cy = {}, cc = {};
+  for (const n of nodes) { cx[n.comm] = (cx[n.comm]||0)+n.x; cy[n.comm] = (cy[n.comm]||0)+n.y; cc[n.comm] = (cc[n.comm]||0)+1; }
   for (const n of nodes) {
+    if (cc[n.comm] > 1) { n.vx += (cx[n.comm]/cc[n.comm] - n.x) * 0.022; n.vy += (cy[n.comm]/cc[n.comm] - n.y) * 0.022; }
     if (n.ax != null) { n.vx += (n.ax - n.x) * 0.03; n.vy += (n.ay - n.y) * 0.03; }
     else { n.vx -= n.x * 0.006; n.vy -= n.y * 0.006; }
     if (n.pin) { n.vx = n.vy = 0; continue; }
@@ -358,7 +363,30 @@ function draw() {
   ctx.globalAlpha = 1;
 }
 
-function radius(n) { return n.kind === "core" ? 14 : n.kind === "project" ? 9 : 4 + Math.min(7, n.degree*0.8); }
+// Communities of densely-connected neurons (label propagation over content links only, ignoring the
+// structural hive spokes), so the layout can pull each into its own bubble.
+function detectCommunities() {
+  const adj = {};
+  for (const n of nodes) { adj[n.id] = []; n.comm = n.id; }
+  for (const l of links) {
+    if (l.rel === "hub" || l.rel === "cluster") continue;
+    adj[l.source].push(l.target); adj[l.target].push(l.source);
+  }
+  for (let iter = 0; iter < 8; iter++) {
+    let changed = false;
+    for (const n of nodes) {
+      const nb = adj[n.id]; if (!nb.length) continue;
+      const counts = {};
+      for (const m of nb) { const c = byId[m].comm; counts[c] = (counts[c]||0)+1; }
+      let best = n.comm, bc = -1;
+      for (const c in counts) if (counts[c] > bc || (counts[c] === bc && c < best)) { bc = counts[c]; best = c; }
+      if (best !== n.comm) { n.comm = best; changed = true; }
+    }
+    if (!changed) break;
+  }
+}
+
+function radius(n) { return n.kind === "core" ? 8 : n.kind === "project" ? 6 : 2.4 + Math.min(3.6, n.degree*0.45); }
 function neighbors(n) { const s = new Set(); if (!n) return s; for (const l of links) { if (l.s===n) s.add(l.t); if (l.t===n) s.add(l.s); } return s; }
 function match(n) { return (n.label||"").toLowerCase().includes(filter) || (n.snippet||"").toLowerCase().includes(filter); }
 function loop() { if (heat > 0) tick(); draw(); requestAnimationFrame(loop); }

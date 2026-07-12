@@ -1,4 +1,6 @@
-# Marrow Ⰶ
+<p align="center"><img src="assets/brand/logo.png" width="300" alt="Marrow" /></p>
+
+<h1 align="center">Marrow</h1>
 
 *A shared brain for your AI coding agents, so they stop forgetting, work as one, and you can **see** everything they know.*
 
