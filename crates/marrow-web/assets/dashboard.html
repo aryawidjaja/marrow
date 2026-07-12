@@ -298,11 +298,18 @@ function buildTree() {
   }
 }
 
+// How far a neuron may drift from its cluster's centre. Hard boundaries mean nothing can ever be
+// flung off into empty space, no matter how the forces balance.
+const HIVE_RADIUS = 300, PROJECT_RADIUS = 620;
+
 function tick() {
-  // Obsidian-style: strong repulsion fills the space, firm short links make tight stars, and a
-  // GENTLE pull of each community toward its own centre carves the sub-clusters apart into visible
-  // bubbles. The community pull is weak on purpose — strong enough to group, too weak to collapse.
-  const rep = view === "project" ? 4500 : 2600;
+  // The model, top to bottom:
+  //  - repulsion (1/d²) spreads neurons apart so they don't overlap;
+  //  - short, firm links pull connected neurons into tight flowers (a topic/tag hub + its petals);
+  //  - a gentle pull toward each community's centre separates the sub-clusters into their own bubbles;
+  //  - every neuron is kept inside its project's region (hive) or the canvas (project) by a hard clamp,
+  //    so lone, link-less neurons stay home instead of scattering.
+  const rep = view === "project" ? 2800 : 2000;
   for (let i = 0; i < nodes.length; i++) {
     const a = nodes[i];
     for (let j = i+1; j < nodes.length; j++) {
@@ -314,22 +321,28 @@ function tick() {
   }
   for (const l of links) {
     // Skip the in-project spokes in the hive: they'd make each project a 150-arm starburst. The
-    // project's anchor already groups its neurons; real content links give it internal structure.
+    // project's region already groups its neurons; real content links give it internal structure.
     if (view === "hive" && l.rel === "cluster") continue;
     let dx = l.t.x-l.s.x, dy = l.t.y-l.s.y, d = Math.hypot(dx,dy)+.01;
-    const rest = l.rel === "hub" ? 210 : l.rel === "semantic" ? 100 : 80;
-    const k = l.rel === "hub" ? 0.008 : 0.035;
+    const rest = l.rel === "hub" ? 180 : l.rel === "semantic" ? 62 : 52;
+    const k = l.rel === "hub" ? 0.01 : 0.06;
     const f = (d-rest)*k, ux = dx/d, uy = dy/d;
     l.s.vx += ux*f; l.s.vy += uy*f; l.t.vx -= ux*f; l.t.vy -= uy*f;
   }
   const cx = {}, cy = {}, cc = {};
   for (const n of nodes) { cx[n.comm] = (cx[n.comm]||0)+n.x; cy[n.comm] = (cy[n.comm]||0)+n.y; cc[n.comm] = (cc[n.comm]||0)+1; }
   for (const n of nodes) {
-    if (cc[n.comm] > 1) { n.vx += (cx[n.comm]/cc[n.comm] - n.x) * 0.022; n.vy += (cy[n.comm]/cc[n.comm] - n.y) * 0.022; }
-    if (n.ax != null) { n.vx += (n.ax - n.x) * 0.03; n.vy += (n.ay - n.y) * 0.03; }
-    else { n.vx -= n.x * 0.006; n.vy -= n.y * 0.006; }
+    if (cc[n.comm] > 1) { n.vx += (cx[n.comm]/cc[n.comm] - n.x) * 0.015; n.vy += (cy[n.comm]/cc[n.comm] - n.y) * 0.015; }
+    const hx = n.ax != null ? n.ax : 0, hy = n.ay != null ? n.ay : 0;
+    n.vx += (hx - n.x) * (n.ax != null ? 0.02 : 0.004);
+    n.vy += (hy - n.y) * (n.ax != null ? 0.02 : 0.004);
+    const sp = Math.hypot(n.vx, n.vy); if (sp > 24) { n.vx = n.vx/sp*24; n.vy = n.vy/sp*24; }
     if (n.pin) { n.vx = n.vy = 0; continue; }
-    n.x += n.vx*heat; n.y += n.vy*heat; n.vx *= 0.9; n.vy *= 0.9;
+    n.x += n.vx*heat; n.y += n.vy*heat; n.vx *= 0.85; n.vy *= 0.85;
+    // Hard boundary: no neuron may leave its cluster's disc.
+    const rmax = n.ax != null ? HIVE_RADIUS : PROJECT_RADIUS;
+    const ox = n.x - hx, oy = n.y - hy, od = Math.hypot(ox, oy);
+    if (od > rmax) { n.x = hx + ox/od*rmax; n.y = hy + oy/od*rmax; n.vx *= 0.4; n.vy *= 0.4; }
   }
   heat *= 0.985; if (heat < 0.03) heat = 0;
 }

@@ -54,7 +54,7 @@ fn tags_of(raw: &str) -> Vec<String> {
 
 /// A tag shared by more than this many memories in one project is a broad convention, not a
 /// specific relationship — it would draw a giant noise-star, so it doesn't create edges.
-const INTRA_TAG_FANOUT: usize = 12;
+const INTRA_TAG_FANOUT: usize = 7;
 
 /// Extract `[[target]]` wiki-links from text — the explicit references an agent wrote between
 /// memories. `target` is either a memory id or a topic slug.
