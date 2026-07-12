@@ -495,7 +495,7 @@ window.addEventListener("mousemove", e => {
   const r = cv.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
   if (drag) { moved = true; const p = screenToWorld(px, py); drag.n.x = p.x; drag.n.y = p.y; drag.n.pin = true; heat = Math.max(heat, .5); }
   else if (panning) { if (downXY && Math.hypot(px - downXY.x, py - downXY.y) > 3) moved = true; T.x = px - panning.x; T.y = py - panning.y; }
-  else showTip(px, py, e.clientX, e.clientY);
+  else showTip(px, py);
 });
 window.addEventListener("mouseup", () => {
   if (drag && !moved) {
@@ -590,9 +590,11 @@ window.addEventListener("keydown", e => {
   e.preventDefault();
 });
 
-function showTip(px, py, cx, cy) {
+function showTip(px, py) {
+  // The tip lives inside .stage, so it must be placed with stage-relative (canvas) coords, not the
+  // viewport clientX/Y — otherwise it lands offset by the sidebar width and header height.
   const n = nodeAt(px, py), tip = document.getElementById("tip");
-  if (n) { tip.style.display = "block"; tip.style.left = (cx+12)+"px"; tip.style.top = (cy+12)+"px";
+  if (n) { tip.style.display = "block"; tip.style.left = (px+14)+"px"; tip.style.top = (py+14)+"px";
     tip.innerHTML = `<b>${esc(n.label||n.id)}</b><br>${esc((n.snippet||"").slice(0,120))}`; }
   else tip.style.display = "none";
 }
