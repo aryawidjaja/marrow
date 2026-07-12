@@ -379,6 +379,38 @@ impl Store {
         self.load_budgeted(rows, q.max_tokens)
     }
 
+    /// Semantic neighbours: for each active memory, up to `top_k` others whose embedding cosine is
+    /// at least `min_sim`. Each pair appears once. Empty when the store has no real (non-hash)
+    /// embeddings — meaning-based links need a semantic backend.
+    pub fn related(&self, top_k: usize, min_sim: f32) -> Result<Vec<(String, String, f32)>, Error> {
+        let ids: Vec<String> = self
+            .list()?
+            .into_iter()
+            .filter(|r| r.status == "active")
+            .map(|r| r.id)
+            .collect();
+        let vecs = index::vectors_for(&self.conn, &ids)?;
+        let mut edges = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for (i, (_, va)) in vecs.iter().enumerate() {
+            let mut sims: Vec<(usize, f32)> = vecs
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| *j != i)
+                .map(|(j, (_, vb))| (j, crate::embed::cosine(va, vb)))
+                .filter(|(_, s)| *s >= min_sim)
+                .collect();
+            sims.sort_by(|a, b| b.1.total_cmp(&a.1));
+            for (j, s) in sims.into_iter().take(top_k) {
+                let (lo, hi) = if i < j { (i, j) } else { (j, i) };
+                if seen.insert((lo, hi)) {
+                    edges.push((vecs[lo].0.clone(), vecs[hi].0.clone(), s));
+                }
+            }
+        }
+        Ok(edges)
+    }
+
     /// Hybrid search: keyword (FTS5/BM25) fused with semantic (vector cosine) via weighted
     /// RRF. `hybrid_weight` of 0 (or no embedder) is exactly keyword search.
     pub fn search(&self, text: &str, q: &Query) -> Result<Vec<Memory>, Error> {

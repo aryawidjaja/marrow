@@ -66,7 +66,44 @@ fn star(links: &mut Vec<Link>, members: &[String], rel: &str) {
     }
 }
 
-/// The neuron graph for one store: memories linked by shared topic, shared tag, and user overlay.
+/// How many meaning-neighbours each memory keeps, and how close they must be. bge-m3 cosine puts
+/// genuinely related notes around 0.5–0.75; a top-k cap keeps the graph readable, not a hairball.
+const SEMANTIC_TOP_K: usize = 4;
+const SEMANTIC_MIN_SIM: f32 = 0.55;
+
+fn ordered(a: &str, b: &str) -> (String, String) {
+    if a <= b {
+        (a.into(), b.into())
+    } else {
+        (b.into(), a.into())
+    }
+}
+
+/// Add "related meaning" edges from embedding cosine, skipping any pair a topic/tag/user link
+/// already connects so the same two neurons aren't joined twice.
+fn add_semantic(store: &Store, links: &mut Vec<Link>, node_id: impl Fn(&str) -> String) {
+    let existing: std::collections::HashSet<(String, String)> = links
+        .iter()
+        .map(|l| ordered(&l.source, &l.target))
+        .collect();
+    for (a, b, _sim) in store
+        .related(SEMANTIC_TOP_K, SEMANTIC_MIN_SIM)
+        .unwrap_or_default()
+    {
+        let (na, nb) = (node_id(&a), node_id(&b));
+        if existing.contains(&ordered(&na, &nb)) {
+            continue;
+        }
+        links.push(Link {
+            source: na,
+            target: nb,
+            rel: "semantic".into(),
+        });
+    }
+}
+
+/// The neuron graph for one store: memories linked by shared topic, shared tag, related meaning
+/// (embeddings), and any links you drew.
 pub fn project_graph(store: &Store, root: &Path) -> Graph {
     let rows = store.list().unwrap_or_default();
     let mut by_topic: HashMap<String, Vec<String>> = HashMap::new();
@@ -119,6 +156,7 @@ pub fn project_graph(store: &Store, root: &Path) -> Graph {
             });
         }
     }
+    add_semantic(store, &mut links, |id| id.to_string());
 
     for l in &links {
         *degree.entry(l.source.clone()).or_default() += 1;
@@ -309,6 +347,35 @@ mod tests {
             },
             body: body.into(),
         }
+    }
+
+    #[test]
+    fn semantic_edges_link_related_meaning() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::init(dir.path()).unwrap();
+        store.set_embedder(Box::new(marrow_store::HashEmbedder::new(256)));
+        // Same body, different topic/no shared tag: only meaning (embedding) can connect them.
+        let body =
+            "the write cache is invalidated and rebuilt on every persisted mutation of the store";
+        store
+            .write(&mut mem(MemoryKind::Fact, "alpha", body, &[]))
+            .unwrap();
+        store
+            .write(&mut mem(MemoryKind::Fact, "beta", body, &[]))
+            .unwrap();
+        store
+            .write(&mut mem(
+                MemoryKind::Fact,
+                "gamma",
+                "stripe billing webhooks are signed",
+                &[],
+            ))
+            .unwrap();
+        let g = project_graph(&store, dir.path());
+        assert!(
+            g.links.iter().any(|l| l.rel == "semantic"),
+            "expected a related-meaning edge between the two same-meaning memories"
+        );
     }
 
     #[test]
