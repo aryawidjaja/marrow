@@ -1,7 +1,7 @@
-# Marrow backbone — one brain across devices
+# Marrow backbone, one brain across devices
 
 `marrow-server` is a shared Marrow store over HTTP. Point every device's agent at it and they read
-and write the same memory — the hive-mind, across machines. It speaks the same tool calls the local
+and write the same memory, the hive-mind, across machines. It speaks the same tool calls the local
 MCP server does, routed to a per-project store on the server.
 
 ## Run it
@@ -38,14 +38,14 @@ export MARROW_TOKEN=<the shared secret>
 export MARROW_PROJECT=team-app        # devices sharing this name share one brain
 ```
 
-That's it — `mem_write`, `mem_recall`, `mem_search`, and the rest now round-trip through the
+That's it, `mem_write`, `mem_recall`, `mem_search`, and the rest now round-trip through the
 shared backbone. Leave the variables unset and Marrow stays fully local.
 
 ## API
 
 | Method | Path | Body | Purpose |
 | --- | --- | --- | --- |
-| GET | `/health` | — | liveness (open, no token) |
+| GET | `/health` |, | liveness (open, no token) |
 | POST | `/v1/rpc` | `{"tool","args","project"}` | run a Marrow tool against a project store |
 
 `Authorization: Bearer <MARROW_TOKEN>` is required on every request but `/health`.

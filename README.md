@@ -1,6 +1,6 @@
-# Marrow 🦴
+# Marrow Ⰶ
 
-*A shared brain for your AI coding agents — so they stop forgetting, work as one, and you can **see** everything they know.*
+*A shared brain for your AI coding agents, so they stop forgetting, work as one, and you can **see** everything they know.*
 
 [![Release](https://img.shields.io/github/v/release/aryawidjaja/marrow?color=2ea44f&label=release)](https://github.com/aryawidjaja/marrow/releases/latest)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
@@ -12,21 +12,34 @@
 [![Cursor](https://img.shields.io/badge/Cursor-compatible-000000?logo=cursor&logoColor=white)](https://cursor.com)
 [![Codex](https://img.shields.io/badge/Codex-compatible-412991)](https://openai.com/codex)
 
+## You know Pluribus?
+
+In the show almost everyone joins into one shared mind. Carol is one of the few who stay themselves.
+She never gets absorbed, but she still gets to use that hive. Through Zosia she can ask the whole
+collective anything, and thousands of minds organize around her to get it done. She stays the
+individual. The hive works for her.
+
+That is you and your AI agents. Each one is sharp on its own, but they forget everything between
+sessions, repeat decisions you already made, and when you run a few at once they trip over each other.
+Marrow gives them one shared memory so they act like a real hive instead of a crowd of strangers:
+organized, coordinated, far more useful together. And you stay Carol. The memory lives in your marrow,
+plain files on your own machine that you read and own, never taken from you without your say-so.
+
 ## The problem
 
 Every new agent session starts from zero. It re-reads your codebase, repeats decisions you already
 made, and forgets everything the moment its context fills up. Run several agents at once and it gets
-worse — blind to each other, they collide and undo each other's work.
+worse: blind to each other, they collide and undo each other's work.
 
 ## What Marrow does
 
 Marrow gives your agents **one shared memory** that persists across sessions, stays current as your
 code changes, and lets many agents work together without stepping on each other. It's plain markdown
-files you can read, edit, and commit — not a black box. A new session starts already knowing what the
+files you can read, edit, and commit, not a black box. A new session starts already knowing what the
 others learned.
 
 And it pays for itself in tokens. Ask the same "understand this codebase" question through Claude Code
-— once cold, once warm with Marrow — and the warm run uses about **72% fewer tokens** and finishes
+once cold and once warm with Marrow, and the warm run uses about **72% fewer tokens** and finishes
 about **57% faster**, because it recalls a small distilled briefing instead of re-reading every file.
 
 <img src="assets/benchmark.png" width="720" alt="Marrow: 72% fewer tokens, 57% faster, 25% cheaper">
@@ -38,7 +51,7 @@ about **57% faster**, because it recalls a small distilled briefing instead of r
 | Cost | ~$0.21 | ~$0.16 | ~25% |
 
 The tell is the variance: warm stays flat at ~38k tokens every run while cold swings from 98k to
-170k — so the gap *widens* on bigger projects.
+170k, so the gap *widens* on bigger projects.
 
 ## Get started in 3 steps
 
@@ -60,7 +73,7 @@ The memory lives in `.marrow/` in your project.
 
 ## See your brain
 
-Marrow isn't a black box — it's a graph you can explore, like a second brain.
+Marrow isn't a black box, it's a graph you can explore, like a second brain.
 
 ```bash
 marrow-serve          # opens the dashboard at http://localhost:8088
@@ -87,10 +100,10 @@ central *core* neuron (you) with every project orbiting it, bridged where they s
 
 ## One brain across your devices
 
-Run the Marrow backbone once and point every machine at it — the hive mind, across computers:
+Run the Marrow backbone once and point every machine at it. One hive mind, across computers:
 
 ```bash
-# on a server (Docker, Fly.io, any host — see deploy/)
+# on a server (Docker, Fly.io, or any host; see deploy/)
 MARROW_TOKEN=$(openssl rand -hex 16) marrow-server
 
 # on each device
@@ -115,7 +128,7 @@ This puts `marrow`, `marrow-mcp`, and `marrow-serve` on your PATH.
 ## Bringing in an existing project
 
 A fresh brain starts empty. To seed it from docs you already have, the first warm start nudges your
-agent to run `marrow ingest` — it lists your README and `docs/` and distills them into memory. After
+agent to run `marrow ingest`, it lists your README and `docs/` and distills them into memory. After
 that, every session starts informed. Any time, run **`/marrow-save`** to capture the session you're in.
 
 ## Using Cursor, Codex, or other MCP agents
@@ -130,7 +143,7 @@ Codex TOML.
 
 ## Smarter (semantic) search
 
-Search is keyword-based by default — instant and offline. For **meaning-based** recall (finding a note
+Search is keyword-based by default, instant and offline. For **meaning-based** recall (finding a note
 about "JWT" when you search "login security"), install a semantic build:
 ```bash
 brew install aryawidjaja/marrow/marrow-semantic   # multilingual, downloads a small model on first use
@@ -151,30 +164,31 @@ marrow consolidate --repo . --apply                                  # merge dup
 marrow audit                                                         # prove the ledger untampered
 ```
 
-`marrow add` writes a plain markdown file under `.marrow/memory/` — the YAML frontmatter is metadata,
+`marrow add` writes a plain markdown file under `.marrow/memory/`, the YAML frontmatter is metadata,
 the text below is the memory. The SQLite index is a rebuildable cache over these files.
 
 ## What's under the hood
 
-- **Staleness detection** — a memory can cite a code symbol; Marrow fingerprints it and flags the note
+- **Staleness detection**: a memory can cite a code symbol; Marrow fingerprints it and flags the note
   the moment the symbol changes, ignoring reformatting and renames.
-- **Consolidation** — clusters related memories by meaning, merges duplicates, resolves contradictions,
+- **Consolidation**: clusters related memories by meaning, merges duplicates, resolves contradictions,
   and retires expired notes, preserving lineage.
-- **Hive mind** — many sessions work as one: each joins warm, claims its work so two never collide, and
+- **Hive mind**: many sessions work as one: each joins warm, claims its work so two never collide, and
   reads a live activity trail. Unlike a black-box hive, every signal is in an auditable ledger.
-- **Audit & provenance** — every write, edit, and recall lands in an append-only, hash-chained ledger;
+- **Audit & provenance**: every write, edit, and recall lands in an append-only, hash-chained ledger;
   any answer traces back to its sources.
-- **Typed & validated** — five schemas (fact, decision, entity, session, skill); bad writes are rejected
+- **Typed & validated**: five schemas (fact, decision, entity, session, skill); bad writes are rejected
   with reasons.
-- **Runs anywhere** — offline single binaries; markdown is the source of truth, SQLite a disposable cache.
+- **Runs anywhere**: offline single binaries; markdown is the source of truth, SQLite a disposable cache.
 
 ## The name
 
-Marrow is the essential core a body grows from — and where the immune system's memory begins: the
-quiet, foundational layer an agent's knowledge is built on.
+Marrow is where the immune system's memory begins, the quiet layer a body's knowledge is built on. In
+Pluribus it is the marrow that keeps the immune themselves, the one thing the hive cannot take without
+consent. Same idea here. Your agents share a memory, but it stays yours, in your marrow, on your terms.
 
 ## License
 
 The engine (`crates/`) is **AGPL-3.0-only**; the embeddable Python backend (`python/marrow-anthropic`)
 is **Apache-2.0**. Using Marrow from your agent over MCP or the CLI is a separate process, not a
-derivative work. A commercial license is available — see [COMMERCIAL.md](COMMERCIAL.md).
+derivative work. A commercial license is available, see [COMMERCIAL.md](COMMERCIAL.md).
