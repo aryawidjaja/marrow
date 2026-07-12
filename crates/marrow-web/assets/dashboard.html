@@ -344,6 +344,18 @@ function tick() {
     const ox = n.x - hx, oy = n.y - hy, od = Math.hypot(ox, oy);
     if (od > rmax) { n.x = hx + ox/od*rmax; n.y = hy + oy/od*rmax; n.vx *= 0.4; n.vy *= 0.4; }
   }
+  if (view === "hive") {
+    // Seat each project's hub in the centre of its own cluster, so it reads as that cluster's core
+    // (the neuron the central 'you' node links to) instead of dangling on a stick in empty space.
+    const gx = {}, gy = {}, gn = {};
+    for (const n of nodes) {
+      if (n.kind === "project" || n.kind === "core") continue;
+      gx[n.group] = (gx[n.group]||0)+n.x; gy[n.group] = (gy[n.group]||0)+n.y; gn[n.group] = (gn[n.group]||0)+1;
+    }
+    for (const n of nodes) if (n.kind === "project" && gn[n.group]) {
+      n.x = gx[n.group]/gn[n.group]; n.y = gy[n.group]/gn[n.group]; n.vx = n.vy = 0;
+    }
+  }
   heat *= 0.985; if (heat < 0.03) heat = 0;
 }
 
@@ -356,10 +368,17 @@ function draw() {
     if (l.rel === "semantic" && !showSemantic) continue;
     if (view === "hive" && l.rel === "cluster") continue;   // spokes are noise; grouping is spatial
     const active = selected && (l.s === selected || l.t === selected);
-    ctx.strokeStyle = active ? "rgba(150,180,255,.6)" : (edgeStyle[l.rel]?.color || "rgba(120,130,150,.14)");
-    ctx.lineWidth = (l.rel === "user" ? 1.6 : active ? 1.4 : 0.8) / T.k;
-    ctx.beginPath(); ctx.moveTo(l.s.x, l.s.y); ctx.lineTo(l.t.x, l.t.y); ctx.stroke();
+    // Select a neuron and everything but its own links fades away, so you read one thing at a time
+    // instead of a web. Otherwise links are faint and thin so crossings don't shout.
+    ctx.globalAlpha = active ? 0.95 : (selected ? 0.05 : 0.4);
+    ctx.strokeStyle = active ? "rgba(150,180,255,.95)" : (edgeStyle[l.rel]?.color || "rgba(120,130,150,.5)");
+    ctx.lineWidth = (l.rel === "user" ? 1.4 : active ? 1.5 : 0.7) / T.k;
+    // Bow each link slightly so overlapping links read as separate strands, not one straight tangle.
+    const dx = l.t.x - l.s.x, dy = l.t.y - l.s.y;
+    const cxp = (l.s.x + l.t.x)/2 - dy*0.14, cyp = (l.s.y + l.t.y)/2 + dx*0.14;
+    ctx.beginPath(); ctx.moveTo(l.s.x, l.s.y); ctx.quadraticCurveTo(cxp, cyp, l.t.x, l.t.y); ctx.stroke();
   }
+  ctx.globalAlpha = 1;
   for (const n of nodes) {
     const r = radius(n);
     const dim = (filter && !match(n)) || (selected && n !== selected && !nb.has(n));
@@ -533,13 +552,43 @@ async function finishReconnect(n) {
   await post("link", rc.keep, n.id);
   toast("reconnected"); await load();
 }
-function setHint() { document.getElementById("hint").textContent = reconnect ? "reconnect: click the memory to connect this end to" : linkMode ? "link mode: click two neurons to connect or disconnect" : "drag to pan · scroll to zoom · drag a neuron · click a link to edit it"; }
+function setHint() { document.getElementById("hint").textContent = reconnect ? "reconnect: click the memory to connect this end to" : linkMode ? "link mode: click two neurons to connect or disconnect" : "drag to pan · scroll to zoom · drag a neuron · click a link to edit it · keys: esc, arrows, +/−, F fit, H/P view"; }
 cv.addEventListener("dblclick", e => { const n = nodeAt(e.offsetX, e.offsetY); if (n) n.pin = false; });
 cv.addEventListener("wheel", e => {
   e.preventDefault();
   const s = e.deltaY < 0 ? 1.12 : 0.89, wx = (e.offsetX - T.x)/T.k, wy = (e.offsetY - T.y)/T.k;
   T.k = Math.max(0.15, Math.min(5, T.k*s)); T.x = e.offsetX - wx*T.k; T.y = e.offsetY - wy*T.k;
 }, { passive: false });
+
+function zoomBy(s) {
+  const cx = cv.clientWidth/2, cy = cv.clientHeight/2, wx = (cx - T.x)/T.k, wy = (cy - T.y)/T.k;
+  T.k = Math.max(0.15, Math.min(5, T.k*s)); T.x = cx - wx*T.k; T.y = cy - wy*T.k;
+}
+// Keyboard: Esc backs out (modal -> link mode -> selection -> filter), arrows pan, +/- zoom,
+// F recenters, H/P switch views. Ignored while typing in a field.
+window.addEventListener("keydown", e => {
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+  const step = 70;
+  switch (e.key) {
+    case "Escape":
+      if (document.getElementById("modal").classList.contains("show")) closeModal();
+      else if (linkMode || reconnect) { linkMode = false; linkFrom = null; reconnect = null; document.getElementById("linkmode").classList.remove("on"); closeEdgeMenu(); setHint(); }
+      else if (selected) closeDetail();
+      else { document.getElementById("search").value = ""; filter = ""; }
+      break;
+    case "ArrowLeft": T.x += step; break;
+    case "ArrowRight": T.x -= step; break;
+    case "ArrowUp": T.y += step; break;
+    case "ArrowDown": T.y -= step; break;
+    case "+": case "=": zoomBy(1.15); break;
+    case "-": case "_": zoomBy(0.87); break;
+    case "f": case "F": case "0": fit(); break;
+    case "h": case "H": setView("hive"); break;
+    case "p": case "P": setView("project"); break;
+    default: return;
+  }
+  e.preventDefault();
+});
 
 function showTip(px, py, cx, cy) {
   const n = nodeAt(px, py), tip = document.getElementById("tip");
