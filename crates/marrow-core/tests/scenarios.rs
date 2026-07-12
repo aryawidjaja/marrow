@@ -119,7 +119,7 @@ fn move_to_another_file_is_not_stale_and_relocates() {
     fs::write(dir.path().join("src/lib.rs"), "pub struct Calc;\n").unwrap();
     fs::write(
         dir.path().join("src/moved.rs"),
-        format!("pub struct Calc;\n{}", &anchor.snippet),
+        format!("pub struct Calc;\n{}", anchor.snippet),
     )
     .unwrap();
 
