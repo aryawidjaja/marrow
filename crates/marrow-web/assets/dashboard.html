@@ -145,6 +145,7 @@ const palette = ["#6ea8fe","#46d39a","#ff8f5d","#c77dff","#ffd166","#4cc9f0","#f
 const kindColor = { decision:"#6ea8fe", fact:"#46d39a", entity:"#c77dff", session:"#ffd166", skill:"#ff8f5d", project:"#8b93a4", core:"#f5c518" };
 // Edge types are real relationships, each its own colour so the graph is legible.
 const edgeStyle = {
+  ref:      { color: "rgba(255,120,90,0.65)",  label: "explicit link" },
   topic:    { color: "rgba(110,168,254,0.30)", label: "shared topic" },
   tag:      { color: "rgba(70,211,154,0.32)",  label: "shared tag" },
   semantic: { color: "rgba(199,125,255,0.45)", label: "related meaning" },
@@ -223,7 +224,7 @@ function buildLegend() {
   }
 
   const present = new Set(links.map(l => l.rel));
-  const conns = ["topic", "tag", "semantic", "hub", "cluster", "user"]
+  const conns = ["ref", "topic", "tag", "semantic", "hub", "cluster", "user"]
     .filter(r => present.has(r) && (r !== "semantic" || showSemantic)).map(r => {
     const label = r === "tag" && view === "hive" ? "shared tag (bridge)" : edgeStyle[r].label;
     return edge(edgeStyle[r].color, label);

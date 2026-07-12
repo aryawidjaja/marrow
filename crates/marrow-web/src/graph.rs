@@ -52,6 +52,52 @@ fn tags_of(raw: &str) -> Vec<String> {
         .collect()
 }
 
+/// A tag shared by more than this many memories in one project is a broad convention, not a
+/// specific relationship — it would draw a giant noise-star, so it doesn't create edges.
+const INTRA_TAG_FANOUT: usize = 12;
+
+/// Extract `[[target]]` wiki-links from text — the explicit references an agent wrote between
+/// memories. `target` is either a memory id or a topic slug.
+fn wiki_refs(text: &str) -> Vec<String> {
+    text.match_indices("[[")
+        .filter_map(|(i, _)| {
+            let rest = &text[i + 2..];
+            rest.find("]]").map(|j| rest[..j].trim().to_string())
+        })
+        .filter(|s| !s.is_empty() && s.len() <= 48)
+        .collect()
+}
+
+/// Explicit `[[id]]`/`[[topic]]` links between memories — the strongest, agent-authored edges.
+fn ref_edges(rows: &[marrow_store::index::IndexRow], id_of: &impl Fn(&str) -> String) -> Vec<Link> {
+    let active = || rows.iter().filter(|r| r.status == "active");
+    let ids: std::collections::HashSet<&str> = active().map(|r| r.id.as_str()).collect();
+    let topic_to_id: HashMap<&str, &str> = active()
+        .filter(|r| !r.topic.is_empty())
+        .map(|r| (r.topic.as_str(), r.id.as_str()))
+        .collect();
+    let mut links = Vec::new();
+    for r in active() {
+        for rf in wiki_refs(&r.body).into_iter().chain(wiki_refs(&r.topic)) {
+            let target = if ids.contains(rf.as_str()) {
+                Some(rf)
+            } else {
+                topic_to_id.get(rf.as_str()).map(|s| s.to_string())
+            };
+            if let Some(t) = target {
+                if t != r.id {
+                    links.push(Link {
+                        source: id_of(&r.id),
+                        target: id_of(&t),
+                        rel: "ref".into(),
+                    });
+                }
+            }
+        }
+    }
+    links
+}
+
 /// Connect every node in a group to the group's first node — a star, so a shared topic or tag
 /// forms a cluster without an O(n²) clique.
 fn star(links: &mut Vec<Link>, members: &[String], rel: &str) {
@@ -138,12 +184,14 @@ pub fn project_graph(store: &Store, root: &Path) -> Graph {
         });
     }
 
-    let mut links = Vec::new();
+    let mut links = ref_edges(&rows, &|id: &str| id.to_string());
     for members in by_topic.values() {
         star(&mut links, members, "topic");
     }
     for members in by_tag.values() {
-        star(&mut links, members, "tag");
+        if members.len() <= INTRA_TAG_FANOUT {
+            star(&mut links, members, "tag");
+        }
     }
     let live: std::collections::HashSet<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
     let overlay = read_overlay(&overlay_path(root));
@@ -236,13 +284,26 @@ pub fn hive_graph(hub: &Hub) -> Graph {
         };
         let vecs: HashMap<String, Vec<f32>> =
             store.vectors().unwrap_or_default().into_iter().collect();
-        for r in store.list().unwrap_or_default() {
+        let mut local_topic: HashMap<String, Vec<String>> = HashMap::new();
+        let mut local_tag: HashMap<String, Vec<String>> = HashMap::new();
+        let rows = store.list().unwrap_or_default();
+        for r in &rows {
             if r.status != "active" {
                 continue;
             }
             let node_id = format!("{hub_id}#{}", r.id);
+            if !r.topic.is_empty() {
+                local_topic
+                    .entry(r.topic.clone())
+                    .or_default()
+                    .push(node_id.clone());
+            }
             for t in tags_of(&r.tags) {
-                tag_owners.entry(t).or_default().push(node_id.clone());
+                tag_owners
+                    .entry(t.clone())
+                    .or_default()
+                    .push(node_id.clone());
+                local_tag.entry(t).or_default().push(node_id.clone());
             }
             if let Some(v) = vecs.get(&r.id) {
                 sem_nodes.push((node_id.clone(), i, v.clone()));
@@ -265,6 +326,19 @@ pub fn hive_graph(hub: &Hub) -> Graph {
                 rel: "cluster".into(),
             });
         }
+        // Give each project's cluster internal structure — explicit refs, shared topic/tag, and
+        // meaning — so it reads as a connected sub-brain, not a bare star around its hub.
+        let map = |id: &str| format!("{hub_id}#{id}");
+        links.extend(ref_edges(&rows, &map));
+        for members in local_topic.values() {
+            star(&mut links, members, "topic");
+        }
+        for members in local_tag.values() {
+            if members.len() <= INTRA_TAG_FANOUT {
+                star(&mut links, members, "tag");
+            }
+        }
+        add_semantic(&store, &mut links, map);
     }
 
     // Cross-project links must be meaningful, not coincidental. A shared tag only bridges when it's
