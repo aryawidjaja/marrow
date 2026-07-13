@@ -81,7 +81,7 @@ pub enum Cmd {
         #[arg(long)]
         apply: bool,
         /// Apply only if enough new memories have accumulated since the last pass (otherwise a
-        /// no-op). Used for hands-free auto-consolidation.
+        /// no-op), so this can be run on a schedule without churning the store.
         #[arg(long)]
         if_due: bool,
     },
@@ -92,6 +92,10 @@ pub enum Cmd {
         filter: FilterArgs,
         #[arg(long, default_value = "cli")]
         by: String,
+        /// Also return the memories connected to the matches, found by following links, shared
+        /// topics and related meaning outward. 0 turns it off.
+        #[arg(long, default_value_t = 8)]
+        connect: usize,
     },
     /// Show a memory's provenance: who wrote it, its lineage, and how it's been used.
     Provenance { id: String },
@@ -263,8 +267,6 @@ pub enum KindArg {
     Fact,
     Decision,
     Entity,
-    Session,
-    Skill,
 }
 
 impl From<KindArg> for MemoryKind {
@@ -273,8 +275,6 @@ impl From<KindArg> for MemoryKind {
             KindArg::Fact => MemoryKind::Fact,
             KindArg::Decision => MemoryKind::Decision,
             KindArg::Entity => MemoryKind::Entity,
-            KindArg::Session => MemoryKind::Session,
-            KindArg::Skill => MemoryKind::Skill,
         }
     }
 }
@@ -378,7 +378,6 @@ impl FilterArgs {
             limit: self.limit,
             exclude_expired: !self.include_expired,
             hybrid_weight: self.weight,
-            ..Query::default()
         }
     }
 }
@@ -566,14 +565,45 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
         }
         Cmd::Audit => {
             let store = open(&cli.root)?;
-            match store.verify_log() {
-                Ok(()) => {
-                    let n = store.history().map_err(|e| e.to_string())?.len();
-                    writeln!(out, "audit ok: {n} event(s), chain intact").ok();
-                    Ok(())
-                }
-                Err(seq) => Err(format!("audit chain broken at seq {seq}")),
+            if let Err(seq) = store.verify_log() {
+                return Err(format!("audit chain broken at seq {seq}"));
             }
+            let n = store.history().map_err(|e| e.to_string())?.len();
+
+            // The ledger proves no event was rewritten. It cannot prove nobody edited a memory file
+            // on disk behind Marrow's back — that is what the per-memory signature is for, so when
+            // signing is on, check every one.
+            let mut checked = 0usize;
+            let mut forged: Vec<String> = Vec::new();
+            for row in store.list().map_err(|e| e.to_string())? {
+                let Some(m) = store.read(&row.id).map_err(|e| e.to_string())? else {
+                    continue;
+                };
+                match store.verify(&m) {
+                    Some(true) => checked += 1,
+                    Some(false) => forged.push(m.frontmatter.id.clone()),
+                    None => {}
+                }
+            }
+            if !forged.is_empty() {
+                return Err(format!(
+                    "{} memor{} changed on disk without going through Marrow: {}",
+                    forged.len(),
+                    if forged.len() == 1 { "y" } else { "ies" },
+                    forged.join(", ")
+                ));
+            }
+            if checked > 0 {
+                writeln!(
+                    out,
+                    "audit ok: {n} event(s), chain intact; {checked} memor{} signed and unaltered",
+                    if checked == 1 { "y" } else { "ies" }
+                )
+                .ok();
+            } else {
+                writeln!(out, "audit ok: {n} event(s), chain intact").ok();
+            }
+            Ok(())
         }
         Cmd::Log { kind, by, summary } => {
             let store = open(&cli.root)?;
@@ -622,12 +652,49 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
             }
             Ok(())
         }
-        Cmd::Recall { text, filter, by } => {
+        Cmd::Recall {
+            text,
+            filter,
+            by,
+            connect,
+        } => {
             let store = open(&cli.root)?;
-            let hits = store
-                .recall(&text, &filter.to_query(), &by)
+            if connect == 0 {
+                let hits = store
+                    .recall(&text, &filter.to_query(), &by)
+                    .map_err(|e| e.to_string())?;
+                print_memories(&hits, out);
+                return Ok(());
+            }
+            let r = store
+                .recall_connected(&text, &filter.to_query(), &by, connect)
                 .map_err(|e| e.to_string())?;
-            print_memories(&hits, out);
+            print_memories(&r.seeds, out);
+            if !r.neighbors.is_empty() {
+                writeln!(out, "\nconnected:").ok();
+                for n in &r.neighbors {
+                    let topic = n.memory.frontmatter.topic.as_deref().unwrap_or("-");
+                    let snippet: String = n
+                        .memory
+                        .body
+                        .trim()
+                        .lines()
+                        .next()
+                        .unwrap_or("")
+                        .chars()
+                        .take(70)
+                        .collect();
+                    writeln!(
+                        out,
+                        "  {}  {topic} — {snippet}  ({} hop{}, via {})",
+                        n.memory.frontmatter.id,
+                        n.hops,
+                        if n.hops == 1 { "" } else { "s" },
+                        n.via.join("+"),
+                    )
+                    .ok();
+                }
+            }
             Ok(())
         }
         Cmd::Provenance { id } => {
@@ -784,6 +851,28 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
             writeln!(out, "relevant memories ({}):", brief.relevant.len()).ok();
             for m in &brief.relevant {
                 writeln!(out, "  {} — {}", m.frontmatter.id, first_line(&m.body)).ok();
+            }
+            // A memory whose code has changed may now be lying. Say so before the agent relies on it.
+            let stale = store.list_stale(&cli.root).unwrap_or_default();
+            if !stale.is_empty() {
+                writeln!(
+                    out,
+                    "stale ({}): these memories cite code that has since CHANGED — verify them before relying on them, and mem_supersede any that are now wrong:",
+                    stale.len()
+                )
+                .ok();
+                for h in stale.iter().take(5) {
+                    let what = match &h.relocated_to {
+                        Some(to) => format!("moved to {to}"),
+                        None => "code changed".to_string(),
+                    };
+                    writeln!(
+                        out,
+                        "  {} — {} ({}) [{}]",
+                        h.memory_id, h.symbol, h.file_path, what
+                    )
+                    .ok();
+                }
             }
             if brief.suggest_ingest {
                 let n = knowledge_docs(&cli.root).len();
@@ -1149,12 +1238,9 @@ fn build_memory(
             topic,
             area,
             scope: Scope {
-                user_id: None,
-                agent_id: None,
                 project_id: project.unwrap_or_default(),
-                org_id: None,
             },
-            refs: vec![],
+            refs: marrow_memdocs::wiki_refs(&body),
             code_anchors: vec![],
             confidence: 1.0,
             decay: None,

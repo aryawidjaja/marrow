@@ -215,8 +215,7 @@ check "past threshold, --if-due applies" "$(a consolidate --if-due)" "applied:"
 check "after a pass, --if-due is a no-op again" "$(a consolidate --if-due)" "not due"
 
 echo "==> Dashboard: no JS handler references a missing element"
-# A deleted button left a dangling getElementById(), which threw and silently killed setView() —
-# the Hive tab stopped loading. Catch that class of bug statically.
+# A dangling getElementById() throws and takes the whole handler down with it. Catch it statically.
 dangling="$(python3 - "$repo_root/crates/marrow-web/assets/dashboard.html" <<'EOF'
 import re, sys
 s = open(sys.argv[1], encoding="utf-8").read()
@@ -226,5 +225,35 @@ print(",".join(sorted(used - ids)))
 EOF
 )"
 check "every getElementById target exists in the markup" "[$dangling]" "[]"
+
+echo "==> Guidance only tells agents about tools they can actually see"
+# The guidance we inject and publish must never name a tool that isn't advertised over MCP: the agent
+# would be told to call something absent from its tool list.
+phantom="$(python3 - "$repo_root" <<'EOF'
+import re, sys, pathlib
+root = pathlib.Path(sys.argv[1])
+tools = (root / "crates/marrow-mcp/src/tools.rs").read_text(encoding="utf-8")
+grab = lambda name: re.search(rf"const {name}: &\[&str\] = &\[(.*?)\];", tools, re.S).group(1)
+advertised = set(re.findall(r'"(mem_[a-z_]+)"', grab("CORE_TOOLS") + grab("HUB_TOOLS")))
+named = set()
+for f in ("llms.txt", "README.md", "integrations/README.md", "crates/marrow-cli/src/setup.rs"):
+    named |= set(re.findall(r"mem_[a-z_]+", (root / f).read_text(encoding="utf-8")))
+print(",".join(sorted(named - advertised)))
+EOF
+)"
+check "no guidance names an unadvertised tool" "[$phantom]" "[]"
+
+echo "==> Recall reaches memories that match none of the query's words"
+far="$(a add --kind fact --topic key-rotation 'Signing keys rotate every 90 days.' | tr -d '[:space:]')"
+near="$(a add --kind fact --topic webhook-signing "Webhooks are signed. See [[$far]]." | tr -d '[:space:]')"
+a add --kind fact --topic session-tokens "Sessions use JWT. See [[$near]]." > /dev/null
+check "the chain of links was actually built" "$far" "01"
+# "JWT" appears only in the session note. key-rotation is two links away and shares no word with the
+# query, so it can only come back if activation genuinely spread along the chain. Assert on the topic,
+# never the id: the linking memory quotes the id verbatim in its own body, so an id would match the
+# snippet of the memory that merely points AT it and the check would pass without spreading at all.
+connected="$(a recall 'JWT' --connect 8)"
+check "the directly linked memory surfaces" "$connected" "webhook-signing"
+check "a memory two links away still surfaces" "$connected" "key-rotation"
 
 printf '\nAll %d checks passed.\n' "$pass"

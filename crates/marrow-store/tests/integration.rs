@@ -19,10 +19,7 @@ fn mem(kind: MemoryKind, topic: &str, body: &str) -> Memory {
             topic: Some(topic.into()),
             area: None,
             scope: Scope {
-                user_id: None,
-                agent_id: None,
                 project_id: "demo".into(),
-                org_id: None,
             },
             refs: vec![],
             code_anchors: vec![],
@@ -147,7 +144,6 @@ fn expired_memories_are_excluded_by_default() {
     let store = Store::init(dir.path()).unwrap();
     let mut m = mem(MemoryKind::Fact, "temp", "ephemeral note");
     m.frontmatter.decay = Some(Decay {
-        half_life: None,
         expires_at: Some("2000-01-01T00:00:00Z".into()),
     });
     store.write(&mut m).unwrap();
@@ -229,7 +225,6 @@ fn list_stale_flags_changed_code_anchor() {
     m.frontmatter.refs.push(Ref {
         kind: RefKind::Symbol,
         value: "src/lib.rs::Calc::add".into(),
-        anchor: Some(core.fingerprint.clone()),
     });
     m.frontmatter.code_anchors.push(CodeAnchor {
         file_path: core.file_path,
@@ -491,7 +486,6 @@ fn consolidate_apply_retires_expired() {
     let store = Store::init(dir.path()).unwrap();
     let mut m = mem(MemoryKind::Fact, "temp", "ephemeral note");
     m.frontmatter.decay = Some(Decay {
-        half_life: None,
         expires_at: Some("2000-01-01T00:00:00Z".into()),
     });
     let id = store.write(&mut m).unwrap();
@@ -696,4 +690,49 @@ fn open_discovers_store_in_an_ancestor_dir() {
     std::fs::create_dir_all(&sub).unwrap();
     let sub_store = Store::open(&sub).unwrap();
     assert_eq!(sub_store.list().unwrap().len(), 1);
+}
+
+/// A memory's file lives under a directory named for its kind, so changing the kind moves it. If the
+/// copy at the old path survived, the same id would exist twice on disk and a reindex could revive
+/// the retired version over the live one.
+#[test]
+fn changing_a_memorys_kind_leaves_no_copy_at_the_old_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::init(dir.path()).unwrap();
+
+    let mut m = mem(MemoryKind::Entity, "jwt-expiry", "JWTs last 15 minutes.");
+    let id = store.write(&mut m).unwrap();
+    assert!(dir
+        .path()
+        .join(".marrow/memory/entity")
+        .join(format!("{id}.md"))
+        .exists());
+
+    let mut moved = store.read(&id).unwrap().unwrap();
+    moved.frontmatter.kind = MemoryKind::Fact;
+    store.write(&mut moved).unwrap();
+
+    assert!(
+        !dir.path()
+            .join(".marrow/memory/entity")
+            .join(format!("{id}.md"))
+            .exists(),
+        "the file at the old kind's path must not survive the move"
+    );
+    assert!(dir
+        .path()
+        .join(".marrow/memory/fact")
+        .join(format!("{id}.md"))
+        .exists());
+
+    // And a reindex must not resurrect anything from a stranded file.
+    store.reindex().unwrap();
+    let rows: Vec<_> = store
+        .list()
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.id == id)
+        .collect();
+    assert_eq!(rows.len(), 1, "one id, one row");
+    assert!(rows[0].path.starts_with("fact/"), "got {}", rows[0].path);
 }

@@ -15,10 +15,7 @@ fn mem(kind: MemoryKind, topic: &str, body: &str) -> Memory {
             topic: Some(topic.into()),
             area: None,
             scope: Scope {
-                user_id: None,
-                agent_id: None,
                 project_id: "demo".into(),
-                org_id: None,
             },
             refs: vec![],
             code_anchors: vec![],
@@ -56,20 +53,6 @@ fn serves_the_dashboard_html() {
 }
 
 #[test]
-fn lists_active_memories_with_snippets() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = Store::init(dir.path()).unwrap();
-    let mut a = mem(MemoryKind::Fact, "auth", "We rotate keys every 90 days.");
-    let id = store.write(&mut a).unwrap();
-
-    let v = get(dir.path(), "/api/memories");
-    assert_eq!(v["count"], 1);
-    assert_eq!(v["memories"][0]["id"], id);
-    assert_eq!(v["memories"][0]["topic"], "auth");
-    assert_eq!(v["memories"][0]["snippet"], "We rotate keys every 90 days.");
-}
-
-#[test]
 fn reads_one_memory_with_body() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::init(dir.path()).unwrap();
@@ -92,18 +75,16 @@ fn reads_one_memory_with_body() {
 }
 
 #[test]
-fn reports_history_and_audit() {
+fn audit_reports_the_chain_and_how_much_it_covers() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::init(dir.path()).unwrap();
     let mut a = mem(MemoryKind::Fact, "x", "a fact");
     store.write(&mut a).unwrap();
 
-    let hist = get(dir.path(), "/api/history");
-    assert_eq!(hist["count"], 1);
-    assert_eq!(hist["events"][0]["kind"], "write");
-
     let audit = get(dir.path(), "/api/audit");
     assert_eq!(audit["ok"], true);
+    // "chain intact" over an unstated number of events proves nothing to the person reading it.
+    assert_eq!(audit["events"], 1);
 }
 
 #[test]
@@ -112,28 +93,6 @@ fn stale_endpoint_returns_empty_without_anchors() {
     Store::init(dir.path()).unwrap();
     let v = get(dir.path(), "/api/stale");
     assert_eq!(v["count"], 0);
-}
-
-#[test]
-fn consolidate_endpoint_merges_duplicates() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = Store::init(dir.path()).unwrap();
-    let mut a = mem(MemoryKind::Fact, "a", "the cache is invalidated on write");
-    store.write(&mut a).unwrap();
-    let mut b = mem(MemoryKind::Fact, "b", "the cache is invalidated on write");
-    store.write(&mut b).unwrap();
-
-    let report = route(Some(dir.path()), "POST", "/api/consolidate", "");
-    let rv: serde_json::Value = serde_json::from_str(&report.body).unwrap();
-    assert_eq!(rv["related_memories"], 1);
-
-    let applied = route(Some(dir.path()), "POST", "/api/consolidate?apply=true", "");
-    let av: serde_json::Value = serde_json::from_str(&applied.body).unwrap();
-    assert_eq!(av["merged"], 1);
-
-    // The superseded duplicate drops out of the active list.
-    let v = get(dir.path(), "/api/memories?status=active");
-    assert_eq!(v["count"], 1);
 }
 
 #[test]
@@ -182,10 +141,6 @@ fn create_edit_delete_memory_round_trip() {
     let v = get(dir.path(), &format!("/api/memory/{id}"));
     assert!(v["body"].as_str().unwrap().contains("always"));
 
-    // Search finds it.
-    let s = get(dir.path(), "/api/search?q=cache");
-    assert!(s["count"].as_u64().unwrap() >= 1);
-
     // Delete it.
     let del = route(
         Some(dir.path()),
@@ -194,5 +149,6 @@ fn create_edit_delete_memory_round_trip() {
         "",
     );
     assert_eq!(del.status, 200);
-    assert_eq!(get(dir.path(), "/api/memories")["count"], 0);
+    let gone = route(Some(dir.path()), "GET", &format!("/api/memory/{id}"), "");
+    assert_eq!(gone.status, 404);
 }

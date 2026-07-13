@@ -185,27 +185,33 @@ mod tests {
         // must be a superset of the lean core.
         let all = tools::all_definitions();
         let names: Vec<&str> = all.iter().map(|t| t["name"].as_str().unwrap()).collect();
-        assert!(names.contains(&"mem_query"));
         assert!(names.contains(&"mem_list_stale"));
         assert!(names.contains(&"mem_claim"));
         assert!(names.len() > super::tools::definitions().as_array().unwrap().len());
     }
 
     #[test]
-    fn write_then_query_round_trips() {
+    fn write_then_read_round_trips() {
         let dir = store_root();
         let id = result_text(&call(
             dir.path(),
             "mem_write",
             json!({"kind":"decision","topic":"auth","body":"Use JWT for sessions."}),
         ));
-        assert!(!id.trim().is_empty());
+        let id = id.trim();
+        assert!(!id.is_empty());
 
-        let resp = call(dir.path(), "mem_query", json!({"kind":"decision"}));
+        let resp = call(dir.path(), "mem_read", json!({ "id": id }));
         let text = result_text(&resp);
-        assert!(text.contains(&id.trim().to_string()));
-        assert!(text.contains("Use JWT"));
+        assert!(text.contains("Use JWT"), "mem_read lost the body: {text}");
         assert_eq!(resp["result"]["isError"], false);
+
+        // and it is findable without knowing the id
+        let found = result_text(&call(dir.path(), "mem_search", json!({"text":"JWT"})));
+        assert!(
+            found.contains("Use JWT"),
+            "mem_search could not find it: {found}"
+        );
     }
 
     #[test]
@@ -282,7 +288,7 @@ mod tests {
     }
 
     #[test]
-    fn anchor_tool_tracks_code_staleness() {
+    fn writing_with_an_anchor_tracks_code_staleness() {
         let dir = store_root();
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
         std::fs::write(
@@ -291,10 +297,13 @@ mod tests {
         )
         .unwrap();
 
+        // Anchoring lives on mem_write: a memory about code gets tied to that code as it is written.
+        // It was a separate tool once, and that tool was never called, so staleness never fired.
         let resp = call(
             dir.path(),
-            "mem_anchor",
-            json!({"kind":"decision","topic":"auth","file":"src/auth.rs","symbol":"issue_token","body":"Issues a JWT."}),
+            "mem_write",
+            json!({"kind":"decision","topic":"auth","area":"auth","body":"Issues a JWT.",
+                   "anchor":{"file":"src/auth.rs","symbol":"issue_token"}}),
         );
         assert_eq!(resp["result"]["isError"], false);
 
@@ -309,6 +318,15 @@ mod tests {
         let stale = call(dir.path(), "mem_list_stale", json!({}));
         assert!(result_text(&stale).contains("\"count\":1"));
         assert!(result_text(&stale).contains("issue_token"));
+
+        // ...and the next session is TOLD, without having to call a tool it might never call.
+        let brief = call(dir.path(), "mem_bootstrap", json!({"goal": "work on auth"}));
+        let text = result_text(&brief);
+        assert!(
+            text.contains("issue_token"),
+            "warm start must surface the stale memory: {text}"
+        );
+        assert!(text.contains("stale_note"));
     }
 
     #[test]

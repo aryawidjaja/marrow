@@ -552,10 +552,7 @@ mod tests {
                 topic: Some("auth".into()),
                 area: None,
                 scope: Scope {
-                    user_id: None,
-                    agent_id: None,
                     project_id: "demo".into(),
-                    org_id: None,
                 },
                 refs: vec![],
                 code_anchors: vec![],
@@ -657,10 +654,7 @@ mod tests {
                 topic: Some("t".into()),
                 area: None,
                 scope: Scope {
-                    user_id: None,
-                    agent_id: None,
                     project_id: "demo".into(),
-                    org_id: None,
                 },
                 refs: vec![],
                 code_anchors: vec![],

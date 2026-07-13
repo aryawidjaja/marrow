@@ -8,8 +8,6 @@ pub fn kind_str(kind: MemoryKind) -> &'static str {
         MemoryKind::Fact => "fact",
         MemoryKind::Decision => "decision",
         MemoryKind::Entity => "entity",
-        MemoryKind::Session => "session",
-        MemoryKind::Skill => "skill",
     }
 }
 
@@ -19,8 +17,8 @@ pub fn parse_kind(s: &str) -> Option<MemoryKind> {
         "fact" => MemoryKind::Fact,
         "decision" => MemoryKind::Decision,
         "entity" => MemoryKind::Entity,
-        "session" => MemoryKind::Session,
-        "skill" => MemoryKind::Skill,
+        // Kinds from older versions carried no rules of their own; read them as plain facts.
+        "session" | "skill" => MemoryKind::Fact,
         _ => return None,
     })
 }
@@ -30,20 +28,8 @@ pub fn status_str(status: Status) -> &'static str {
     match status {
         Status::Active => "active",
         Status::Superseded => "superseded",
-        Status::Draft => "draft",
         Status::Deprecated => "deprecated",
     }
-}
-
-/// Parse a stored status string.
-pub fn parse_status(s: &str) -> Option<Status> {
-    Some(match s {
-        "active" => Status::Active,
-        "superseded" => Status::Superseded,
-        "draft" => Status::Draft,
-        "deprecated" => Status::Deprecated,
-        _ => return None,
-    })
 }
 
 #[cfg(test)]
@@ -52,26 +38,11 @@ mod tests {
 
     #[test]
     fn kind_round_trips() {
-        for k in [
-            MemoryKind::Fact,
-            MemoryKind::Decision,
-            MemoryKind::Entity,
-            MemoryKind::Session,
-            MemoryKind::Skill,
-        ] {
+        for k in [MemoryKind::Fact, MemoryKind::Decision, MemoryKind::Entity] {
             assert_eq!(parse_kind(kind_str(k)), Some(k));
         }
-    }
-
-    #[test]
-    fn status_round_trips() {
-        for s in [
-            Status::Active,
-            Status::Superseded,
-            Status::Draft,
-            Status::Deprecated,
-        ] {
-            assert_eq!(parse_status(status_str(s)), Some(s));
-        }
+        // Kinds written by older versions still load, rather than being dropped on upgrade.
+        assert_eq!(parse_kind("session"), Some(MemoryKind::Fact));
+        assert_eq!(parse_kind("skill"), Some(MemoryKind::Fact));
     }
 }

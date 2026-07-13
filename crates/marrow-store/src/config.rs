@@ -34,20 +34,12 @@ impl Default for EmbeddingConfig {
 pub struct ConsolidationConfig {
     /// Cosine similarity at or above which two memories are considered related.
     pub sim_threshold: f64,
-    /// Distiller backend: "heuristic" | "http".
-    pub distiller: String,
-    /// Chat-completions endpoint for the "http" distiller (point at a local/sovereign model).
-    pub distiller_url: String,
-    pub distiller_model: String,
 }
 
 impl Default for ConsolidationConfig {
     fn default() -> Self {
         ConsolidationConfig {
             sim_threshold: 0.83,
-            distiller: "heuristic".to_string(),
-            distiller_url: "http://localhost:8080/v1/chat/completions".to_string(),
-            distiller_model: "local".to_string(),
         }
     }
 }

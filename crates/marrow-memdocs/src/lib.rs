@@ -10,6 +10,7 @@ pub mod validate;
 
 pub use document::{parse, to_markdown, ParseError};
 pub use types::{
-    CodeAnchor, Decay, Frontmatter, Memory, MemoryKind, Provenance, Ref, RefKind, Scope, Status,
+    wiki_refs, CodeAnchor, Decay, Frontmatter, Memory, MemoryKind, Provenance, Ref, RefKind, Scope,
+    Status,
 };
 pub use validate::{validate, Violation};

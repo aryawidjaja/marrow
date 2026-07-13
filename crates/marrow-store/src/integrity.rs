@@ -50,10 +50,7 @@ mod tests {
                 topic: None,
                 area: None,
                 scope: Scope {
-                    user_id: None,
-                    agent_id: None,
                     project_id: "demo".into(),
-                    org_id: None,
                 },
                 refs: vec![],
                 code_anchors: vec![],

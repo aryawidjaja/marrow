@@ -69,10 +69,7 @@ mod tests {
                 topic: Some("calc".into()),
                 area: None,
                 scope: Scope {
-                    user_id: None,
-                    agent_id: None,
                     project_id: "demo".into(),
-                    org_id: None,
                 },
                 refs: vec![],
                 code_anchors: vec![ca],

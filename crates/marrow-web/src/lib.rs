@@ -38,6 +38,8 @@ pub fn route(default_root: Option<&Path>, method: &str, target: &str, body: &str
         ("GET", "/api/projects") => return projects_list(default_root),
         ("GET", "/api/channel") => return channel(default_root),
         ("GET", "/api/browse") => return browse(&query),
+        ("GET", "/api/stale/hive") => return stale_hive(),
+        ("GET", "/api/audit/hive") => return audit_hive(),
         ("GET", "/api/pulse") => return pulse(default_root, &query),
         ("POST", "/api/project/register") => return hub_register(body),
         ("POST", "/api/project/forget") => return hub_forget(body),
@@ -57,17 +59,13 @@ pub fn route(default_root: Option<&Path>, method: &str, target: &str, body: &str
     };
     match (method, p) {
         ("GET", "/api/graph") => graph_project(&store, &root),
-        ("GET", "/api/search") => search_memories(&store, &query),
-        ("GET", "/api/memories") => memories(&store, &query),
         ("GET", "/api/stale") => stale(&store, &root),
-        ("GET", "/api/history") => history(&store),
         ("GET", "/api/audit") => audit(&store),
         ("POST", "/api/memory") => create_memory(&store, body),
         ("POST", "/api/link") => link(&store, &root, &query, true),
         ("POST", "/api/unlink") => link(&store, &root, &query, false),
         ("POST", "/api/hide") => hide(&root, &query, true),
         ("POST", "/api/unhide") => hide(&root, &query, false),
-        ("POST", "/api/consolidate") => consolidate(&store, &root, &query),
         ("POST", pp) if pp.starts_with("/api/memory/") && pp.ends_with("/edit") => {
             edit_memory(&store, mem_id(pp, "/edit"), body)
         }
@@ -423,31 +421,6 @@ fn delete_memory(store: &Store, id: &str) -> Response {
     }
 }
 
-fn search_memories(store: &Store, query: &HashMap<String, String>) -> Response {
-    let q = query.get("q").map(String::as_str).unwrap_or_default();
-    let found = store
-        .search(
-            q,
-            &marrow_store::Query {
-                limit: Some(30),
-                ..Default::default()
-            },
-        )
-        .unwrap_or_default();
-    let items: Vec<Value> = found
-        .iter()
-        .map(|m| {
-            json!({
-                "id": m.frontmatter.id,
-                "kind": kind_str(m.frontmatter.kind),
-                "topic": m.frontmatter.topic,
-                "snippet": m.body.lines().next().unwrap_or("").trim(),
-            })
-        })
-        .collect();
-    json_ok(json!({ "results": items, "count": items.len() }))
-}
-
 fn parse_body(body: &str) -> Value {
     serde_json::from_str(body).unwrap_or_else(|_| json!({}))
 }
@@ -468,19 +441,7 @@ fn parse_kind(s: &str) -> Result<MemoryKind, ()> {
         "fact" => Ok(MemoryKind::Fact),
         "decision" => Ok(MemoryKind::Decision),
         "entity" => Ok(MemoryKind::Entity),
-        "session" => Ok(MemoryKind::Session),
-        "skill" => Ok(MemoryKind::Skill),
         _ => Err(()),
-    }
-}
-
-fn kind_str(k: MemoryKind) -> &'static str {
-    match k {
-        MemoryKind::Fact => "fact",
-        MemoryKind::Decision => "decision",
-        MemoryKind::Entity => "entity",
-        MemoryKind::Session => "session",
-        MemoryKind::Skill => "skill",
     }
 }
 
@@ -499,10 +460,7 @@ fn new_memory(
             topic: topic.filter(|t| !t.is_empty()).map(String::from),
             area: area.filter(|a| !a.is_empty()).map(String::from),
             scope: Scope {
-                user_id: None,
-                agent_id: None,
                 project_id: String::new(),
-                org_id: None,
             },
             refs: vec![],
             code_anchors: vec![],
@@ -658,32 +616,6 @@ pub fn serve(root: Option<PathBuf>, addr: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn memories(store: &Store, query: &HashMap<String, String>) -> Response {
-    let want_status = query.get("status").map(String::as_str).unwrap_or("active");
-    let want_kind = query.get("kind").map(String::as_str);
-    let rows = match store.list() {
-        Ok(r) => r,
-        Err(e) => return error(&e.to_string()),
-    };
-    let items: Vec<_> = rows
-        .into_iter()
-        .filter(|r| want_status == "all" || r.status == want_status)
-        .filter(|r| want_kind.is_none_or(|k| r.kind == k))
-        .map(|r| {
-            json!({
-                "id": r.id,
-                "kind": r.kind,
-                "topic": r.topic,
-                "status": r.status,
-                "confidence": r.confidence,
-                "updated_at": r.updated_at,
-                "snippet": r.body.lines().next().unwrap_or("").trim(),
-            })
-        })
-        .collect();
-    json_ok(json!({ "memories": items, "count": items.len() }))
-}
-
 fn memory(store: &Store, id: &str) -> Response {
     match store.read(id) {
         Ok(Some(m)) => {
@@ -694,6 +626,49 @@ fn memory(store: &Store, id: &str) -> Response {
         Ok(None) => not_found(),
         Err(e) => error(&e.to_string()),
     }
+}
+
+/// Every memory in the hive whose cited code has drifted. The graph is one scene, so trust has to be
+/// answerable across it, not one project at a time.
+fn stale_hive() -> Response {
+    let Ok(hub) = Hub::open() else {
+        return json_ok(json!({ "stale": [] }));
+    };
+    let mut items = Vec::new();
+    for p in hub.projects() {
+        let Ok(store) = Store::open(&p.root) else {
+            continue;
+        };
+        for h in store.list_stale(&p.root).unwrap_or_default() {
+            items.push(json!({
+                "project": p.name,
+                "memory_id": h.memory_id,
+                "symbol": h.symbol,
+                "file_path": h.file_path,
+                "relocated_to": h.relocated_to,
+            }));
+        }
+    }
+    json_ok(json!({ "stale": items }))
+}
+
+/// Verify every project's hash-chained ledger. "Tamper-evident" is a claim; this is the proof.
+fn audit_hive() -> Response {
+    let Ok(hub) = Hub::open() else {
+        return json_ok(json!({ "ok": true, "events": 0, "projects": 0 }));
+    };
+    let (mut ok, mut events, mut projects) = (true, 0usize, 0usize);
+    for p in hub.projects() {
+        let Ok(store) = Store::open(&p.root) else {
+            continue;
+        };
+        projects += 1;
+        events += store.history().map(|h| h.len()).unwrap_or(0);
+        if store.verify_log().is_err() {
+            ok = false;
+        }
+    }
+    json_ok(json!({ "ok": ok, "events": events, "projects": projects }))
 }
 
 fn stale(store: &Store, root: &Path) -> Response {
@@ -716,48 +691,11 @@ fn stale(store: &Store, root: &Path) -> Response {
     }
 }
 
-fn history(store: &Store) -> Response {
-    match store.history() {
-        Ok(events) => json_ok(json!({
-            "events": serde_json::to_value(&events).unwrap_or_else(|_| json!([])),
-            "count": events.len(),
-        })),
-        Err(e) => error(&e.to_string()),
-    }
-}
-
 fn audit(store: &Store) -> Response {
+    let events = store.history().map(|h| h.len()).unwrap_or(0);
     match store.verify_log() {
-        Ok(()) => json_ok(json!({ "ok": true })),
-        Err(seq) => json_ok(json!({ "ok": false, "broken_at_seq": seq })),
-    }
-}
-
-fn consolidate(store: &Store, root: &Path, query: &HashMap<String, String>) -> Response {
-    let apply = query.get("apply").map(String::as_str) == Some("true");
-    if apply {
-        match store.consolidate_apply(root) {
-            Ok(o) => json_ok(json!({
-                "applied": true,
-                "deprecated": o.deprecated,
-                "merged": o.merged,
-                "conflicts_resolved": o.conflicts_resolved,
-            })),
-            Err(e) => error(&e.to_string()),
-        }
-    } else {
-        match store.consolidate(root) {
-            Ok(r) => {
-                let related: usize = r.clusters.iter().map(|c| c.others.len()).sum();
-                json_ok(json!({
-                    "stale": r.stale.len(),
-                    "expired": r.expired.len(),
-                    "related_memories": related,
-                    "clusters": r.clusters.len(),
-                }))
-            }
-            Err(e) => error(&e.to_string()),
-        }
+        Ok(()) => json_ok(json!({ "ok": true, "events": events })),
+        Err(seq) => json_ok(json!({ "ok": false, "events": events, "broken_at_seq": seq })),
     }
 }
 

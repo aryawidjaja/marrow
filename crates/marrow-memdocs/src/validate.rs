@@ -54,10 +54,10 @@ pub fn validate(memory: &Memory) -> Result<(), Vec<Violation>> {
         v.push(viol("updated_at", "is required"));
     }
 
-    // `topic` is the grouping key the whole brain hangs off (supersession, dedup, clustering), so
-    // it has to stay a short label. Without this, agents dump whole paragraphs in here and the
-    // project loses its only stable key. Only enforced on *active* memories: a superseded one is
-    // frozen history, it no longer groups anything, and rewriting it would falsify the record.
+    // `topic` is the grouping key the whole brain hangs off (supersession, dedup, clustering), so it
+    // has to stay a short label rather than a sentence, or the project loses its only stable key.
+    // Enforced on *active* memories only: a superseded one is frozen history, it groups nothing, and
+    // rewriting it would falsify the record.
     let topic_to_check = fm
         .topic
         .as_deref()
@@ -99,7 +99,7 @@ pub fn validate(memory: &Memory) -> Result<(), Vec<Violation>> {
                 v.push(viol("body", "entity memories must describe the entity"));
             }
         }
-        MemoryKind::Fact | MemoryKind::Session | MemoryKind::Skill => {}
+        MemoryKind::Fact => {}
     }
 
     // A superseded memory must record what replaced it.
@@ -138,10 +138,7 @@ mod tests {
                 topic: Some("auth".into()),
                 area: None,
                 scope: Scope {
-                    user_id: None,
-                    agent_id: None,
                     project_id: "demo".into(),
-                    org_id: None,
                 },
                 refs: vec![],
                 code_anchors: vec![],

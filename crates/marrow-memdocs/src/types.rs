@@ -3,36 +3,32 @@
 use serde::{Deserialize, Serialize};
 
 /// The kind of a memory (its base schema).
+///
+/// The aliases keep memories written by older versions readable: their kinds carried no rules of
+/// their own, so they load as plain facts rather than being dropped on the floor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MemoryKind {
+    #[serde(alias = "session", alias = "skill")]
     Fact,
     Decision,
     Entity,
-    Session,
-    Skill,
 }
 
 /// Lifecycle status of a memory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Status {
+    #[serde(alias = "draft")]
     Active,
     Superseded,
-    Draft,
     Deprecated,
 }
 
-/// Ownership scope. `project_id` is always required; the rest narrow visibility.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Which project a memory belongs to.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Scope {
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub user_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub agent_id: Option<String>,
     pub project_id: String,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub org_id: Option<String>,
 }
 
 /// What kind of thing a reference points at.
@@ -47,15 +43,10 @@ pub enum RefKind {
 }
 
 /// A reference from a memory to a code location, URL, or another memory.
-///
-/// When `kind` is `path` or `symbol`, `anchor` may hold a marrow-core fingerprint so the
-/// reference can be staleness-checked against the live code.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ref {
     pub kind: RefKind,
     pub value: String,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub anchor: Option<String>,
 }
 
 /// A code anchor carried by a memory, mirroring a `marrow_core::Anchor` so the store can
@@ -69,12 +60,9 @@ pub struct CodeAnchor {
     pub norm: String,
 }
 
-/// Time-based decay configuration.
+/// When a memory stops being true.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Decay {
-    /// Duration string such as `"30d"` (parsed by the store).
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub half_life: Option<String>,
     /// RFC3339 timestamp after which the memory is expired.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub expires_at: Option<String>,
@@ -133,4 +121,24 @@ pub struct Frontmatter {
 pub struct Memory {
     pub frontmatter: Frontmatter,
     pub body: String,
+}
+
+/// The `[[target]]` links written inside a memory body. Both the MCP and CLI write paths mirror
+/// these into `refs`, so the link graph is structured data rather than prose every reader has to
+/// re-parse.
+pub fn wiki_refs(body: &str) -> Vec<Ref> {
+    let mut out: Vec<Ref> = Vec::new();
+    for (i, _) in body.match_indices("[[") {
+        let rest = &body[i + 2..];
+        let Some(j) = rest.find("]]") else { continue };
+        let value = rest[..j].trim();
+        if value.is_empty() || value.len() > 64 || out.iter().any(|r| r.value == value) {
+            continue;
+        }
+        out.push(Ref {
+            kind: RefKind::MemoryId,
+            value: value.to_string(),
+        });
+    }
+    out
 }

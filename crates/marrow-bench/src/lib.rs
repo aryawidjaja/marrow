@@ -23,10 +23,7 @@ fn mem(kind: MemoryKind, topic: &str, body: &str, confidence: f64) -> Memory {
             topic: Some(topic.into()),
             area: None,
             scope: Scope {
-                user_id: None,
-                agent_id: None,
                 project_id: "bench".into(),
-                org_id: None,
             },
             refs: vec![],
             code_anchors: vec![],

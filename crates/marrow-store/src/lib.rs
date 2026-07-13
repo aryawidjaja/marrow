@@ -11,8 +11,6 @@ pub mod config;
 pub mod consolidate;
 pub mod convert;
 pub mod coordinate;
-#[cfg(feature = "distill-http")]
-pub mod distill_http;
 pub mod embed;
 #[cfg(feature = "embed-fastembed")]
 pub mod embed_fastembed;

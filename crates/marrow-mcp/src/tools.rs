@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use marrow_memdocs::{Frontmatter, Memory, MemoryKind, Provenance, Scope, Status};
+use marrow_memdocs::{Decay, Frontmatter, Memory, MemoryKind, Provenance, Scope, Status};
 use marrow_store::{knowledge_docs, ClaimScope, Hub, Query, Store};
 use serde_json::{json, Value};
 
@@ -56,15 +56,28 @@ const HUB_TOOLS: &[&str] = &[
 
 pub(crate) fn all_definitions() -> Vec<Value> {
     let Value::Array(defs) = json!([
-        tool("mem_write", "Write a new memory (fact, decision, entity, session, or skill). Rejects invalid writes with the reasons. FILE IT: pass `area` so the memory lands in the right part of the project's brain — call mem_areas first and REUSE an existing area rather than inventing a near-duplicate.", json!({
+        tool("mem_write", "Write a new memory (a fact, a decision, or an entity). Rejects invalid writes with the reasons. FILE IT: pass `area` so the memory lands in the right part of the project's brain — call mem_areas first and REUSE an existing area rather than inventing a near-duplicate.", json!({
             "type": "object",
             "properties": {
-                "kind": {"type": "string", "enum": ["fact","decision","entity","session","skill"]},
+                "kind": {"type": "string", "enum": ["fact","decision","entity"]},
                 "body": {"type": "string"},
                 "topic": {"type": "string", "description": "Short label for what this is about (max 48 chars), e.g. `jwt-expiry`. NOT a sentence — the detail goes in the body. Memories on the same topic supersede each other."},
                 "area": {"type": "string", "description": "The feature area this belongs to, e.g. `auth`, `billing`, `infra`. Call mem_areas and reuse one of the project's existing areas; only invent a new one if nothing fits. Leave it out if genuinely nothing fits — an unfiled memory is still fully searchable, and a wrong area is worse than none."},
+                "anchor": {
+                    "type": "object",
+                    "description": "ANCHOR IT IF IT IS ABOUT CODE. If this memory describes how a specific function/type behaves, name it here: Marrow fingerprints that symbol and flags this memory the moment the code changes, so the brain tells you when it has gone out of date instead of confidently lying. Skip it for memories that are not about a specific symbol.",
+                    "properties": {
+                        "file": {"type": "string", "description": "path to the file, relative to the repo root"},
+                        "symbol": {"type": "string", "description": "the symbol this memory is about, e.g. RateLimiter::check"}
+                    },
+                    "required": ["file", "symbol"]
+                },
+                "confidence": {"type": "number", "description": "0-1. Say so when you are NOT sure: an uncertain memory is useful, a confidently wrong one is not. Defaults to 1."},
+                "expires_at": {"type": "string", "description": "RFC3339 timestamp after which this stops being true (e.g. a temporary workaround, a deadline). Marrow retires it automatically when it expires. Omit for anything durable."},
+                "sources": {"type": "array", "items": {"type": "string"}, "description": "Where this came from: file paths, URLs, docs you distilled it from."},
                 "project": {"type": "string"},
                 "by": {"type": "string", "description": "author for provenance"},
+                "session": {"type": "string", "description": "your session id, so the hive can attribute this"},
                 "tags": {"type": "array", "items": {"type": "string"}}
             },
             "required": ["kind","body"]
@@ -72,27 +85,11 @@ pub(crate) fn all_definitions() -> Vec<Value> {
         tool("mem_areas", "The table of contents for this project's brain: its feature areas and how many memories each holds. Call this before mem_write so you file the memory into an area that already exists.", json!({
             "type": "object", "properties": {}
         })),
-        tool("mem_anchor", "Write a memory anchored to a code symbol so it can be checked for staleness.", json!({
-            "type": "object",
-            "properties": {
-                "kind": {"type": "string", "enum": ["fact","decision","entity","session","skill"]},
-                "body": {"type": "string"},
-                "file": {"type": "string", "description": "file containing the symbol, relative to repo"},
-                "symbol": {"type": "string", "description": "qualified symbol name, e.g. Foo::bar"},
-                "repo": {"type": "string", "description": "repo root (defaults to the store root)"},
-                "topic": {"type": "string", "description": "Short label (max 48 chars), not a sentence."},
-                "area": {"type": "string", "description": "Feature area this belongs to (auth, billing, infra). Call mem_areas and reuse an existing one."},
-                "project": {"type": "string"},
-                "by": {"type": "string"}
-            },
-            "required": ["kind","body","file","symbol"]
-        })),
         tool("mem_read", "Read a single memory by id, returned as markdown.", json!({
             "type": "object",
             "properties": {"id": {"type": "string"}},
             "required": ["id"]
         })),
-        tool("mem_query", "Structured query over memories with an optional token budget.", filter_schema(false)),
         tool("mem_search", "Hybrid keyword+semantic search over memories.", filter_schema(true)),
         tool("mem_recall", "Recall memories AND the ones connected to them (explicit links, shared topic/tag, related meaning) in one call — the related cluster, not just the matches. Records the retrieval so answers stay traceable.", recall_schema()),
         tool("mem_provenance", "Trace a memory's origin, lineage, and how it has been used.", json!({
@@ -104,7 +101,7 @@ pub(crate) fn all_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "old_id": {"type": "string"},
-                "kind": {"type": "string", "enum": ["fact","decision","entity","session","skill"]},
+                "kind": {"type": "string", "enum": ["fact","decision","entity"]},
                 "body": {"type": "string"},
                 "topic": {"type": "string", "description": "Short label (max 48 chars), not a sentence."},
                 "area": {"type": "string", "description": "Feature area this belongs to (auth, billing, infra). Call mem_areas and reuse an existing one."},
@@ -129,15 +126,6 @@ pub(crate) fn all_definitions() -> Vec<Value> {
                 "repo": {"type": "string", "description": "repo root for staleness (defaults to store root)"},
                 "apply": {"type": "boolean", "description": "merge duplicates and retire expired instead of only reporting"}
             }
-        })),
-        tool("mem_log", "Append an agent-authored event (observation, correction, note).", json!({
-            "type": "object",
-            "properties": {
-                "kind": {"type": "string"},
-                "summary": {"type": "string"},
-                "by": {"type": "string"}
-            },
-            "required": ["summary"]
         })),
         tool("mem_claim", "Register an advisory work-claim so other agent sessions know what you're working on and don't collide. Returns the claim id.", json!({
             "type": "object",
@@ -257,7 +245,7 @@ fn recall_schema() -> Value {
 
 fn filter_schema(with_text: bool) -> Value {
     let mut props = json!({
-        "kind": {"type": "string", "enum": ["fact","decision","entity","session","skill"]},
+        "kind": {"type": "string", "enum": ["fact","decision","entity"]},
         "topic": {"type": "string"},
         "project": {"type": "string"},
         "tag": {"type": "string"},
@@ -309,10 +297,8 @@ pub fn call(root: &Path, name: &str, args: &Value) -> Result<String, String> {
     }
     let store = Store::open(root).map_err(|e| e.to_string())?;
     match name {
-        "mem_write" => write(&store, args),
-        "mem_anchor" => anchor(&store, root, args),
+        "mem_write" => write(&store, root, args),
         "mem_read" => read(&store, args),
-        "mem_query" => query(&store, args),
         "mem_search" => search(&store, args),
         "mem_areas" => areas(&store),
         "mem_recall" => recall(&store, args),
@@ -323,36 +309,36 @@ pub fn call(root: &Path, name: &str, args: &Value) -> Result<String, String> {
         "mem_status" => status(&store),
         "mem_history" => history(&store, args),
         "mem_audit" => audit(&store),
-        "mem_log" => log_event(&store, args),
         "mem_consolidate" => consolidate(&store, root, args),
         "mem_claim" => claim(&store, args),
         "mem_release" => release(&store, args),
         "mem_claims" => claims(&store, args),
         "mem_progress" => progress(&store, args),
         "mem_activity" => activity(&store, args),
-        "mem_bootstrap" => bootstrap(&store, args),
+        "mem_bootstrap" => bootstrap(&store, root, args),
         "mem_ingest" => ingest(root),
         other => Err(format!("unknown tool: {other}")),
     }
 }
 
-fn write(store: &Store, args: &Value) -> Result<String, String> {
+fn write(store: &Store, root: &Path, args: &Value) -> Result<String, String> {
     let mut memory = memory_from(args)?;
-    store.write(&mut memory).map_err(|e| e.to_string())
-}
-
-fn anchor(store: &Store, root: &Path, args: &Value) -> Result<String, String> {
-    let file = str_arg(args, "file")?;
-    let symbol = str_arg(args, "symbol")?;
-    let repo = args
-        .get("repo")
-        .and_then(Value::as_str)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| root.to_path_buf());
-    let mut memory = memory_from(args)?;
-    store
-        .write_anchored(&repo, &file, &symbol, &mut memory)
-        .map_err(|e| e.to_string())
+    // A memory about code gets anchored to that code, so Marrow can tell you when it goes out of
+    // date. Anchoring lives on mem_write itself so it happens in the flow of writing.
+    let anchor = args.get("anchor").and_then(Value::as_object);
+    match anchor {
+        Some(a) => {
+            let file = a.get("file").and_then(Value::as_str).unwrap_or_default();
+            let symbol = a.get("symbol").and_then(Value::as_str).unwrap_or_default();
+            if file.is_empty() || symbol.is_empty() {
+                return Err("anchor needs both file and symbol".into());
+            }
+            store
+                .write_anchored(root, file, symbol, &mut memory)
+                .map_err(|e| e.to_string())
+        }
+        None => store.write(&mut memory).map_err(|e| e.to_string()),
+    }
 }
 
 fn read(store: &Store, args: &Value) -> Result<String, String> {
@@ -361,11 +347,6 @@ fn read(store: &Store, args: &Value) -> Result<String, String> {
         Some(m) => Ok(marrow_memdocs::to_markdown(&m)),
         None => Err(format!("no memory with id {id}")),
     }
-}
-
-fn query(store: &Store, args: &Value) -> Result<String, String> {
-    let hits = store.query(&query_from(args)).map_err(|e| e.to_string())?;
-    Ok(summaries(&hits))
 }
 
 fn search(store: &Store, args: &Value) -> Result<String, String> {
@@ -438,6 +419,9 @@ fn recall(store: &Store, args: &Value) -> Result<String, String> {
                 "kind": kind_name(n.memory.frontmatter.kind),
                 "topic": n.memory.frontmatter.topic,
                 "via": n.via,
+                // How many links from the nearest direct match. 1 is adjacent; 2+ came back because
+                // the brain followed the chain, not because it matched the words.
+                "hops": n.hops,
                 "snippet": n.memory.body.trim().lines().next().unwrap_or("").chars().take(140).collect::<String>(),
             })
         })
@@ -556,16 +540,6 @@ fn audit(store: &Store) -> Result<String, String> {
     }
 }
 
-fn log_event(store: &Store, args: &Value) -> Result<String, String> {
-    let summary = str_arg(args, "summary")?;
-    let kind = opt_arg(args, "kind").unwrap_or_else(|| "observe".into());
-    let by = opt_arg(args, "by").unwrap_or_else(|| "mcp".into());
-    store
-        .log_event(&kind, &by, &summary)
-        .map_err(|e| e.to_string())?;
-    Ok("logged".to_string())
-}
-
 fn claim(store: &Store, args: &Value) -> Result<String, String> {
     let session = str_arg(args, "session")?;
     let intent = str_arg(args, "intent")?;
@@ -628,7 +602,7 @@ fn activity(store: &Store, args: &Value) -> Result<String, String> {
     Ok(json!({"events": items, "count": items.len()}).to_string())
 }
 
-fn bootstrap(store: &Store, args: &Value) -> Result<String, String> {
+fn bootstrap(store: &Store, root: &Path, args: &Value) -> Result<String, String> {
     let goal = str_arg(args, "goal")?;
     let project = opt_arg(args, "project").unwrap_or_else(|| "default".into());
     let by = opt_arg(args, "by").unwrap_or_else(|| "mcp".into());
@@ -649,9 +623,29 @@ fn bootstrap(store: &Store, args: &Value) -> Result<String, String> {
         .filter(|(a, _)| !a.is_empty())
         .map(|(a, n)| json!({"area": a, "memories": n}))
         .collect();
+    // Memories whose code has drifted. Surfaced at warm start rather than behind a tool the agent
+    // would have to remember to call — that is precisely how anchoring stayed dead.
+    let stale: Vec<Value> = store
+        .list_stale(root)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|h| {
+            json!({
+                "id": h.memory_id,
+                "symbol": h.symbol,
+                "file": h.file_path,
+                "what": if h.relocated_to.is_some() { "moved" } else { "code changed" },
+                "relocated_to": h.relocated_to,
+            })
+        })
+        .collect();
     Ok(json!({
         "goal": brief.goal,
         "areas": areas,
+        "stale": stale,
+        "stale_note": if stale.is_empty() { Value::Null } else {
+            json!("These memories cite code that has since changed. Verify them before relying on them, and mem_supersede any that are now wrong.")
+        },
         "active_claims": claims,
         "relevant": brief.relevant.iter().map(mem_brief).collect::<Vec<_>>(),
         "recent_decisions": brief.recent_decisions.iter().map(mem_brief_snippet).collect::<Vec<_>>(),
@@ -865,6 +859,18 @@ fn summaries(hits: &[Memory]) -> String {
     json!({"results": items, "count": hits.len()}).to_string()
 }
 
+fn str_list(args: &Value, key: &str) -> Vec<String> {
+    args.get(key)
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn memory_from(args: &Value) -> Result<Memory, String> {
     let kind = parse_kind(&str_arg(args, "kind")?)?;
     let body = str_arg(args, "body")?;
@@ -885,19 +891,24 @@ fn memory_from(args: &Value) -> Result<Memory, String> {
             topic: opt_arg(args, "topic"),
             area: opt_arg(args, "area"),
             scope: Scope {
-                user_id: None,
-                agent_id: None,
                 project_id: opt_arg(args, "project").unwrap_or_default(),
-                org_id: None,
             },
-            refs: vec![],
+            // Structured refs mirror the [[wiki-links]] the agent wrote in the body, so the link
+            // graph is data rather than something every reader has to re-parse out of prose.
+            refs: marrow_memdocs::wiki_refs(&body),
             code_anchors: vec![],
-            confidence: 1.0,
-            decay: None,
+            confidence: args
+                .get("confidence")
+                .and_then(Value::as_f64)
+                .filter(|c| (0.0..=1.0).contains(c))
+                .unwrap_or(1.0),
+            decay: opt_arg(args, "expires_at").map(|expires_at| Decay {
+                expires_at: Some(expires_at),
+            }),
             provenance: Provenance {
                 written_by: opt_arg(args, "by").unwrap_or_else(|| "mcp".into()),
-                session_id: None,
-                sources: vec![],
+                session_id: opt_arg(args, "session"),
+                sources: str_list(args, "sources"),
             },
             supersedes: vec![],
             tags,
@@ -939,7 +950,6 @@ fn query_from(args: &Value) -> Query {
             .and_then(Value::as_bool)
             .unwrap_or(false),
         hybrid_weight: args.get("weight").and_then(Value::as_f64),
-        ..Query::default()
     }
 }
 
@@ -959,8 +969,6 @@ fn parse_kind(s: &str) -> Result<MemoryKind, String> {
         "fact" => MemoryKind::Fact,
         "decision" => MemoryKind::Decision,
         "entity" => MemoryKind::Entity,
-        "session" => MemoryKind::Session,
-        "skill" => MemoryKind::Skill,
         other => return Err(format!("unknown kind: {other}")),
     })
 }
@@ -970,7 +978,5 @@ fn kind_name(kind: MemoryKind) -> &'static str {
         MemoryKind::Fact => "fact",
         MemoryKind::Decision => "decision",
         MemoryKind::Entity => "entity",
-        MemoryKind::Session => "session",
-        MemoryKind::Skill => "skill",
     }
 }

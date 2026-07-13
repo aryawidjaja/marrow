@@ -1,6 +1,7 @@
 //! The memory store: markdown files as the source of truth, SQLite as a derived index.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -123,8 +124,8 @@ impl Store {
         };
         fs::create_dir_all(marrow.join(".index"))?;
         let conn = Connection::open(marrow.join(".index/sqlite.db"))?;
-        // Wait, don't error, when another writer (e.g. a second device on the served backbone)
-        // holds the lock.
+        // Another writer (a second device on the served backbone, say) may hold the lock; wait for
+        // it rather than failing the open.
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         index::init_schema(&conn)?;
         let key = if config.sign {
@@ -163,7 +164,8 @@ impl Store {
     }
 
     /// Record a retrieval: which memory ids were recalled for a query. This is what makes an
-    /// answer traceable back to the knowledge that produced it.
+    /// answer traceable back to the knowledge that produced it, and it is also what teaches the
+    /// brain which memories are worth reaching for — see [`Store::recall_counts`].
     pub fn log_retrieval(&self, actor: &str, query: &str, ids: &[String]) -> Result<(), Error> {
         let mut ev = NewEvent::new(
             "retrieve",
@@ -175,7 +177,35 @@ impl Store {
             ),
         );
         ev.data = serde_json::json!({ "query": query, "ids": ids });
+        index::bump_recalls(&self.conn, ids).map_err(|e| Error::Db(e.to_string()))?;
         self.record(ev)
+    }
+
+    /// How many times each memory has been recalled. A memory that keeps proving useful is easier
+    /// to recall again; one nobody ever reaches for stays where it is.
+    pub fn recall_counts(&self) -> Result<HashMap<String, u32>, Error> {
+        index::recall_counts(&self.conn)
+            .map(|v| v.into_iter().collect())
+            .map_err(|e| Error::Db(e.to_string()))
+    }
+
+    /// Rebuild the recall counts from the episodic ledger. Every retrieval Marrow has ever served
+    /// is already recorded there, so a store that predates the counts still knows its own history.
+    pub fn rebuild_recall_counts(&self) -> Result<usize, Error> {
+        let mut counts: HashMap<String, u32> = HashMap::new();
+        for ev in self.history()? {
+            if ev.kind != "retrieve" {
+                continue;
+            }
+            for id in ev.data["ids"].as_array().into_iter().flatten() {
+                if let Some(id) = id.as_str() {
+                    *counts.entry(id.to_string()).or_default() += 1;
+                }
+            }
+        }
+        let flat: Vec<(String, u32)> = counts.into_iter().collect();
+        index::reset_recalls(&self.conn, &flat).map_err(|e| Error::Db(e.to_string()))?;
+        Ok(flat.len())
     }
 
     /// Append an event carrying a structured payload. Used by the coordination plane
@@ -243,6 +273,17 @@ impl Store {
         )
     }
 
+    /// A memory's file lives under its kind, so changing the kind moves the file. Drop the copy at
+    /// the old path, or the id would exist twice on disk and a later reindex could pick either.
+    fn drop_stale_file(&self, id: &str, rel: &str) {
+        let Ok(Some(old)) = index::path_of(&self.conn, id) else {
+            return;
+        };
+        if old != rel {
+            let _ = fs::remove_file(self.memory_dir().join(old));
+        }
+    }
+
     /// Validate, sign, persist atomically, and index a memory. Returns its id.
     pub fn write(&self, memory: &mut Memory) -> Result<String, Error> {
         let now = util::now_rfc3339();
@@ -274,6 +315,7 @@ impl Store {
             fs::create_dir_all(parent)?;
         }
         atomic_write(&abs, &to_markdown(memory))?;
+        self.drop_stale_file(&memory.frontmatter.id, &rel);
 
         index::upsert(&self.conn, &self.row_of(memory, &rel))?;
         self.embed_memory(memory)?;
@@ -302,7 +344,6 @@ impl Store {
         memory.frontmatter.refs.push(Ref {
             kind: RefKind::Symbol,
             value: format!("{file}::{symbol}"),
-            anchor: Some(core.fingerprint.clone()),
         });
         memory.frontmatter.code_anchors.push(CodeAnchor {
             file_path: core.file_path,
@@ -343,6 +384,7 @@ impl Store {
         }
         let rel = self.rel_path(&memory);
         atomic_write(&self.memory_dir().join(&rel), &to_markdown(&memory))?;
+        self.drop_stale_file(id, &rel);
         index::upsert(&self.conn, &self.row_of(&memory, &rel))?;
         self.embed_memory(&memory)?;
         let summary = format!(
@@ -645,6 +687,8 @@ impl Store {
             self.embed_memory(&memory)?;
             count += 1;
         }
+        // `clear` wiped the counts with the rest of the derived index; the ledger still has them.
+        self.rebuild_recall_counts()?;
         Ok(count)
     }
 
@@ -682,9 +726,6 @@ impl Store {
             topic: fm.topic.clone().unwrap_or_default(),
             area: fm.area.clone().unwrap_or_default(),
             project_id: fm.scope.project_id.clone(),
-            user_id: fm.scope.user_id.clone().unwrap_or_default(),
-            agent_id: fm.scope.agent_id.clone().unwrap_or_default(),
-            org_id: fm.scope.org_id.clone().unwrap_or_default(),
             confidence: fm.confidence,
             created_at: fm.created_at.clone(),
             updated_at: fm.updated_at.clone(),

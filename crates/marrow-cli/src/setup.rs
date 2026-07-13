@@ -22,9 +22,11 @@ const MARROW_SAVE: &str = include_str!("../../../integrations/claude-code/comman
 const GUIDANCE: &str = "<!-- marrow:begin (managed by `marrow setup`) -->\n\
 ## Marrow shared memory\n\n\
 This project has a Marrow shared brain over MCP. Hooks load context at session start, prevent file\n\
-collisions, and record activity automatically. Three things are on you:\n\n\
+collisions, and record activity automatically. Five things are on you:\n\n\
 1. Recall before you answer. For any question about how this project works or what was decided, call\n\
-`mem_recall` first. Do not rely only on the start-of-session briefing; it can be stale.\n\
+`mem_recall` first. Do not rely only on the start-of-session briefing; it can be stale. It returns the\n\
+matches AND the memories connected to them; a neighbour with `hops` of 2 or more did not match your\n\
+words at all, so read it, it is often the thing you did not know to ask for.\n\
 2. Save as you go. The moment you reach a durable decision, fact, or gotcha, save it with `mem_write`\n\
 (kind `decision` or `fact`). Call `mem_recall` first so you do not duplicate.\n\
 3. File it where it belongs. Every memory lives in an `area` of the project (`auth`, `billing`,\n\
@@ -32,9 +34,15 @@ collisions, and record activity automatically. Three things are on you:\n\n\
 near-duplicate. If nothing fits, leave `area` out rather than forcing a wrong one: an unfiled memory\n\
 is still fully searchable, a misfiled one is a lie. Keep `topic` a SHORT LABEL of a few words, never\n\
 a sentence: it is the key the brain groups and de-duplicates by, and the detail belongs in the body.\n\n\
+4. Link what belongs together. Reference related memories as `[[id]]` or `[[topic]]` in the body.\n\
+Recall follows those links outward from whatever matched, so a link is how an old memory stays\n\
+findable long after anyone stops searching for its words. Link generously.\n\n\
+5. Anchor what is about code. If a memory describes how a specific function or type behaves, pass\n\
+`anchor: {file, symbol}` to `mem_write`. Marrow fingerprints that symbol and flags the memory the\n\
+moment the code changes, so the brain warns you instead of confidently telling you something stale.\n\n\
 Hive etiquette: you share this brain with other live sessions. Heed the notes about what they are\n\
-doing, do not edit a file another session has claimed, and if one looks stuck, offer to help. Check\n\
-`mem_claims` before a big change.\n\
+doing, and do not edit a file another session has claimed. The hooks claim and release files for you;\n\
+you do not manage claims yourself.\n\
 <!-- marrow:end -->\n";
 
 /// Add the marrow binary's own directory to a hook's lookup chain, so the hook finds `marrow`

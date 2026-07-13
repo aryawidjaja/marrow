@@ -36,9 +36,8 @@ pub struct Verdict {
     pub rationale: String,
 }
 
-/// Judges a cluster of related memories and distills them. The default is deterministic; an
-/// LLM-backed distiller (feature `distill-http`, pointed at a local/sovereign model) resolves
-/// genuine contradictions.
+/// Judges a cluster of related memories and distills them into one. Deterministic: it keeps what the
+/// memories agree on and never invents a claim none of them made.
 pub trait Distiller: Send + Sync {
     fn distill(&self, bodies: &[String]) -> Result<Verdict, String>;
 }
@@ -68,24 +67,13 @@ impl Distiller for HeuristicDistiller {
 }
 
 /// Build the configured distiller, falling back to the heuristic when no LLM is available.
-pub fn build_distiller(config: &Config) -> Box<dyn Distiller> {
-    match config.consolidation.distiller.as_str() {
-        #[cfg(feature = "distill-http")]
-        "http" => Box::new(crate::distill_http::HttpDistiller::from_config(
-            &config.consolidation,
-        )),
-        _ => Box::new(HeuristicDistiller),
-    }
+pub fn build_distiller(_config: &Config) -> Box<dyn Distiller> {
+    Box::new(HeuristicDistiller)
 }
 
-/// How strongly a memory should be retained: decayed confidence, tie-broken by recency.
-/// Higher means "keep this one".
-pub fn salience(memory: &Memory, now_unix: i64) -> f64 {
-    let fm = &memory.frontmatter;
-    match fm.decay.as_ref().and_then(|d| d.half_life.as_deref()) {
-        Some(hl) => util::decayed_confidence(fm.confidence, &fm.created_at, hl, now_unix),
-        None => fm.confidence,
-    }
+/// How strongly a memory should be retained. Higher means "keep this one".
+pub fn salience(memory: &Memory) -> f64 {
+    memory.frontmatter.confidence
 }
 
 /// A cluster of related memories, with the chosen survivor first.
@@ -209,7 +197,6 @@ impl Store {
     /// Group active memories into clusters of related meaning. With an embedder this is by
     /// cosine similarity; without one it falls back to exact normalized-body matching.
     fn clusters(&self) -> Result<Vec<Cluster>, Error> {
-        let now = util::to_unix(&util::now_rfc3339()).unwrap_or(0);
         let memories: Vec<Memory> = self
             .query(&Query {
                 status: Some(Status::Active),
@@ -236,8 +223,8 @@ impl Store {
             {
                 // Survivor = highest salience, tie-broken by most recent update.
                 members.sort_by(|a, b| {
-                    salience(b, now)
-                        .partial_cmp(&salience(a, now))
+                    salience(b)
+                        .partial_cmp(&salience(a))
                         .unwrap_or(std::cmp::Ordering::Equal)
                         .then_with(|| b.frontmatter.updated_at.cmp(&a.frontmatter.updated_at))
                 });
@@ -429,10 +416,9 @@ mod tests {
         }
     }
 
-    /// THE BUG THAT ATE A REAL STORE. Greedy clustering on a fixed cosine threshold swept DISTINCT
-    /// topics into one cluster and the merge retired all but one (71 of 72 memories superseded).
-    /// Even when every memory looks similar to the embedder, memories on DIFFERENT topics must
-    /// never be merged: `topic` is the identity of the thing being remembered.
+    /// `topic` is the identity of the thing being remembered, so memories on DIFFERENT topics must
+    /// never be merged — not even when the embedder rates every one of them alike, which it will on a
+    /// corpus with a high baseline similarity.
     #[test]
     fn consolidation_never_merges_distinct_topics_even_when_embeddings_are_alike() {
         let dir = tempfile::tempdir().unwrap();
@@ -515,10 +501,7 @@ mod tests {
                 topic: Some(topic.into()),
                 area: None,
                 scope: Scope {
-                    user_id: None,
-                    agent_id: None,
                     project_id: "demo".into(),
-                    org_id: None,
                 },
                 refs: vec![],
                 code_anchors: vec![],

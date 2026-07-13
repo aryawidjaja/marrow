@@ -45,18 +45,6 @@ pub fn is_expired(expires_at: &str, now_unix: i64) -> bool {
     to_unix(expires_at).is_some_and(|e| e < now_unix)
 }
 
-/// Confidence after exponential decay: `base * 0.5^(age / half_life)`.
-pub fn decayed_confidence(base: f64, created_at: &str, half_life: &str, now_unix: i64) -> f64 {
-    let (Some(created), Some(hl)) = (to_unix(created_at), parse_duration_secs(half_life)) else {
-        return base;
-    };
-    if hl <= 0 {
-        return base;
-    }
-    let age = (now_unix - created).max(0) as f64;
-    base * 0.5_f64.powf(age / hl as f64)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -75,12 +63,5 @@ mod tests {
         let now = to_unix("2026-06-06T00:00:00Z").unwrap();
         assert!(is_expired("2000-01-01T00:00:00Z", now));
         assert!(!is_expired("2099-01-01T00:00:00Z", now));
-    }
-
-    #[test]
-    fn decays_by_half_life() {
-        let now = to_unix("2026-02-01T00:00:00Z").unwrap(); // ~31 days later
-        let c = decayed_confidence(1.0, "2026-01-01T00:00:00Z", "31d", now);
-        assert!((c - 0.5).abs() < 0.02, "got {c}");
     }
 }

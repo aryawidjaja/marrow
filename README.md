@@ -83,7 +83,7 @@ marrow-serve          # opens the dashboard at http://localhost:8088
 
 Every memory is a neuron, grouped into the area it belongs to, so the graph has real structure
 instead of being a hairball. Links connect memories that share a topic, a tag, or **related meaning**
-(from embeddings). Browse the tree, drag, zoom, click to read, search, and **add, edit, or delete**
+(from embeddings). Browse the tree, drag, zoom, click to read, filter, and **add, edit, or delete**
 memories right there. The **Hive** tab shows every project at once.
 
 ## Your memories are organised, not a pile
@@ -203,6 +203,25 @@ marrow audit                                                         # prove the
 `marrow add` writes a plain markdown file under `.marrow/memory/`, the YAML frontmatter is metadata,
 the text below is the memory. The SQLite index is a rebuildable cache over these files.
 
+## It doesn't forget the old stuff
+
+The obvious worry with a memory that only ever grows: does the good idea from four months ago just
+sink? Two things stop it.
+
+**Recall follows the links.** Ask a question and Marrow doesn't only return what matched your words.
+It takes the matches and spreads outward through the graph, a few links at a time, weakening with
+each step. So a note that shares none of your vocabulary still surfaces if it sits behind one that
+does. That old decision stays reachable through its neighbours, which is exactly what the links are
+for.
+
+**And the brain strengthens what it uses.** Every recall is recorded. A memory the agents keep
+reaching for gets easier to reach again; one nobody has ever touched stays where it is. Recall a
+thing enough and it comes to you.
+
+The size never runs away either, because a new memory on an existing topic *supersedes* the old one
+rather than piling on top. The brain grows with how much your project knows, not with how much your
+agents type.
+
 ## What's under the hood
 
 - **Staleness detection**: a memory can cite a code symbol; Marrow fingerprints it and flags the note
@@ -210,12 +229,17 @@ the text below is the memory. The SQLite index is a rebuildable cache over these
 - **Consolidation**: finds genuine duplicates (a near-identical restatement, or a pair that are
   mutually each other's closest match) and merges them, preserving lineage. It will not merge notes
   that are merely similar.
+- **Associative recall**: a question returns the matches *and* the memories connected to them, found
+  by following links, shared topics and related meaning outward from the hits.
 - **Hive mind**: many sessions work as one: each joins warm, claims its work so two never collide, and
   reads a live activity trail. Unlike a black-box hive, every signal is in an auditable ledger.
 - **Audit & provenance**: every write, edit, and recall lands in an append-only, hash-chained ledger;
-  any answer traces back to its sources.
-- **Typed & validated**: five schemas (fact, decision, entity, session, skill); bad writes are rejected
-  with reasons.
+  any answer traces back to its sources. Turn signing on and `marrow audit` also catches a memory
+  file edited on disk behind Marrow's back.
+- **Typed & validated**: every memory is a `fact` or a `decision` (or an `entity`), filed in an area
+  under a short topic; bad writes are rejected with the reason, so the brain can't fill up with junk.
+- **Expiry & confidence**: a memory can say how sure it is, and can carry an expiry date for things
+  that are only true for now. Marrow retires them when they lapse.
 - **Runs anywhere**: offline single binaries; markdown is the source of truth, SQLite a disposable cache.
 
 ## The name

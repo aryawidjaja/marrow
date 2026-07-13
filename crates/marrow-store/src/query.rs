@@ -9,9 +9,6 @@ pub struct Query {
     pub status: Option<Status>,
     pub topic: Option<String>,
     pub project_id: Option<String>,
-    pub user_id: Option<String>,
-    pub agent_id: Option<String>,
-    pub org_id: Option<String>,
     pub min_confidence: Option<f64>,
     pub tag: Option<String>,
     /// Exclude memories whose `expires_at` is in the past (default true).

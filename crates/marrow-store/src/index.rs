@@ -16,9 +16,6 @@ pub struct IndexRow {
     pub topic: String,
     pub area: String,
     pub project_id: String,
-    pub user_id: String,
-    pub agent_id: String,
-    pub org_id: String,
     pub confidence: f64,
     pub created_at: String,
     pub updated_at: String,
@@ -38,9 +35,6 @@ pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
             topic TEXT NOT NULL DEFAULT '',
             area TEXT NOT NULL DEFAULT '',
             project_id TEXT NOT NULL DEFAULT '',
-            user_id TEXT NOT NULL DEFAULT '',
-            agent_id TEXT NOT NULL DEFAULT '',
-            org_id TEXT NOT NULL DEFAULT '',
             confidence REAL NOT NULL DEFAULT 1.0,
             created_at TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL DEFAULT '',
@@ -57,6 +51,10 @@ pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
             id TEXT PRIMARY KEY,
             dim INTEGER NOT NULL,
             vec BLOB NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS recalls (
+            id TEXT PRIMARY KEY,
+            n INTEGER NOT NULL DEFAULT 0
         );",
     )?;
     // Older stores predate `area`; add it in place rather than forcing a full reindex.
@@ -64,6 +62,35 @@ pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
         "ALTER TABLE memories ADD COLUMN area TEXT NOT NULL DEFAULT ''",
         [],
     );
+    Ok(())
+}
+
+/// Count one retrieval against each memory that came back.
+pub fn bump_recalls(conn: &Connection, ids: &[String]) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare(
+        "INSERT INTO recalls (id, n) VALUES (?1, 1)
+         ON CONFLICT(id) DO UPDATE SET n = n + 1",
+    )?;
+    for id in ids {
+        stmt.execute([id])?;
+    }
+    Ok(())
+}
+
+/// How many times each memory has been recalled. Memories never recalled are absent.
+pub fn recall_counts(conn: &Connection) -> rusqlite::Result<Vec<(String, u32)>> {
+    let mut stmt = conn.prepare("SELECT id, n FROM recalls WHERE n > 0")?;
+    let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as u32)))?;
+    rows.collect()
+}
+
+/// Replace every recall count, used when rebuilding them from the ledger.
+pub fn reset_recalls(conn: &Connection, counts: &[(String, u32)]) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM recalls", [])?;
+    let mut stmt = conn.prepare("INSERT OR REPLACE INTO recalls (id, n) VALUES (?1, ?2)")?;
+    for (id, n) in counts {
+        stmt.execute(params![id, *n as i64])?;
+    }
     Ok(())
 }
 
@@ -109,18 +136,15 @@ pub fn vectors_for(conn: &Connection, ids: &[String]) -> rusqlite::Result<Vec<(S
 pub fn upsert(conn: &Connection, row: &IndexRow) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT OR REPLACE INTO memories
-         (id, kind, status, topic, project_id, user_id, agent_id, org_id,
+         (id, kind, status, topic, project_id,
           confidence, created_at, updated_at, expires_at, tags, path, body, area)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
         params![
             row.id,
             row.kind,
             row.status,
             row.topic,
             row.project_id,
-            row.user_id,
-            row.agent_id,
-            row.org_id,
             row.confidence,
             row.created_at,
             row.updated_at,
@@ -163,7 +187,11 @@ pub fn path_of(conn: &Connection, id: &str) -> rusqlite::Result<Option<String>> 
 
 /// Remove every row (used before a full reindex).
 pub fn clear(conn: &Connection) -> rusqlite::Result<()> {
-    conn.execute_batch("DELETE FROM memories; DELETE FROM memories_fts; DELETE FROM embeddings;")
+    // Recall counts are derived too — the ledger holds the retrievals they are counted from — so
+    // they are wiped with the rest and rebuilt, rather than being allowed to drift forever.
+    conn.execute_batch(
+        "DELETE FROM memories; DELETE FROM memories_fts; DELETE FROM embeddings; DELETE FROM recalls;",
+    )
 }
 
 /// Build the shared WHERE clause and bound parameters from a [`Query`].
@@ -192,9 +220,6 @@ fn filters(q: &Query, now: &str) -> (String, Vec<String>) {
         &mut binds,
         &mut clauses,
     );
-    eq("user_id", q.user_id.as_ref(), &mut binds, &mut clauses);
-    eq("agent_id", q.agent_id.as_ref(), &mut binds, &mut clauses);
-    eq("org_id", q.org_id.as_ref(), &mut binds, &mut clauses);
     if let Some(c) = q.min_confidence {
         clauses.push("confidence >= ?".into());
         binds.push(c.to_string());
@@ -215,7 +240,7 @@ fn filters(q: &Query, now: &str) -> (String, Vec<String>) {
     (where_sql, binds)
 }
 
-const COLS: &str = "id,kind,status,topic,project_id,user_id,agent_id,org_id,confidence,created_at,updated_at,expires_at,tags,path,body,area";
+const COLS: &str = "id,kind,status,topic,project_id,confidence,created_at,updated_at,expires_at,tags,path,body,area";
 
 fn row_from(r: &rusqlite::Row) -> rusqlite::Result<IndexRow> {
     Ok(IndexRow {
@@ -224,17 +249,14 @@ fn row_from(r: &rusqlite::Row) -> rusqlite::Result<IndexRow> {
         status: r.get(2)?,
         topic: r.get(3)?,
         project_id: r.get(4)?,
-        user_id: r.get(5)?,
-        agent_id: r.get(6)?,
-        org_id: r.get(7)?,
-        confidence: r.get(8)?,
-        created_at: r.get(9)?,
-        updated_at: r.get(10)?,
-        expires_at: r.get(11)?,
-        tags: r.get(12)?,
-        path: r.get(13)?,
-        body: r.get(14)?,
-        area: r.get(15)?,
+        confidence: r.get(5)?,
+        created_at: r.get(6)?,
+        updated_at: r.get(7)?,
+        expires_at: r.get(8)?,
+        tags: r.get(9)?,
+        path: r.get(10)?,
+        body: r.get(11)?,
+        area: r.get(12)?,
     })
 }
 

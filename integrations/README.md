@@ -70,15 +70,18 @@ You share a Marrow memory with other agent sessions. Follow this loop:
 1. At the start of a task, call mem_bootstrap with your goal. Read the briefing: it tells you
    what other sessions are already doing and the memories/decisions relevant to your goal.
    Do NOT re-scan the whole codebase first.
-2. Before you start editing, call mem_claims with the files/feature you intend to change.
-   If an active claim overlaps, pick different work or coordinate — don't collide.
-3. Claim your work with mem_claim, then record notable steps with mem_progress.
-4. When you learn something durable (a decision, a fact, a gotcha), write it with mem_write so
-   the next session inherits it.
-5. Release your claim with mem_release when done.
+2. Before you answer anything about how this project works, call mem_recall. It returns the
+   matches AND the memories connected to them. A neighbour with `hops` of 2 or more matched none
+   of your words — the brain followed the links to reach it, so read it.
+3. When you learn something durable (a decision, a fact, a gotcha), write it with mem_write so
+   the next session inherits it. Call mem_areas first and file it into an area that already
+   exists, keep `topic` a short label, and reference related memories as [[links]] in the body —
+   links are how an old memory stays findable once nobody searches for its words any more.
+4. When a decision changes, mem_supersede the old one instead of writing a contradiction.
 ```
 
-That five-step loop is the whole point: **one brain, many hands.**
+Claiming files so two sessions never collide is handled by the hooks, not by the agent: it happens
+for you. That loop is the whole point: **one brain, many hands.**
 
 ---
 
@@ -93,11 +96,14 @@ tokens. See [`claude-code/README.md`](claude-code/README.md).
 
 ## The tools you get (MCP)
 
-Knowledge plane: `mem_write` · `mem_anchor` · `mem_read` · `mem_query` · `mem_search` ·
-`mem_recall` · `mem_provenance` · `mem_supersede` · `mem_list_stale` · `mem_validate` ·
-`mem_status` · `mem_history` · `mem_audit` · `mem_consolidate` · `mem_log`
+Your agent is given a small set, so it spends its tokens on your code and not on reading a tool
+catalogue: `mem_bootstrap` (start warm) · `mem_recall` (the matches *and* what they're connected to) ·
+`mem_search` · `mem_areas` · `mem_write` · `mem_read` · `mem_supersede` · `mem_ingest`.
 
-Coordination plane (the shared brain): `mem_bootstrap` · `mem_claim` · `mem_claims` ·
-`mem_release` · `mem_progress` · `mem_activity`
+Join a hive and it also gets `mem_hub_recall`, `mem_hub_activity`, and the agent channel
+(`mem_ask` · `mem_inbox` · `mem_reply`).
+
+Claiming files so two sessions don't collide happens in the hooks, not in the agent: it is handled
+for you rather than being something the agent has to remember to do.
 
 Everything has a `marrow <command>` CLI equivalent, so scripts and hooks can do the same.

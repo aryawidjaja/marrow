@@ -44,16 +44,39 @@ empty but docs exist.
 
 ## How an agent should use Marrow (the loop)
 
-1. **Start warm.** Call `mem_bootstrap` with your goal. It returns active work-claims (what other sessions are doing) + the memories/decisions most relevant to the goal. Do NOT re-scan the whole codebase first.
-2. **Avoid collisions.** Before editing, call `mem_claims` with the files/feature you intend to change. If an active claim overlaps, pick different work, coordinate, or help that session if it's stuck. Stay aware of others as you go with `mem_activity` (Claude Code injects this automatically each turn).
-3. **Claim your work.** Call `mem_claim` (session, intent, files). Record steps with `mem_progress`.
-4. **Remember what you learn.** When you reach a durable decision/fact/gotcha, call `mem_write` so the next session inherits it.
-5. **Release.** Call `mem_release` when done.
+1. **Start warm.** Call `mem_bootstrap` with your goal. You get back: the project's AREAS (its table of
+   contents), what other sessions are doing, the memories most relevant to your goal, and any memories
+   whose code has since CHANGED. Do not re-scan the codebase first.
+2. **Recall before you answer.** For any question about how this project works or what was decided,
+   call `mem_recall`. It returns the matches AND the memories connected to them, in one call. The
+   connected ones carry `hops`: `1` is directly linked to a match, `2` or more means the brain
+   followed the chain to reach it. A high-`hops` memory did not match your words at all, so read it —
+   it is often the thing you did not know to ask for.
+3. **Remember what you learn.** The moment you reach a durable decision, fact, or gotcha, call
+   `mem_write`. Three things matter:
+   - `area`: which part of the project this belongs to (`auth`, `billing`). Call `mem_areas` first and
+     REUSE an existing area. If nothing fits, leave it out; an unfiled memory is still searchable, a
+     misfiled one is a lie.
+   - `topic`: a SHORT LABEL, never a sentence. It is the key the brain de-duplicates by, and a new
+     memory on the same topic supersedes the old one. This is what stops the brain growing forever.
+   - `[[links]]`: reference related memories by id or topic in the body. Links are how an old memory
+     stays findable once nobody searches for its words any more, so link generously.
+   Optional but worth it: `confidence` when you are NOT sure (an uncertain memory is useful, a
+   confidently wrong one is not), and `expires_at` for something only true for now, which Marrow
+   retires on its own.
+4. **Anchor what is about code.** If the memory describes how a specific function or type behaves, pass
+   `anchor: {file, symbol}` to `mem_write`. Marrow fingerprints that symbol and warns the next session
+   the moment the code changes, instead of confidently telling it something stale.
+5. **Supersede, do not duplicate.** When a decision changes, `mem_supersede` the old one. The lineage is
+   kept, so you can always see what you used to think and why it changed.
+
+You do NOT manage work-claims yourself. Claiming files, releasing them, and recording progress are done
+FOR you by the Claude Code hooks. Do not call claim/release tools; they are not in your tool list.
 
 ## Tools (MCP) and CLI equivalents
 
 
-Coordination (the shared brain): `mem_bootstrap`/`marrow bootstrap`, `mem_claim`/`marrow claim`, `mem_claims`/`marrow claims`, `mem_release`/`marrow release`, `mem_progress`/`marrow progress`, `mem_activity`/`marrow activity`.
+Warm start: `mem_bootstrap`/`marrow bootstrap`. Collision-avoidance, progress and claims are handled by the hooks; agents do not call them.
 
 Onboarding: `mem_ingest`/`marrow ingest` (seed memory from existing docs). A `save` MCP prompt (Claude Code: `/mcp__marrow__save`, or the `/marrow-save` slash command) tells the agent to distill the current session into memory.
 

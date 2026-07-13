@@ -31,4 +31,3 @@ marrow-core = { path = "../marrow-core" }
 [features]
 embed-http = ["dep:ureq"]
 embed-fastembed = ["dep:fastembed"]
-distill-http = ["dep:ureq"]

@@ -241,10 +241,7 @@ mod tests {
                 topic: Some(topic.into()),
                 area: None,
                 scope: Scope {
-                    user_id: None,
-                    agent_id: None,
                     project_id: String::new(),
-                    org_id: None,
                 },
                 refs: vec![],
                 code_anchors: vec![],

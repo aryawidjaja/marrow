@@ -20,6 +20,8 @@ pub struct Node {
     pub group: String,
     /// The feature area this memory lives in ("" when unfiled) — the layout groups by this.
     pub area: String,
+    /// When this memory was written. Lets the dashboard replay the brain's growth over time.
+    pub born: String,
     pub snippet: String,
     pub degree: usize,
 }
@@ -182,6 +184,7 @@ pub fn project_graph(store: &Store, root: &Path) -> Graph {
             kind: r.kind.clone(),
             group: r.area.clone(),
             area: r.area.clone(),
+            born: r.created_at.clone(),
             snippet: snippet(&r.body, 140),
             degree: 0,
         });
@@ -210,6 +213,7 @@ pub fn project_graph(store: &Store, root: &Path) -> Graph {
             kind: "area".into(),
             group: area.clone(),
             area: area.clone(),
+            born: String::new(),
             snippet: format!("{} memories filed under `{area}`", members.len()),
             degree: 0,
         });
@@ -274,6 +278,7 @@ pub fn hive_graph(hub: &Hub) -> Graph {
         kind: "core".into(),
         group: "core".into(),
         area: String::new(),
+        born: String::new(),
         snippet: "shared memory about you — the center of the hive".into(),
         degree: 0,
     }];
@@ -311,6 +316,7 @@ pub fn hive_graph(hub: &Hub) -> Graph {
                 kind: "project".into(),
                 group: p.name.clone(),
                 area: String::new(),
+                born: String::new(),
                 snippet: format!("project: {}", p.root.display()),
                 degree: 0,
             });
@@ -360,6 +366,7 @@ pub fn hive_graph(hub: &Hub) -> Graph {
                 kind: r.kind.clone(),
                 group: p.name.clone(),
                 area: r.area.clone(),
+                born: r.created_at.clone(),
                 snippet: snippet(&r.body, 140),
                 degree: 0,
             });
@@ -388,6 +395,7 @@ pub fn hive_graph(hub: &Hub) -> Graph {
                 kind: "area".into(),
                 group: p.name.clone(),
                 area: area.clone(),
+                born: String::new(),
                 snippet: format!("{} memories in `{area}` ({})", members.len(), p.name),
                 degree: 0,
             });
@@ -617,10 +625,7 @@ mod tests {
                 topic: Some(topic.into()),
                 area: None,
                 scope: Scope {
-                    user_id: None,
-                    agent_id: None,
                     project_id: String::new(),
-                    org_id: None,
                 },
                 refs: vec![],
                 code_anchors: vec![],
