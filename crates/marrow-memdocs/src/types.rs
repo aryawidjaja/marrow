@@ -103,6 +103,11 @@ pub struct Frontmatter {
     pub status: Status,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub topic: Option<String>,
+    /// The feature/area this memory belongs to — its one home inside the project (`auth`,
+    /// `billing`, `infra`). The agent picks it when writing, reusing the project's existing areas.
+    /// Gives the brain a navigable middle layer: project → area → topic → versions.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub area: Option<String>,
     pub scope: Scope,
     #[serde(default)]
     pub refs: Vec<Ref>,

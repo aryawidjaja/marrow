@@ -21,6 +21,7 @@ fn mem(kind: MemoryKind, topic: &str, body: &str, confidence: f64) -> Memory {
             kind,
             status: Status::Active,
             topic: Some(topic.into()),
+            area: None,
             scope: Scope {
                 user_id: None,
                 agent_id: None,

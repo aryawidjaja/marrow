@@ -67,6 +67,7 @@ mod tests {
                 kind: MemoryKind::Decision,
                 status: Status::Active,
                 topic: Some("calc".into()),
+                area: None,
                 scope: Scope {
                     user_id: None,
                     agent_id: None,

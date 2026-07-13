@@ -424,6 +424,23 @@ impl Store {
         )?)
     }
 
+    /// The project's feature areas with their memory counts, busiest first — the table of contents
+    /// for this brain. An agent reads this before writing so it files into an area that already
+    /// exists instead of inventing a near-duplicate ("auth" vs "authentication"). Memories with no
+    /// area are reported under an empty name; they stay fully searchable, they're just unfiled.
+    pub fn areas(&self) -> Result<Vec<(String, usize)>, Error> {
+        let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for row in self.list()? {
+            if row.status != "active" {
+                continue;
+            }
+            *counts.entry(row.area.clone()).or_default() += 1;
+        }
+        let mut areas: Vec<(String, usize)> = counts.into_iter().collect();
+        areas.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        Ok(areas)
+    }
+
     /// Structured query, loading full memories under an optional token budget.
     pub fn query(&self, q: &Query) -> Result<Vec<Memory>, Error> {
         let rows = index::query(&self.conn, q, &util::now_rfc3339())?;
@@ -648,6 +665,7 @@ impl Store {
             kind: kind_str(fm.kind).into(),
             status: status_str(fm.status).into(),
             topic: fm.topic.clone().unwrap_or_default(),
+            area: fm.area.clone().unwrap_or_default(),
             project_id: fm.scope.project_id.clone(),
             user_id: fm.scope.user_id.clone().unwrap_or_default(),
             agent_id: fm.scope.agent_id.clone().unwrap_or_default(),

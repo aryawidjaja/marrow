@@ -37,6 +37,7 @@ const CORE_TOOLS: &[&str] = &[
     "mem_bootstrap",
     "mem_recall",
     "mem_search",
+    "mem_areas",
     "mem_write",
     "mem_read",
     "mem_supersede",
@@ -55,17 +56,21 @@ const HUB_TOOLS: &[&str] = &[
 
 pub(crate) fn all_definitions() -> Vec<Value> {
     let Value::Array(defs) = json!([
-        tool("mem_write", "Write a new memory (fact, decision, entity, session, or skill). Rejects invalid writes with the reasons.", json!({
+        tool("mem_write", "Write a new memory (fact, decision, entity, session, or skill). Rejects invalid writes with the reasons. FILE IT: pass `area` so the memory lands in the right part of the project's brain — call mem_areas first and REUSE an existing area rather than inventing a near-duplicate.", json!({
             "type": "object",
             "properties": {
                 "kind": {"type": "string", "enum": ["fact","decision","entity","session","skill"]},
                 "body": {"type": "string"},
-                "topic": {"type": "string"},
+                "topic": {"type": "string", "description": "Short label for what this is about (max 48 chars), e.g. `jwt-expiry`. NOT a sentence — the detail goes in the body. Memories on the same topic supersede each other."},
+                "area": {"type": "string", "description": "The feature area this belongs to, e.g. `auth`, `billing`, `infra`. Call mem_areas and reuse one of the project's existing areas; only invent a new one if nothing fits. Leave it out if genuinely nothing fits — an unfiled memory is still fully searchable, and a wrong area is worse than none."},
                 "project": {"type": "string"},
                 "by": {"type": "string", "description": "author for provenance"},
                 "tags": {"type": "array", "items": {"type": "string"}}
             },
             "required": ["kind","body"]
+        })),
+        tool("mem_areas", "The table of contents for this project's brain: its feature areas and how many memories each holds. Call this before mem_write so you file the memory into an area that already exists.", json!({
+            "type": "object", "properties": {}
         })),
         tool("mem_anchor", "Write a memory anchored to a code symbol so it can be checked for staleness.", json!({
             "type": "object",
@@ -242,6 +247,7 @@ fn filter_schema(with_text: bool) -> Value {
     let mut props = json!({
         "kind": {"type": "string", "enum": ["fact","decision","entity","session","skill"]},
         "topic": {"type": "string"},
+        "area": {"type": "string", "description": "Feature area to favour (auth, billing, infra). This BOOSTS that area's memories to the top; it does not hide the rest."},
         "project": {"type": "string"},
         "tag": {"type": "string"},
         "min_confidence": {"type": "number"},
@@ -297,6 +303,7 @@ pub fn call(root: &Path, name: &str, args: &Value) -> Result<String, String> {
         "mem_read" => read(&store, args),
         "mem_query" => query(&store, args),
         "mem_search" => search(&store, args),
+        "mem_areas" => areas(&store),
         "mem_recall" => recall(&store, args),
         "mem_provenance" => provenance(&store, args),
         "mem_supersede" => supersede(&store, args),
@@ -358,6 +365,28 @@ fn search(store: &Store, args: &Value) -> Result<String, String> {
     Ok(summaries(&hits))
 }
 
+/// The project's table of contents: its feature areas and how many memories each holds. The agent
+/// reads this before writing so it files into an area that already exists.
+fn areas(store: &Store) -> Result<String, String> {
+    let all = store.areas().map_err(|e| e.to_string())?;
+    let filed: Vec<Value> = all
+        .iter()
+        .filter(|(a, _)| !a.is_empty())
+        .map(|(a, n)| json!({"area": a, "memories": n}))
+        .collect();
+    let unfiled = all
+        .iter()
+        .find(|(a, _)| a.is_empty())
+        .map(|(_, n)| *n)
+        .unwrap_or(0);
+    let guidance = if filed.len() >= 12 {
+        "This project already has a lot of areas. Reuse one of the above; do NOT add another unless nothing fits."
+    } else {
+        "Reuse one of these areas when you mem_write. Only invent a new area if none genuinely fits — and keep the project under ~12."
+    };
+    Ok(json!({"areas": filed, "unfiled": unfiled, "guidance": guidance}).to_string())
+}
+
 fn recall(store: &Store, args: &Value) -> Result<String, String> {
     let text = str_arg(args, "text")?;
     let by = opt_arg(args, "by").unwrap_or_else(|| "mcp".into());
@@ -371,14 +400,20 @@ fn recall(store: &Store, args: &Value) -> Result<String, String> {
     let r = store
         .recall_connected(&text, &query_from(args), &by, max_neighbors)
         .map_err(|e| e.to_string())?;
-    let results: Vec<Value> = r
-        .seeds
+    let mut seeds = r.seeds.clone();
+    // `area` is a BOOST, never a filter: memories in the named area float to the top, but everything
+    // else still comes back. A memory filed in the wrong area must never become unfindable.
+    if let Some(area) = opt_arg(args, "area").filter(|a| !a.is_empty()) {
+        seeds.sort_by_key(|m| m.frontmatter.area.as_deref() != Some(area.as_str()));
+    }
+    let results: Vec<Value> = seeds
         .iter()
         .map(|m| {
             json!({
                 "id": m.frontmatter.id,
                 "kind": kind_name(m.frontmatter.kind),
                 "topic": m.frontmatter.topic,
+                "area": m.frontmatter.area,
                 "body": m.body.trim(),
             })
         })
@@ -595,8 +630,17 @@ fn bootstrap(store: &Store, args: &Value) -> Result<String, String> {
         .bootstrap(&goal, &project, &by, max_tokens)
         .map_err(|e| e.to_string())?;
     let claims = serde_json::to_value(&brief.active_claims).map_err(|e| e.to_string())?;
+    // The map of the project's brain, so the agent knows what exists before it recalls or writes.
+    let areas: Vec<Value> = store
+        .areas()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(a, _)| !a.is_empty())
+        .map(|(a, n)| json!({"area": a, "memories": n}))
+        .collect();
     Ok(json!({
         "goal": brief.goal,
+        "areas": areas,
         "active_claims": claims,
         "relevant": brief.relevant.iter().map(mem_brief).collect::<Vec<_>>(),
         "recent_decisions": brief.recent_decisions.iter().map(mem_brief_snippet).collect::<Vec<_>>(),
@@ -828,6 +872,7 @@ fn memory_from(args: &Value) -> Result<Memory, String> {
             kind,
             status: Status::Active,
             topic: opt_arg(args, "topic"),
+            area: opt_arg(args, "area"),
             scope: Scope {
                 user_id: None,
                 agent_id: None,

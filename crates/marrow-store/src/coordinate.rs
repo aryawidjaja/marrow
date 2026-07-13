@@ -550,6 +550,7 @@ mod tests {
                 kind: MemoryKind::Decision,
                 status: Status::Active,
                 topic: Some("auth".into()),
+                area: None,
                 scope: Scope {
                     user_id: None,
                     agent_id: None,
@@ -654,6 +655,7 @@ mod tests {
                 kind: MemoryKind::Fact,
                 status: Status::Active,
                 topic: Some("t".into()),
+                area: None,
                 scope: Scope {
                     user_id: None,
                     agent_id: None,

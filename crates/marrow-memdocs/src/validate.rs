@@ -6,6 +6,11 @@
 
 use crate::types::{Memory, MemoryKind, Status};
 
+/// `topic` is a short label, not prose: it is the key the brain groups by.
+pub const TOPIC_MAX: usize = 48;
+/// `area` is the feature bucket a memory lives in (`auth`, `billing`).
+pub const AREA_MAX: usize = 32;
+
 /// A single validation problem, naming the offending field.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Violation {
@@ -47,6 +52,32 @@ pub fn validate(memory: &Memory) -> Result<(), Vec<Violation>> {
     }
     if fm.updated_at.trim().is_empty() {
         v.push(viol("updated_at", "is required"));
+    }
+
+    // `topic` is the grouping key the whole brain hangs off (supersession, dedup, clustering), so
+    // it has to stay a short label. Without this, agents dump whole paragraphs in here and the
+    // project loses its only stable key.
+    if let Some(topic) = fm.topic.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+        if topic.contains('\n') {
+            v.push(viol("topic", "must be a single line, not prose"));
+        }
+        if topic.chars().count() > TOPIC_MAX {
+            v.push(viol(
+                "topic",
+                &format!(
+                    "must be a short label of at most {TOPIC_MAX} characters (got {}). Put the detail in the body.",
+                    topic.chars().count()
+                ),
+            ));
+        }
+    }
+    if let Some(area) = fm.area.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
+        if area.contains('\n') || area.chars().count() > AREA_MAX {
+            v.push(viol(
+                "area",
+                &format!("must be a short single-line label of at most {AREA_MAX} characters, e.g. `auth`, `billing`"),
+            ));
+        }
     }
 
     // Kind-specific rules.
@@ -98,6 +129,7 @@ mod tests {
                 kind,
                 status: Status::Active,
                 topic: Some("auth".into()),
+                area: None,
                 scope: Scope {
                     user_id: None,
                     agent_id: None,

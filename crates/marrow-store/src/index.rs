@@ -14,6 +14,7 @@ pub struct IndexRow {
     pub kind: String,
     pub status: String,
     pub topic: String,
+    pub area: String,
     pub project_id: String,
     pub user_id: String,
     pub agent_id: String,
@@ -35,6 +36,7 @@ pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
             kind TEXT NOT NULL,
             status TEXT NOT NULL,
             topic TEXT NOT NULL DEFAULT '',
+            area TEXT NOT NULL DEFAULT '',
             project_id TEXT NOT NULL DEFAULT '',
             user_id TEXT NOT NULL DEFAULT '',
             agent_id TEXT NOT NULL DEFAULT '',
@@ -56,7 +58,13 @@ pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
             dim INTEGER NOT NULL,
             vec BLOB NOT NULL
         );",
-    )
+    )?;
+    // Older stores predate `area`; add it in place rather than forcing a full reindex.
+    let _ = conn.execute(
+        "ALTER TABLE memories ADD COLUMN area TEXT NOT NULL DEFAULT ''",
+        [],
+    );
+    Ok(())
 }
 
 /// Store (or replace) a memory's embedding as a little-endian f32 blob.
@@ -102,8 +110,8 @@ pub fn upsert(conn: &Connection, row: &IndexRow) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT OR REPLACE INTO memories
          (id, kind, status, topic, project_id, user_id, agent_id, org_id,
-          confidence, created_at, updated_at, expires_at, tags, path, body)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+          confidence, created_at, updated_at, expires_at, tags, path, body, area)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
         params![
             row.id,
             row.kind,
@@ -119,7 +127,8 @@ pub fn upsert(conn: &Connection, row: &IndexRow) -> rusqlite::Result<()> {
             row.expires_at,
             row.tags,
             row.path,
-            row.body
+            row.body,
+            row.area
         ],
     )?;
     conn.execute("DELETE FROM memories_fts WHERE id = ?1", params![row.id])?;
@@ -206,7 +215,7 @@ fn filters(q: &Query, now: &str) -> (String, Vec<String>) {
     (where_sql, binds)
 }
 
-const COLS: &str = "id,kind,status,topic,project_id,user_id,agent_id,org_id,confidence,created_at,updated_at,expires_at,tags,path,body";
+const COLS: &str = "id,kind,status,topic,project_id,user_id,agent_id,org_id,confidence,created_at,updated_at,expires_at,tags,path,body,area";
 
 fn row_from(r: &rusqlite::Row) -> rusqlite::Result<IndexRow> {
     Ok(IndexRow {
@@ -225,6 +234,7 @@ fn row_from(r: &rusqlite::Row) -> rusqlite::Result<IndexRow> {
         tags: r.get(12)?,
         path: r.get(13)?,
         body: r.get(14)?,
+        area: r.get(15)?,
     })
 }
 

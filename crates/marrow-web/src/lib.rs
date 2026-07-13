@@ -313,6 +313,7 @@ fn create_memory(store: &Store, body: &str) -> Response {
     let mut memory = new_memory(
         kind,
         v.get("topic").and_then(Value::as_str),
+        v.get("area").and_then(Value::as_str),
         text,
         str_list(&v, "tags"),
     );
@@ -403,13 +404,20 @@ fn kind_str(k: MemoryKind) -> &'static str {
     }
 }
 
-fn new_memory(kind: MemoryKind, topic: Option<&str>, body: &str, tags: Vec<String>) -> Memory {
+fn new_memory(
+    kind: MemoryKind,
+    topic: Option<&str>,
+    area: Option<&str>,
+    body: &str,
+    tags: Vec<String>,
+) -> Memory {
     Memory {
         frontmatter: Frontmatter {
             id: String::new(),
             kind,
             status: Status::Active,
             topic: topic.filter(|t| !t.is_empty()).map(String::from),
+            area: area.filter(|a| !a.is_empty()).map(String::from),
             scope: Scope {
                 user_id: None,
                 agent_id: None,
@@ -528,6 +536,7 @@ fn demo_memory(kind: MemoryKind, topic: &str, body: &str) -> Memory {
             kind,
             status: Status::Active,
             topic: Some(topic.into()),
+            area: None,
             scope: Scope {
                 user_id: None,
                 agent_id: None,

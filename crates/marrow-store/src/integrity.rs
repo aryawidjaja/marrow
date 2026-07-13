@@ -48,6 +48,7 @@ mod tests {
                 kind: MemoryKind::Fact,
                 status: Status::Active,
                 topic: None,
+                area: None,
                 scope: Scope {
                     user_id: None,
                     agent_id: None,

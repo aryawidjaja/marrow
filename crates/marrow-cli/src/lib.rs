@@ -194,6 +194,8 @@ pub enum Cmd {
     },
     /// Stop sharing this project — make it local and private again. Nothing is deleted.
     Unshare,
+    /// The project's feature areas and how many memories each holds — the table of contents.
+    Areas,
 }
 
 /// Subcommands for the cross-project hub.
@@ -283,6 +285,10 @@ pub struct AddArgs {
     pub kind: KindArg,
     #[arg(long)]
     pub topic: Option<String>,
+    /// The feature area this memory belongs to (auth, billing, infra). Reuse the project's
+    /// existing areas — see `marrow areas`.
+    #[arg(long)]
+    pub area: Option<String>,
     #[arg(long)]
     pub project: Option<String>,
     /// Who is writing this memory (provenance).
@@ -300,6 +306,10 @@ pub struct AnchorArgs {
     pub kind: KindArg,
     #[arg(long)]
     pub topic: Option<String>,
+    /// The feature area this memory belongs to (auth, billing, infra). Reuse the project's
+    /// existing areas — see `marrow areas`.
+    #[arg(long)]
+    pub area: Option<String>,
     #[arg(long)]
     pub project: Option<String>,
     #[arg(long, default_value = "cli")]
@@ -323,6 +333,9 @@ pub struct SupersedeArgs {
     pub kind: KindArg,
     #[arg(long)]
     pub topic: Option<String>,
+    /// The feature area this memory belongs to (auth, billing, infra).
+    #[arg(long)]
+    pub area: Option<String>,
     #[arg(long, default_value = "cli")]
     pub by: String,
     pub body: String,
@@ -391,6 +404,7 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
             let mut memory = build_memory(
                 args.kind.into(),
                 args.topic,
+                args.area,
                 args.project,
                 args.by,
                 args.tags,
@@ -405,6 +419,7 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
             let mut memory = build_memory(
                 args.kind.into(),
                 args.topic,
+                args.area,
                 args.project,
                 args.by,
                 vec![],
@@ -484,6 +499,7 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
             let mut memory = build_memory(
                 args.kind.into(),
                 args.topic,
+                args.area,
                 None,
                 args.by,
                 vec![],
@@ -748,6 +764,15 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
                 .bootstrap(&goal, &project, &by, max_tokens)
                 .map_err(|e| e.to_string())?;
             writeln!(out, "goal: {}", brief.goal).ok();
+            let areas = store.areas().unwrap_or_default();
+            let filed: Vec<String> = areas
+                .iter()
+                .filter(|(a, _)| !a.is_empty())
+                .map(|(a, n)| format!("{a} {n}"))
+                .collect();
+            if !filed.is_empty() {
+                writeln!(out, "areas: {}", filed.join(" · ")).ok();
+            }
             writeln!(out, "active claims ({}):", brief.active_claims.len()).ok();
             for c in &brief.active_claims {
                 writeln!(out, "  {} — {} [{}]", c.id, c.intent, c.session_id).ok();
@@ -858,6 +883,22 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
             .ok();
             Ok(())
         }
+        Cmd::Areas => {
+            let store = open(&cli.root)?;
+            let areas = store.areas().map_err(|e| e.to_string())?;
+            let mut unfiled = 0;
+            for (area, n) in &areas {
+                if area.is_empty() {
+                    unfiled = *n;
+                } else {
+                    writeln!(out, "{area:24} {n}").ok();
+                }
+            }
+            if unfiled > 0 {
+                writeln!(out, "{:24} {unfiled}", "(unfiled)").ok();
+            }
+            Ok(())
+        }
         Cmd::Unshare => {
             if marrow_store::SharedRemote::remove(&cli.root).map_err(|e| e.to_string())? {
                 writeln!(
@@ -925,8 +966,15 @@ fn run_hub(root: PathBuf, cmd: HubCmd, out: &mut impl Write) -> Result<(), Strin
         }
         HubCmd::Remember { body, topic } => {
             let core = hub.core().map_err(|e| e.to_string())?;
-            let mut memory =
-                build_memory(MemoryKind::Fact, topic, None, "hub".into(), vec![], body);
+            let mut memory = build_memory(
+                MemoryKind::Fact,
+                topic,
+                None,
+                None,
+                "hub".into(),
+                vec![],
+                body,
+            );
             let id = core.write(&mut memory).map_err(|e| e.to_string())?;
             writeln!(out, "core memory saved: {id}").ok();
         }
@@ -1087,6 +1135,7 @@ fn open(root: &std::path::Path) -> Result<Store, String> {
 fn build_memory(
     kind: MemoryKind,
     topic: Option<String>,
+    area: Option<String>,
     project: Option<String>,
     by: String,
     tags: Vec<String>,
@@ -1098,6 +1147,7 @@ fn build_memory(
             kind,
             status: Status::Active,
             topic,
+            area,
             scope: Scope {
                 user_id: None,
                 agent_id: None,
