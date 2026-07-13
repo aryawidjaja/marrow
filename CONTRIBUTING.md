@@ -15,12 +15,12 @@ git push -u origin feat/short-description # then open a PR
 ```
 
 This holds for *every* change, including small ones and changes made with the help of automated
-tools — branch it, open a PR, let it be reviewed. It keeps `main` releasable and prevents
+tools, branch it, open a PR, let it be reviewed. It keeps `main` releasable and prevents
 incidental edits from landing unintentionally.
 
 ## Keep it green
 
-Before opening a PR, make sure the full gate passes locally — CI runs the same checks:
+Before opening a PR, make sure the full gate passes locally, CI runs the same checks:
 
 ```bash
 cargo fmt --all --check
@@ -40,7 +40,7 @@ prefixes (`feat:`, `fix:`, `docs:`, `chore:`) are welcome. Keep them factual and
 ## Code style
 
 - Match the surrounding code; keep modules focused and files small.
-- No dead code, no filler comments — every line should earn its place.
+- No dead code, no filler comments, every line should earn its place.
 - Markdown is the source of truth in Marrow; the SQLite index is a rebuildable cache. Don't make
   the index authoritative.
 

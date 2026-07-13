@@ -61,15 +61,12 @@ pub fn route(default_root: Option<&Path>, method: &str, target: &str, body: &str
         ("GET", "/api/stale") => stale(&store, &root),
         ("GET", "/api/history") => history(&store),
         ("GET", "/api/audit") => audit(&store),
-        ("GET", "/api/evidence") => evidence(&store, &root),
         ("POST", "/api/memory") => create_memory(&store, body),
         ("POST", "/api/link") => link(&root, &query, true),
         ("POST", "/api/unlink") => link(&root, &query, false),
         ("POST", "/api/hide") => hide(&root, &query, true),
         ("POST", "/api/unhide") => hide(&root, &query, false),
         ("POST", "/api/consolidate") => consolidate(&store, &root, &query),
-        ("POST", "/api/demo/seed") => demo_seed(&store, &root),
-        ("POST", "/api/demo/break") => demo_break(&root),
         ("POST", pp) if pp.starts_with("/api/memory/") && pp.ends_with("/edit") => {
             edit_memory(&store, mem_id(pp, "/edit"), body)
         }
@@ -526,80 +523,6 @@ fn provenance(store: &Store, id: &str) -> Response {
     }
 }
 
-/// The sample file the demo controls operate on. Only this file is ever touched.
-const DEMO_FILE: &str = "marrow_demo.rs";
-
-fn demo_memory(kind: MemoryKind, topic: &str, body: &str) -> Memory {
-    Memory {
-        frontmatter: Frontmatter {
-            id: String::new(),
-            kind,
-            status: Status::Active,
-            topic: Some(topic.into()),
-            area: None,
-            scope: Scope {
-                user_id: None,
-                agent_id: None,
-                project_id: String::new(),
-                org_id: None,
-            },
-            refs: vec![],
-            code_anchors: vec![],
-            confidence: 1.0,
-            decay: None,
-            provenance: Provenance {
-                written_by: "demo".into(),
-                session_id: None,
-                sources: vec!["demo-seed".into()],
-            },
-            supersedes: vec![],
-            tags: vec![],
-            created_at: String::new(),
-            updated_at: String::new(),
-            hmac: None,
-        },
-        body: body.into(),
-    }
-}
-
-/// Seed a self-contained demo: a code file, a memory anchored to it, and a duplicate pair.
-fn demo_seed(store: &Store, root: &Path) -> Response {
-    let demo_path = root.join(DEMO_FILE);
-    let code = "pub fn demo_widget() -> u32 {\n    42\n}\n";
-    if let Err(e) = std::fs::write(&demo_path, code) {
-        return error(&e.to_string());
-    }
-    let mut anchored = demo_memory(
-        MemoryKind::Decision,
-        "demo-widget",
-        "The demo widget returns 42 from demo_widget().",
-    );
-    if let Err(e) = store.write_anchored(root, DEMO_FILE, "demo_widget", &mut anchored) {
-        return error(&e.to_string());
-    }
-    for topic in ["demo-cache", "demo-cache-copy"] {
-        let mut dup = demo_memory(
-            MemoryKind::Fact,
-            topic,
-            "The demo cache is cleared on every write.",
-        );
-        if let Err(e) = store.write(&mut dup) {
-            return error(&e.to_string());
-        }
-    }
-    json_ok(json!({ "seeded": true }))
-}
-
-/// Change the demo code so its anchored memory goes stale.
-fn demo_break(root: &Path) -> Response {
-    let demo_path = root.join(DEMO_FILE);
-    let code = "pub fn demo_widget() -> u32 {\n    let base = compute_base();\n    base * 7\n}\n";
-    match std::fs::write(&demo_path, code) {
-        Ok(()) => json_ok(json!({ "broke": true })),
-        Err(e) => error(&e.to_string()),
-    }
-}
-
 /// Run the dashboard server until the process is killed. With `root = None` it opens centralized:
 /// the hive and any registered project, no single served store.
 pub fn serve(root: Option<PathBuf>, addr: &str) -> Result<(), String> {
@@ -711,33 +634,6 @@ fn audit(store: &Store) -> Response {
         Ok(()) => json_ok(json!({ "ok": true })),
         Err(seq) => json_ok(json!({ "ok": false, "broken_at_seq": seq })),
     }
-}
-
-/// Marrow's validated benchmark numbers (from `cargo run -p marrow-bench` and the staleness
-/// spike — see bench/REPORT.md) alongside this store's live stats.
-fn evidence(store: &Store, root: &Path) -> Response {
-    let rows = store.list().unwrap_or_default();
-    let active = rows.iter().filter(|r| r.status == "active").count();
-    let stale = store.list_stale(root).map(|h| h.len()).unwrap_or(0);
-    let duplicates = store
-        .consolidate(root)
-        .map(|r| r.clusters.iter().map(|c| c.others.len()).sum::<usize>())
-        .unwrap_or(0);
-    let audit_ok = store.verify_log().is_ok();
-    json_ok(json!({
-        "product": {
-            "staleeval": { "false_positive_pct": 1.0, "recall_pct": 98.4 },
-            "consoleval": { "precision_pct": 100.0, "recall_pct": 100.0, "false_merges": 0 },
-            "tokeneval": { "reduction_pct": 82.5 }
-        },
-        "store": {
-            "memories": rows.len(),
-            "active": active,
-            "stale": stale,
-            "duplicate_memories": duplicates,
-            "audit_ok": audit_ok
-        }
-    }))
 }
 
 fn consolidate(store: &Store, root: &Path, query: &HashMap<String, String>) -> Response {

@@ -35,60 +35,54 @@ Any Docker host works the same way (Render, Railway, a VPS): build `deploy/Docke
 `MARROW_TOKEN`, mount a volume at `/data`, expose `8787`, terminate TLS at the platform. To run it
 locally instead: `MARROW_TOKEN=$(openssl rand -hex 32) docker compose -f deploy/docker-compose.yml up`.
 
-## 2. Connect each device
+## 2. Share a project (on each device)
 
-On **every** machine (do this once per machine), point Claude Code's agent at the backbone. The
-cleanest way is to bake the connection into the MCP registration, so it works no matter how you
-launch Claude Code:
+Each project on your machine is local and private by default. You share the *one* project you want
+synced. Everything else stays put. In that project, on **every** machine:
 
-```sh
-marrow setup --global               # once, if you haven't (installs hooks)
-
-claude mcp remove marrow -s user 2>/dev/null
-claude mcp add marrow -s user \
-  -e MARROW_REMOTE=https://your-app.fly.dev \
-  -e MARROW_TOKEN=your-shared-key \
-  -e MARROW_PROJECT=shared-brain \
-  -- marrow-mcp --root .
+```bash
+marrow share --gateway https://your-app.fly.dev --space team-app --token <the-token>
 ```
 
-- `MARROW_TOKEN` must be the **same** on every device (the one from `fly secrets set`).
-- `MARROW_PROJECT` must be the **same** on every device (any name; same name = same shared brain).
-- Then **fully quit and reopen Claude Code**.
+The rule: **same gateway + same space + same token = one brain.** `--space` is any label you pick,
+as long as it matches on both machines. Then start a fresh agent session.
 
-Test: on machine A tell an agent "remember: we deploy on Fly in sjc." On machine B, ask a fresh
-agent "what did we decide about deploy?" It answers from the shared backbone.
+You can do the same from the dashboard: `marrow-serve`, open **Manage Projects**, hit **share**.
+
+Test it: on machine A tell an agent in that project "remember: we deploy on Fly in sjc". On machine B,
+ask a fresh agent in the same project "what did we decide about deploy?" It answers from the gateway.
 
 ## Does this delete my local memories?
 
-**No. Nothing local is touched or lost.** Turning on `MARROW_REMOTE` only *redirects* where the
-agent reads and writes. Your existing `.marrow/` folders stay on disk exactly as they are.
+**No. Nothing local is touched.** Sharing only changes where that *one* project reads and writes.
+Its `.marrow/` folder stays exactly as it is, and every other project is untouched.
 
-- While connected, the agent talks to the **backbone**, which starts empty. Both devices then build
-  up one shared brain together. Your old per-project local memories are simply not shown during this
-  time (they live on your disk, not on the backbone).
-- Disconnect (below) and the agent goes back to your local store with every local memory still there.
+While shared, the agent talks to the gateway (which starts empty) and both machines build one brain
+there together. Unshare and the agent goes straight back to the local store, with everything still in
+it.
 
-Want to bring an existing project's memories *into* the shared brain? Copy its markdown over on the
-backbone host and reindex once:
+Want an existing project's memories *in* the shared space? Copy its markdown across on the gateway
+host and reindex once:
 
-```sh
-# on the backbone host (or into the Fly volume via `fly ssh console`)
-cp -R ~/your-project/.marrow/memory/*  <data-dir>/shared-brain/.marrow/memory/
-marrow --root <data-dir>/shared-brain doctor      # rebuild the index from the files
+```bash
+cp -R ~/your-project/.marrow/memory/*  <data-dir>/team-app/.marrow/memory/
+marrow --root <data-dir>/team-app doctor
 ```
 
-## Disconnect / go back to local
+## Go back to local
 
-To take a device back off the hive and use its own local memory again:
+In the project:
 
-```sh
-marrow setup --global               # re-registers Marrow with no remote, so it's local again
-# then restart Claude Code
+```bash
+marrow unshare      # local and private again; nothing is deleted
+marrow status       # confirms: shared or local
 ```
 
-That's it. Nothing is deleted either way; you're just switching which brain the agent talks to. (Or,
-if you prefer, `claude mcp remove marrow -s user` then re-add without the `-e` lines.)
+## Machine-wide remote (the old way)
+
+`MARROW_REMOTE` / `MARROW_TOKEN` / `MARROW_PROJECT` still work and send **every** project to one
+backbone. Per-project `marrow share` is preferred: it's the difference between sharing one repo and
+sharing your whole disk.
 
 ## See the shared brain in a dashboard
 

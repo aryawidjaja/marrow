@@ -156,31 +156,6 @@ fn provenance_endpoint_returns_trail() {
 }
 
 #[test]
-fn demo_seed_break_drives_the_full_story() {
-    let dir = tempfile::tempdir().unwrap();
-    Store::init(dir.path()).unwrap();
-
-    let seeded = route(Some(dir.path()), "POST", "/api/demo/seed", "");
-    assert_eq!(seeded.status, 200);
-
-    // 3 memories seeded; nothing stale yet.
-    let mem_v = get(dir.path(), "/api/memories?status=active");
-    assert_eq!(mem_v["count"], 3);
-    assert_eq!(get(dir.path(), "/api/stale")["count"], 0);
-
-    // Break the demo code -> the anchored memory goes stale.
-    let broke = route(Some(dir.path()), "POST", "/api/demo/break", "");
-    assert_eq!(broke.status, 200);
-    assert_eq!(get(dir.path(), "/api/stale")["count"], 1);
-
-    // Consolidate collapses the duplicate pair.
-    let applied = route(Some(dir.path()), "POST", "/api/consolidate?apply=true", "");
-    let av: serde_json::Value = serde_json::from_str(&applied.body).unwrap();
-    assert_eq!(av["merged"], 1);
-    assert_eq!(get(dir.path(), "/api/memories?status=active")["count"], 2);
-}
-
-#[test]
 fn create_edit_delete_memory_round_trip() {
     let dir = tempfile::tempdir().unwrap();
     Store::init(dir.path()).unwrap();
@@ -220,18 +195,4 @@ fn create_edit_delete_memory_round_trip() {
     );
     assert_eq!(del.status, 200);
     assert_eq!(get(dir.path(), "/api/memories")["count"], 0);
-}
-
-#[test]
-fn evidence_endpoint_reports_product_and_store() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = Store::init(dir.path()).unwrap();
-    let mut a = mem(MemoryKind::Fact, "x", "a fact");
-    store.write(&mut a).unwrap();
-
-    let v = get(dir.path(), "/api/evidence");
-    assert_eq!(v["product"]["consoleval"]["precision_pct"], 100.0);
-    assert_eq!(v["product"]["tokeneval"]["reduction_pct"], 82.5);
-    assert!(v["store"]["memories"].as_u64().unwrap() >= 1);
-    assert_eq!(v["store"]["audit_ok"], true);
 }

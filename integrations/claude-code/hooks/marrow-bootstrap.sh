@@ -16,7 +16,10 @@ marrow="$(command -v marrow || true)"
 
 # Hands-free maintenance: run consolidation only if enough new memories have piled up since the
 # last pass (a no-op otherwise). Keeps the brain coherent without the user lifting a finger.
-"$marrow" --root "$root" consolidate --repo "$root" --if-due >/dev/null 2>&1 || true
+# DO NOT auto-run consolidation. `--if-due` calls consolidate_apply(), which MUTATES the store, and
+# the merge step currently over-merges: it collapses distinct topics into a single memory. Running it
+# silently at every session start destroyed real memories. Consolidation stays opt-in and manual until
+# the merge is fixed.
 
 brief="$("$marrow" --root "$root" bootstrap "resume work on this project" --by claude-code 2>/dev/null)" || exit 0
 [ -n "$brief" ] || exit 0

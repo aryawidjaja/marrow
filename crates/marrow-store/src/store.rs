@@ -429,14 +429,14 @@ impl Store {
     /// exists instead of inventing a near-duplicate ("auth" vs "authentication"). Memories with no
     /// area are reported under an empty name; they stay fully searchable, they're just unfiled.
     pub fn areas(&self) -> Result<Vec<(String, usize)>, Error> {
-        let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-        for row in self.list()? {
-            if row.status != "active" {
-                continue;
-            }
-            *counts.entry(row.area.clone()).or_default() += 1;
-        }
-        let mut areas: Vec<(String, usize)> = counts.into_iter().collect();
+        let mut stmt = self
+            .conn
+            .prepare("SELECT area, COUNT(*) FROM memories WHERE status = 'active' GROUP BY area")?;
+        let mut areas: Vec<(String, usize)> = stmt
+            .query_map([], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as usize))
+            })?
+            .collect::<Result<_, _>>()?;
         areas.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         Ok(areas)
     }
@@ -571,6 +571,11 @@ impl Store {
             .read(old_id)?
             .ok_or_else(|| Error::NotFound(old_id.to_string()))?;
         old.frontmatter.status = Status::Superseded;
+        // A revision stays in the same part of the brain unless it explicitly says otherwise, so a
+        // superseding memory inherits the old one's area rather than silently becoming unfiled.
+        if new.frontmatter.area.is_none() {
+            new.frontmatter.area = old.frontmatter.area.clone();
+        }
         self.write(&mut old)?;
         if !new.frontmatter.supersedes.iter().any(|s| s == old_id) {
             new.frontmatter.supersedes.push(old_id.to_string());

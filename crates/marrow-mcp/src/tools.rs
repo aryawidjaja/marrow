@@ -80,7 +80,8 @@ pub(crate) fn all_definitions() -> Vec<Value> {
                 "file": {"type": "string", "description": "file containing the symbol, relative to repo"},
                 "symbol": {"type": "string", "description": "qualified symbol name, e.g. Foo::bar"},
                 "repo": {"type": "string", "description": "repo root (defaults to the store root)"},
-                "topic": {"type": "string"},
+                "topic": {"type": "string", "description": "Short label (max 48 chars), not a sentence."},
+                "area": {"type": "string", "description": "Feature area this belongs to (auth, billing, infra). Call mem_areas and reuse an existing one."},
                 "project": {"type": "string"},
                 "by": {"type": "string"}
             },
@@ -93,7 +94,7 @@ pub(crate) fn all_definitions() -> Vec<Value> {
         })),
         tool("mem_query", "Structured query over memories with an optional token budget.", filter_schema(false)),
         tool("mem_search", "Hybrid keyword+semantic search over memories.", filter_schema(true)),
-        tool("mem_recall", "Recall memories AND the ones connected to them (explicit links, shared topic/tag, related meaning) in one call — the related cluster, not just the matches. Records the retrieval so answers stay traceable.", filter_schema(true)),
+        tool("mem_recall", "Recall memories AND the ones connected to them (explicit links, shared topic/tag, related meaning) in one call — the related cluster, not just the matches. Records the retrieval so answers stay traceable.", recall_schema()),
         tool("mem_provenance", "Trace a memory's origin, lineage, and how it has been used.", json!({
             "type": "object",
             "properties": {"id": {"type": "string"}},
@@ -105,7 +106,8 @@ pub(crate) fn all_definitions() -> Vec<Value> {
                 "old_id": {"type": "string"},
                 "kind": {"type": "string", "enum": ["fact","decision","entity","session","skill"]},
                 "body": {"type": "string"},
-                "topic": {"type": "string"},
+                "topic": {"type": "string", "description": "Short label (max 48 chars), not a sentence."},
+                "area": {"type": "string", "description": "Feature area this belongs to (auth, billing, infra). Call mem_areas and reuse an existing one."},
                 "by": {"type": "string"}
             },
             "required": ["old_id","kind","body"]
@@ -243,11 +245,20 @@ fn tool(name: &str, description: &str, input_schema: Value) -> Value {
     json!({"name": name, "description": description, "inputSchema": input_schema})
 }
 
+/// `mem_recall` accepts everything the filters do, plus `area` (a ranking boost, not a filter) and
+/// `connect` (how many linked neighbours to bring back). Both are honoured only here.
+fn recall_schema() -> Value {
+    let mut schema = filter_schema(true);
+    let props = schema["properties"].as_object_mut().expect("object schema");
+    props.insert("area".into(), json!({"type": "string", "description": "Feature area to favour (auth, billing, infra). BOOSTS that area to the top; it does not hide anything."}));
+    props.insert("connect".into(), json!({"type": "integer", "description": "How many connected neighbours to return alongside the matches (default 8, 0 turns it off)."}));
+    schema
+}
+
 fn filter_schema(with_text: bool) -> Value {
     let mut props = json!({
         "kind": {"type": "string", "enum": ["fact","decision","entity","session","skill"]},
         "topic": {"type": "string"},
-        "area": {"type": "string", "description": "Feature area to favour (auth, billing, infra). This BOOSTS that area's memories to the top; it does not hide the rest."},
         "project": {"type": "string"},
         "tag": {"type": "string"},
         "min_confidence": {"type": "number"},

@@ -17,8 +17,6 @@
   header { display: flex; align-items: center; gap: 10px; padding: 10px 16px; flex-wrap: wrap;
     row-gap: 8px; border-bottom: 1px solid var(--line); background: var(--bg); z-index: 5; }
   header h1 { font-size: 15px; margin: 0; letter-spacing: .3px; font-weight: 600; display: flex; align-items: center; }
-  header h1 span { color: var(--muted); font-weight: 400; }
-  header h1 .mark { color: var(--gold); font-weight: 700; font-size: 17px; margin-right: 1px; }
   .brand-wm { height: 18px; width: auto; display: block; }
   .spacer { flex: 1; }
   button, .seg { background: var(--panel); color: var(--text); border: 1px solid var(--line);
@@ -154,7 +152,6 @@
   .legend .li { display: flex; align-items: center; gap: 8px; padding: 2px 0; color: var(--muted); }
   .legend .lg-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
     color: var(--text); font-weight: 600; margin-bottom: 5px; }
-  .legend .lg-sub { color: var(--text); font-weight: 600; margin: 9px 0 3px; }
   .legend .lg-help { color: var(--accent); cursor: pointer; font-weight: 400; font-size: 10px; white-space: nowrap; }
   .legend .dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
   .legend .edge { width: 18px; height: 3px; border-radius: 2px; flex: 0 0 auto; }
@@ -164,7 +161,7 @@
   .legend .lg-note b { color: var(--text); font-weight: 600; }
   .hint { position: absolute; left: 12px; top: 12px; color: var(--muted); font-size: 11px;
     background: rgba(21,25,34,.7); padding: 4px 9px; border-radius: 7px; }
-  #toast { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%);
+  #toast { position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%); z-index: 30;
     background: var(--accent); color: #0d0f14; font-weight: 600; padding: 7px 14px; border-radius: 8px;
     font-size: 12px; opacity: 0; transition: opacity .2s; pointer-events: none; }
   #toast.show { opacity: 1; }
@@ -233,7 +230,6 @@
 <div id="modal"><div class="modal-card"></div></div>
 <script>
 const palette = ["#ffde59","#ffb057","#ff8a6b","#f2739f","#c78ef0","#8fb0f5","#5fc9d6","#57cf9c","#b5d35c","#e8b53c"];
-const kindColor = { decision:"#8fb0f5", fact:"#57cf9c", entity:"#c78ef0", session:"#ffde59", skill:"#ffb057", project:"#8b93a4", core:"#ffde59" };
 // Edge types are real relationships, each its own colour so the graph is legible.
 const edgeStyle = {
   ref:      { color: "rgba(255,138,107,0.62)", label: "explicit link" },
@@ -256,7 +252,6 @@ function colorFor(v, node) {
 
 let view = "project", raw = { nodes: [], links: [] }, nodes = [], links = [], byId = {};
 let filter = "", selected = null, linkMode = false, linkFrom = null, heat = 1;
-const showSemantic = true;   // related-meaning links are always shown; they were never worth a toggle
 let project = "", projects = [];
 const pq = (lead) => project ? (lead || "?") + "project=" + encodeURIComponent(project) : "";
 const cv = document.getElementById("c"), ctx = cv.getContext("2d");
@@ -293,7 +288,10 @@ async function load() {
 // AREA. Each group gets its own region on a ring, and its neurons are held inside it. The structure
 // is real (the agent filed each memory into an area), so the layout can show it instead of guessing.
 function assignAnchors() {
-  const groups = [...new Set(nodes.map(n => n.group))].filter(g => g !== "core");
+  // Every group gets a home, including "core" (the shared core store's own memories), which sits at
+  // the origin rather than on the ring. A group with no anchor yields NaN coordinates.
+  const groups = [...new Set(nodes.map(n => n.group))];
+  const ringGroups = groups.filter(g => g !== "core");
   const isHub = n => n.kind === "project" || n.kind === "area" || n.kind === "core";
 
   // How many memories in each group, and in each group's area.
@@ -307,12 +305,13 @@ function assignAnchors() {
 
   if (view !== "hive") {
     // Project view: the groups ARE the areas. One ring, one pocket each.
-    const R = groupRingRadius(groups.length);
+    const R = groupRingRadius(ringGroups.length);
     const ang = {};
-    groups.forEach((g, i) => ang[g] = (i / Math.max(1, groups.length)) * Math.PI * 2);
+    ringGroups.forEach((g, i) => ang[g] = (i / Math.max(1, ringGroups.length)) * Math.PI * 2);
     for (const n of nodes) {
-      n.ax = Math.cos(ang[n.group]) * R;
-      n.ay = Math.sin(ang[n.group]) * R;
+      const a = ang[n.group];
+      n.ax = a === undefined ? 0 : Math.cos(a) * R;
+      n.ay = a === undefined ? 0 : Math.sin(a) * R;
       n.rmax = groupRadius(gCount[n.group] || 1);
       n.x = n.ax + (Math.random() - .5) * 90;
       n.y = n.ay + (Math.random() - .5) * 90;
@@ -320,9 +319,9 @@ function assignAnchors() {
     return;
   }
 
-  // Hive: nest it — projects on an outer ring, and inside each project its AREAS get their own
-  // pockets on an inner ring. Both rings are sized from the pockets they must hold, so nothing
-  // can overlap (that was the bug: 10 pockets of r=78 crammed onto a ring of r=180).
+  // Hive nests: projects on an outer ring, and inside each, its AREAS get pockets on an inner ring.
+  // Both radii are DERIVED from the pockets they must hold — for n pockets of radius r, the ring
+  // needs r / sin(pi/n) — so a ring can never be too small for its contents.
   const info = {};
   for (const g of groups) {
     const areas = [...new Set(nodes.filter(n => n.group === g && !isHub(n)).map(n => n.area || ""))].sort();
@@ -337,16 +336,17 @@ function assignAnchors() {
     });
     info[g] = { pockets, span: inner + biggest };
   }
-  const widest = Math.max(...groups.map(g => info[g].span), 120);
-  const R = groups.length <= 1 ? 0
-    : Math.max(600, (widest / Math.sin(Math.PI / Math.max(2, groups.length))) * 1.25);
+  const widest = Math.max(...ringGroups.map(g => info[g].span), 120);
+  const R = ringGroups.length <= 1 ? 0
+    : Math.max(600, (widest / Math.sin(Math.PI / Math.max(2, ringGroups.length))) * 1.25);
   const ang = {};
-  groups.forEach((g, i) => ang[g] = (i / Math.max(1, groups.length)) * Math.PI * 2);
+  ringGroups.forEach((g, i) => ang[g] = (i / Math.max(1, ringGroups.length)) * Math.PI * 2);
 
   for (const n of nodes) {
     if (n.kind === "core") { n.ax = 0; n.ay = 0; n.rmax = 90; }
     else {
-      const gx = Math.cos(ang[n.group]) * R, gy = Math.sin(ang[n.group]) * R;
+      const a = ang[n.group];                       // core-store memories orbit the origin
+      const gx = a === undefined ? 0 : Math.cos(a) * R, gy = a === undefined ? 0 : Math.sin(a) * R;
       if (n.kind === "project") {              // the project hub sits at its own centre
         n.ax = gx; n.ay = gy; n.rmax = info[n.group].span + 40;
       } else {
@@ -371,7 +371,7 @@ function buildLegend() {
 
   const present = new Set(links.map(l => l.rel));
   const conns = ["area", "ref", "topic", "tag", "semantic", "hub", "cluster", "user"]
-    .filter(r => present.has(r) && (r !== "semantic" || showSemantic) && !(view === "hive" && r === "cluster")).map(r => {
+    .filter(r => present.has(r) && !(view === "hive" && r === "cluster")).map(r => {
     const label = r === "tag" && view === "hive" ? "shared tag (bridge)" : edgeStyle[r].label;
     return edge(edgeStyle[r].color, label);
   }).join("");
@@ -507,13 +507,13 @@ function tick() {
     if (n.pin) { n.vx = n.vy = 0; continue; }
     n.x += n.vx*heat; n.y += n.vy*heat; n.vx *= 0.85; n.vy *= 0.85;
     // Hard boundary: no neuron may leave its cluster's disc.
-    const rmax = n.rmax || (n.ax != null ? HIVE_RADIUS : PROJECT_RADIUS);
+    const rmax = n.rmax || 300;
     const ox = n.x - hx, oy = n.y - hy, od = Math.hypot(ox, oy);
     if (od > rmax) { n.x = hx + ox/od*rmax; n.y = hy + oy/od*rmax; n.vx *= 0.4; n.vy *= 0.4; }
   }
-  // Seat each hub at the centre of ITS OWN cluster. A project hub centres on all its memories; an
-  // area hub centres on that area's memories only. Keying both by `group` stacked every area hub of
-  // a project onto one point (in the hive, `group` IS the project), so they piled up on each other.
+  // Seat each hub at the centre of its OWN cluster: a project hub on all its memories, an area hub
+  // on that area's alone. Note `group` means the project in the hive and the area in a project, so
+  // an area hub must be keyed by group+area, never group.
   const gx = {}, gy = {}, gn = {};      // per project/group
   const ax = {}, ay = {}, an = {};      // per group|area
   for (const n of nodes) {
@@ -539,19 +539,24 @@ function draw() {
   ctx.setTransform(T.k*devicePixelRatio,0,0,T.k*devicePixelRatio, T.x*devicePixelRatio, T.y*devicePixelRatio);
   const nb = neighbors(selected);
   for (const l of links) {
-    if (l.rel === "semantic" && !showSemantic) continue;
     const active = selected && (l.s === selected || l.t === selected);
-    // Select a neuron and everything but its own links fades away, so you read one thing at a time
-    // instead of a web. Otherwise links are faint and thin so crossings don't shout.
+    // Selecting a neuron fades everything but its own links, so you read one thing at a time.
     ctx.globalAlpha = active ? 0.95 : (selected ? 0.05 : 0.4);
     ctx.strokeStyle = active ? "rgba(255,222,89,.95)" : (edgeStyle[l.rel]?.color || "rgba(120,130,150,.5)");
     ctx.lineWidth = (l.rel === "user" ? 1.4 : active ? 1.5 : 0.7) / T.k;
     // Bow each link slightly so overlapping links read as separate strands, not one straight tangle.
-    const dx = l.t.x - l.s.x, dy = l.t.y - l.s.y;
-    const cxp = (l.s.x + l.t.x)/2 - dy*0.14, cyp = (l.s.y + l.t.y)/2 + dx*0.14;
-    ctx.beginPath(); ctx.moveTo(l.s.x, l.s.y); ctx.quadraticCurveTo(cxp, cyp, l.t.x, l.t.y); ctx.stroke();
+    const c = bow(l);
+    ctx.beginPath(); ctx.moveTo(l.s.x, l.s.y); ctx.quadraticCurveTo(c.x, c.y, l.t.x, l.t.y); ctx.stroke();
   }
   ctx.globalAlpha = 1;
+  // The wire you are dragging out in link mode, so you can see the connection before committing.
+  if (linkMode && linkFrom && mouseWorld) {
+    ctx.setLineDash([5 / T.k, 4 / T.k]);
+    ctx.strokeStyle = "rgba(255,222,89,.9)";
+    ctx.lineWidth = 1.6 / T.k;
+    ctx.beginPath(); ctx.moveTo(linkFrom.x, linkFrom.y); ctx.lineTo(mouseWorld.x, mouseWorld.y); ctx.stroke();
+    ctx.setLineDash([]);
+  }
   for (const n of nodes) {
     const r = radius(n);
     const dim = (filter && !match(n)) || (selected && n !== selected && !nb.has(n));
@@ -594,7 +599,32 @@ function detectCommunities() {
 function radius(n) { return n.kind === "core" ? 8 : n.kind === "project" ? 6 : n.kind === "area" ? 7 : 2.4 + Math.min(3.6, n.degree*0.45); }
 function neighbors(n) { const s = new Set(); if (!n) return s; for (const l of links) { if (l.s===n) s.add(l.t); if (l.t===n) s.add(l.s); } return s; }
 function match(n) { return (n.label||"").toLowerCase().includes(filter) || (n.snippet||"").toLowerCase().includes(filter); }
-function loop() { if (heat > 0) tick(); draw(); requestAnimationFrame(loop); }
+let dirty = true;
+const invalidate = () => { dirty = true; };
+// Delegated actions. Data lives in data-* attributes (inert), never interpolated into JS.
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-act]");
+  if (!t) return;
+  const d = t.dataset;
+  switch (d.act) {
+    case "edit": editMem(d.id); break;
+    case "del": delMem(d.id); break;
+    case "forget": forgetProj(d.name); break;
+    case "browse": browseTo(d.path); break;
+    case "addproj": addProj(d.path, d.name, d.marrow === "true"); break;
+    case "closedetail": closeDetail(); break;
+    case "save": saveMem(d.id || null); break;
+    case "edge-remove": removeEdge(); break;
+    case "edge-insert": insertBetween(); break;
+    case "edge-reconnect": startReconnect(); break;
+  }
+});
+
+function loop() {
+  if (heat > 0) { tick(); dirty = true; }
+  if (dirty) { draw(); dirty = false; }
+  requestAnimationFrame(loop);
+}
 
 function fit() {
   if (!nodes.length) return;
@@ -604,6 +634,7 @@ function fit() {
   const k = Math.min(2.2, 0.85 * Math.min(w/(maxx-minx+120), h/(maxy-miny+120)));
   T.k = isFinite(k) && k > 0 ? k : 1;
   T.x = w/2 - (minx+maxx)/2*T.k; T.y = h/2 - (miny+maxy)/2*T.k;
+  invalidate();
 }
 
 function screenToWorld(px, py) { return { x: (px - T.x)/T.k, y: (py - T.y)/T.k }; }
@@ -615,44 +646,49 @@ function nodeAt(px, py) {
 }
 
 async function select(n) {
-  selected = n; closeEdgeMenu();
+  selected = n; closeEdgeMenu(); invalidate();
+  const token = ++selectToken;   // a slower earlier fetch must not clobber a newer selection
   document.querySelectorAll(".tnode.sel").forEach(e => e.classList.remove("sel"));
   const leaf = document.querySelector(`.tnode[data-id="${CSS.escape(n.id)}"]`);
   if (leaf) { leaf.classList.add("sel"); leaf.scrollIntoView({ block: "nearest" }); leaf.parentElement.classList.add("open"); }
   const d = document.getElementById("detail");
   const nb = [...neighbors(n)].length;
   let body = n.snippet || "";
-  const editable = view === "project" && n.kind !== "core";
+  const editable = view === "project" && !["core", "area", "project"].includes(n.kind);
   const url = view === "project"
     ? (n.kind !== "core" ? "/api/memory/" + encodeURIComponent(n.id) + pq() : null)
     : (n.id.includes("#") ? `/api/hive/memory?project=${encodeURIComponent(n.group)}&id=${encodeURIComponent(n.id.split("#")[1])}` : null);
   if (url) {
     try { const full = await (await fetch(url)).json(); if (full && full.body) body = full.body; } catch {}
   }
+  if (token !== selectToken) return;   // a newer selection won while we were fetching
   selectedBody = body;
   const long = body.length > 420;
   const shown = long ? esc(body.slice(0, 420)).trimEnd() + "…" : esc(body);
-  d.innerHTML = `<span class="x" onclick="closeDetail()">✕</span>
+  d.innerHTML = `<span class="x" data-act="closedetail">✕</span>
     <span class="k">${n.kind}${view==="hive"&&n.group?" · "+n.group:""}</span>
     <h3>${esc(n.label || n.id)}</h3>
     <div class="body">${shown}</div>` +
     (long ? `<button class="more" onclick="expandBody(this)">read more</button>` : "") +
     `<div class="meta">${nb} connection(s) · degree ${n.degree}<br>${n.id}</div>` +
-    (editable ? `<div class="acts"><button onclick="editMem('${n.id}')">Edit</button><button class="danger" onclick="delMem('${n.id}')">Delete</button></div>` : "");
+    (editable ? `<div class="acts"><button data-act="edit" data-id="${esc(n.id)}">Edit</button><button class="danger" data-act="del" data-id="${esc(n.id)}">Delete</button></div>` : "");
   d.classList.add("show");
 }
 let selectedBody = "";
+let selectToken = 0;
 function expandBody(btn) {
   btn.parentElement.querySelector(".body").textContent = selectedBody;
   btn.remove();
 }
-function closeDetail() { document.getElementById("detail").classList.remove("show"); selected = null; }
-function esc(s){ return (s||"").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+function closeDetail() { document.getElementById("detail").classList.remove("show"); selected = null; invalidate(); }
+function esc(s){ return (s||"").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 
 async function toggleLink(a, b) {
-  const existing = links.find(l => l.rel==="user" && ((l.s===a&&l.t===b)||(l.s===b&&l.t===a)));
-  const url = (existing ? "/api/unlink" : "/api/link") + `?source=${encodeURIComponent(a.id)}&target=${encodeURIComponent(b.id)}` + pq("&");
-  await fetch(url, { method: "POST" });
+  const ra = linkRef(a), rb = linkRef(b);
+  if (!ra || !rb) { toast("pick two memories"); return; }
+  if (ra.project !== rb.project) { toast("a link has to stay inside one project"); return; }
+  const existing = links.find(l => l.rel === "user" && ((l.s===a&&l.t===b) || (l.s===b&&l.t===a)));
+  await post(existing ? "unlink" : "link", ra.id, rb.id, ra.project);
   toast(existing ? "disconnected" : "connected");
   await load();
 }
@@ -666,10 +702,10 @@ cv.addEventListener("mousedown", e => {
 });
 window.addEventListener("mousemove", e => {
   const r = cv.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
-  if (drag) { moved = true; const p = screenToWorld(px, py); drag.n.x = p.x; drag.n.y = p.y; drag.n.pin = true; heat = Math.max(heat, .5); }
-  else if (panning) { if (downXY && Math.hypot(px - downXY.x, py - downXY.y) > 3) moved = true; T.x = px - panning.x; T.y = py - panning.y; }
+  if (drag) { moved = true; const p = screenToWorld(px, py); drag.n.x = p.x; drag.n.y = p.y; drag.n.pin = true; heat = Math.max(heat, .5); invalidate(); }
+  else if (panning) { if (downXY && Math.hypot(px - downXY.x, py - downXY.y) > 3) moved = true; T.x = px - panning.x; T.y = py - panning.y; invalidate(); }
   else showTip(px, py);
-  if (linkMode && linkFrom) mouseWorld = screenToWorld(px, py);
+  if (linkMode && linkFrom) { mouseWorld = screenToWorld(px, py); invalidate(); }
 });
 window.addEventListener("mouseup", () => {
   if (drag && !moved) {
@@ -693,28 +729,67 @@ function distToSeg(px, py, x1, y1, x2, y2) {
   let t = len2 ? ((px-x1)*dx + (py-y1)*dy) / len2 : 0; t = Math.max(0, Math.min(1, t));
   return Math.hypot(px - (x1 + t*dx), py - (y1 + t*dy));
 }
+// The control point of a link's curve. draw() and edgeAt() share it, so what you see is what you
+// can click.
+function bow(l) {
+  const dx = l.t.x - l.s.x, dy = l.t.y - l.s.y;
+  return { x: (l.s.x + l.t.x)/2 - dy*0.14, y: (l.s.y + l.t.y)/2 + dx*0.14 };
+}
+// Distance from a point to the drawn curve, by sampling it.
+function distToCurve(px, py, l) {
+  const c = bow(l);
+  let best = Infinity, prevX = l.s.x, prevY = l.s.y;
+  for (let i = 1; i <= 12; i++) {
+    const t = i / 12, u = 1 - t;
+    const x = u*u*l.s.x + 2*u*t*c.x + t*t*l.t.x;
+    const y = u*u*l.s.y + 2*u*t*c.y + t*t*l.t.y;
+    best = Math.min(best, distToSeg(px, py, prevX, prevY, x, y));
+    prevX = x; prevY = y;
+  }
+  return best;
+}
 function edgeAt(px, py) {
-  if (view !== "project") return null;
-  const p = screenToWorld(px, py); let best = null, bd = 7 / T.k;
+  const p = screenToWorld(px, py); let best = null, bd = 8 / T.k;
   for (const l of links) {
-    if (l.rel === "semantic" && !showSemantic) continue;
-    const d = distToSeg(p.x, p.y, l.s.x, l.s.y, l.t.x, l.t.y);
+    if (view === "hive" && l.rel === "cluster") continue;
+    if (!editableEdge(l)) continue;
+    const d = distToCurve(p.x, p.y, l);
     if (d < bd) { bd = d; best = l; }
   }
   return best;
 }
+// A hand-drawn link lives in ONE project's overlay. In the hive a node id is "proj:N#<memId>", so
+// resolve which project owns it; hub neurons are not memories and can't be linked.
+function linkRef(n) {
+  if (!n || ["core", "area", "project"].includes(n.kind)) return null;
+  if (view !== "hive") return { project: null, id: n.id };
+  const i = n.id.indexOf("#");
+  return i < 0 ? null : { project: n.group, id: n.id.slice(i + 1) };
+}
+// Only edges between two memories of the same project can be edited: the overlay is per project.
+function editableEdge(l) {
+  const a = linkRef(l.s), b = linkRef(l.t);
+  return a && b && a.project === b.project;
+}
 const enc = encodeURIComponent;
-async function post(kind, s, t) { await fetch(`/api/${kind}?source=${enc(s)}&target=${enc(t)}` + pq("&"), { method: "POST" }); }
-async function removeLink(l) { await (l.rel === "user" ? post("unlink", l.source, l.target) : post("hide", l.source, l.target)); }
+async function post(kind, s, t, proj) {
+  const scope = proj ? `&project=${enc(proj)}` : pq("&");
+  await fetch(`/api/${kind}?source=${enc(s)}&target=${enc(t)}` + scope, { method: "POST" });
+}
+async function removeLink(l) {
+  const a = linkRef(l.s), b = linkRef(l.t);
+  if (!a || !b || a.project !== b.project) { toast("that link can't be edited here"); return; }
+  await post(l.rel === "user" ? "unlink" : "hide", a.id, b.id, a.project);
+}
 
 function openEdgeMenu(l, px, py) {
   closeDetail(); selectedEdge = l;
   const label = (edgeStyle[l.rel] || {}).label || l.rel;
   const em = document.getElementById("edgemenu");
   em.innerHTML = `<div class="em-title">${label}</div>
-    <button onclick="removeEdge()">✕ Remove this link</button>
-    <button onclick="insertBetween()">＋ Insert memory in the middle</button>
-    <button onclick="startReconnect()">↳ Reconnect an end…</button>`;
+    <button data-act="edge-remove">Remove this link</button>
+    <button data-act="edge-insert">Insert a memory in the middle</button>
+    <button data-act="edge-reconnect">Reconnect an end…</button>`;
   em.style.left = Math.min(px, cv.clientWidth - 200) + "px";
   em.style.top = py + "px"; em.style.display = "block";
 }
@@ -725,8 +800,10 @@ function startReconnect() { const l = selectedEdge; closeEdgeMenu(); if (!l) ret
 async function finishReconnect(n) {
   const rc = reconnect; reconnect = null; setHint();
   if (!rc || n.id === rc.keep) { toast("reconnect cancelled"); return; }
-  await removeLink({ rel: rc.rel, source: rc.keep, target: rc.drop });
-  await post("link", rc.keep, n.id);
+  await removeLink({ rel: rc.rel, s: byId[rc.keep], t: byId[rc.drop], source: rc.keep, target: rc.drop });
+  const keep = linkRef(byId[rc.keep]), to = linkRef(n);
+  if (!keep || !to || keep.project !== to.project) { toast("a link has to stay inside one project"); return; }
+  await post("link", keep.id, to.id, keep.project);
   toast("reconnected"); await load();
 }
 function setHint() { document.getElementById("hint").textContent = reconnect ? "reconnect: click the memory to connect this end to" : linkMode ? "" : "drag to pan · scroll to zoom · drag a neuron · click a link to edit it · keys: esc, arrows, +/−, F fit, H/P view"; }
@@ -735,16 +812,23 @@ cv.addEventListener("wheel", e => {
   e.preventDefault();
   const s = e.deltaY < 0 ? 1.12 : 0.89, wx = (e.offsetX - T.x)/T.k, wy = (e.offsetY - T.y)/T.k;
   T.k = Math.max(0.15, Math.min(5, T.k*s)); T.x = e.offsetX - wx*T.k; T.y = e.offsetY - wy*T.k;
+  invalidate();
 }, { passive: false });
 
 function zoomBy(s) {
   const cx = cv.clientWidth/2, cy = cv.clientHeight/2, wx = (cx - T.x)/T.k, wy = (cy - T.y)/T.k;
   T.k = Math.max(0.15, Math.min(5, T.k*s)); T.x = cx - wx*T.k; T.y = cy - wy*T.k;
+  invalidate();
 }
 // Keyboard: Esc backs out (modal -> link mode -> selection -> filter), arrows pan, +/- zoom,
 // F recenters, H/P switch views. Ignored while typing in a field.
 window.addEventListener("keydown", e => {
-  if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
+  // Esc always works, even from inside a field — otherwise the modal is a keyboard trap.
+  if (typing && e.key === "Escape" && document.getElementById("modal").classList.contains("show")) {
+    closeModal(); e.preventDefault(); return;
+  }
+  if (typing) return;
   const step = 70;
   switch (e.key) {
     case "Escape":
@@ -776,7 +860,7 @@ function showTip(px, py) {
   else tip.style.display = "none";
 }
 
-document.getElementById("search").addEventListener("input", e => { filter = e.target.value.toLowerCase(); });
+document.getElementById("search").addEventListener("input", e => { filter = e.target.value.toLowerCase(); invalidate(); });
 document.getElementById("linkmode").onclick = () => setLinkMode(!linkMode);
 
 // Link mode is a two-step gesture, so SAY so — and show the wire following the cursor, so it's
@@ -788,6 +872,7 @@ function setLinkMode(on) {
   closeEdgeMenu();
   document.getElementById("linkmode").classList.toggle("on", on);
   document.querySelector(".stage").classList.toggle("linking", on);
+  invalidate();
   drawLinkbar();
   setHint();
 }
@@ -812,7 +897,7 @@ function setView(v) {
   const graph = v !== "channel";
   document.getElementById("proj").hidden = v !== "project";      // the hive spans every project
   document.getElementById("dock").hidden = !graph;               // the dock acts on the canvas
-  document.getElementById("linkmode").hidden = v !== "project";  // hand-drawn links are a project overlay
+  document.getElementById("linkmode").hidden = !graph;
   document.getElementById("channel").classList.toggle("show", v === "channel");
   document.getElementById("legend").style.display = graph ? "" : "none";
   document.getElementById("hint").style.display = graph ? "" : "none";
@@ -853,7 +938,7 @@ function memForm(e) {
     <label>Topic</label><input id="f-topic" value="${esc(e ? e.topic : "")}" placeholder="a short label, e.g. auth-strategy">
     <label>Memory</label><textarea id="f-body" rows="7" placeholder="what should be remembered…">${esc(e ? e.body : "")}</textarea>
     <label>Tags (comma-separated)</label><input id="f-tags" value="${esc(e ? (e.tags || []).join(", ") : "")}">
-    <div class="modal-actions"><button onclick="closeModal()">Cancel</button><button class="on" onclick="saveMem(${e ? `'${e.id}'` : "null"})">Save</button></div>`);
+    <div class="modal-actions"><button onclick="closeModal()">Cancel</button><button class="on" data-act="save" data-id="${e ? esc(e.id) : ""}">Save</button></div>`);
 }
 async function saveMem(id) {
   const kind = document.getElementById("f-kind").value;
@@ -893,7 +978,7 @@ async function manageProjects() {
     const badge = p.shared
       ? `<span class="pill on" title="shared to ${esc(p.gateway||"")}">shared → ${esc(p.space)}</span>`
       : `<span class="pill">local</span>`;
-    const rm = p.project ? `<button class="danger" onclick="forgetProj('${esc(p.project)}')">remove</button>` : "";
+    const rm = p.project ? `<button class="danger" data-act="forget" data-name="${esc(p.project)}">remove</button>` : "";
     return `<div class="row-item"><span>${esc(p.name)} ${badge}</span>
         <span class="dim">${esc(p.root)}</span>
         <button onclick="shareForm(${i})">${p.shared ? "manage sharing" : "share…"}</button>${rm}</div>
@@ -941,11 +1026,10 @@ const FOLDER_OFF = `<svg class="fico" viewBox="0 0 16 16" fill="none" stroke="cu
 const FOLDER_ON  = `<svg class="fico on" viewBox="0 0 16 16" fill="currentColor"><path d="M1.8 4.2A1.2 1.2 0 013 3h3l1.4 1.6H13a1.2 1.2 0 011.2 1.2v6A1.2 1.2 0 0113 13H3a1.2 1.2 0 01-1.2-1.2z"/></svg>`;
 async function browseTo(path) {
   const d = await (await fetch("/api/browse?path=" + encodeURIComponent(path))).json();
-  const esc2 = s => (s || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-  const up = d.parent != null ? `<div class="brow"><span class="nav" onclick="browseTo('${esc2(d.parent)}')">⬆ ..</span></div>` : "";
+  const up = d.parent != null ? `<div class="brow"><span class="nav" data-act="browse" data-path="${esc(d.parent)}">⬆ ..</span></div>` : "";
   const rows = d.dirs.map(dir =>
-    `<div class="brow"><span class="nav" onclick="browseTo('${esc2(dir.path)}')">${dir.marrow ? FOLDER_ON : FOLDER_OFF} ${esc(dir.name)}</span>
-       <button onclick="addProj('${esc2(dir.path)}','${esc2(dir.name)}',${dir.marrow})"><small>${dir.marrow ? "add" : "init + add"}</small></button></div>`).join("");
+    `<div class="brow"><span class="nav" data-act="browse" data-path="${esc(dir.path)}">${dir.marrow ? FOLDER_ON : FOLDER_OFF} ${esc(dir.name)}</span>
+       <button data-act="addproj" data-path="${esc(dir.path)}" data-name="${esc(dir.name)}" data-marrow="${dir.marrow}"><small>${dir.marrow ? "add" : "init + add"}</small></button></div>`).join("");
   document.getElementById("browser").innerHTML = `<div class="dim" style="margin-bottom:6px">${esc(d.path)}</div>${up}${rows || "<div class='dim'>no sub-folders</div>"}`;
 }
 async function addProj(path, name, hasMarrow) {

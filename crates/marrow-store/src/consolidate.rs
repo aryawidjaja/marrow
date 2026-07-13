@@ -233,53 +233,99 @@ impl Store {
                 .iter()
                 .filter_map(|id| memories.iter().find(|m| &m.frontmatter.id == id))
                 .collect();
-            // Survivor = highest salience, tie-broken by most recent update.
-            members.sort_by(|a, b| {
-                salience(b, now)
-                    .partial_cmp(&salience(a, now))
-                    .unwrap_or(std::cmp::Ordering::Equal)
-                    .then_with(|| b.frontmatter.updated_at.cmp(&a.frontmatter.updated_at))
-            });
-            let keep = members[0].frontmatter.id.clone();
-            let others = members[1..]
-                .iter()
-                .map(|m| m.frontmatter.id.clone())
-                .collect();
-            clusters.push(Cluster { keep, others });
+            {
+                // Survivor = highest salience, tie-broken by most recent update.
+                members.sort_by(|a, b| {
+                    salience(b, now)
+                        .partial_cmp(&salience(a, now))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .then_with(|| b.frontmatter.updated_at.cmp(&a.frontmatter.updated_at))
+                });
+                let keep = members[0].frontmatter.id.clone();
+                let others = members[1..]
+                    .iter()
+                    .map(|m| m.frontmatter.id.clone())
+                    .collect();
+                clusters.push(Cluster { keep, others });
+            }
         }
         Ok(clusters)
     }
+}
 
-    /// Cluster memories whose embeddings are within the configured similarity threshold.
+/// A restatement of the same fact lands almost on top of the original. Anything at or above this is
+/// treated as a true duplicate outright, which is what lets three identical notes collapse into one.
+const NEAR_IDENTICAL: f32 = 0.95;
+/// Below that, a merely-similar pair must also be *distinctly* closer to each other than to anything
+/// else. Without this a bare threshold is meaningless: these embedding models put unrelated notes
+/// above 0.8 anyway, so "similar enough" swept 37 distinct decisions into one cluster and retired
+/// all but one of them.
+const DUPLICATE_MARGIN: f32 = 0.04;
+
+impl Store {
+    /// Group memories that are genuinely duplicates of each other.
+    ///
+    /// A duplicate is either a near-identical restatement, or a pair that is *mutually* each other's
+    /// closest match by a clear margin. A plain similarity threshold is not a duplicate test.
     fn semantic_groups(
         &self,
         memories: &[Memory],
         embedder: &dyn crate::embed::Embedder,
     ) -> Result<Vec<Vec<String>>, Error> {
-        let threshold = self.config.consolidation.sim_threshold;
+        let floor = self.config.consolidation.sim_threshold as f32;
         let texts: Vec<String> = memories.iter().map(|m| m.body.clone()).collect();
         let vectors = embedder
             .embed(&texts)
             .map_err(|e| Error::Db(e.to_string()))?;
-
         let n = memories.len();
-        let mut assigned = vec![false; n];
-        let mut groups = Vec::new();
-        for i in 0..n {
-            if assigned[i] {
-                continue;
+        let sim = |i: usize, j: usize| cosine(&vectors[i], &vectors[j]);
+
+        // Each memory's closest peer, but only when it clearly stands out from the runner-up.
+        let standout: Vec<Option<usize>> = (0..n)
+            .map(|i| {
+                let mut sims: Vec<(usize, f32)> =
+                    (0..n).filter(|&j| j != i).map(|j| (j, sim(i, j))).collect();
+                sims.sort_by(|a, b| b.1.total_cmp(&a.1));
+                let (best, top) = *sims.first()?;
+                let runner_up = sims.get(1).map(|(_, s)| *s).unwrap_or(0.0);
+                (top >= floor && top - runner_up >= DUPLICATE_MARGIN).then_some(best)
+            })
+            .collect();
+
+        // Union-find: near-identical notes may chain (they really are the same thing); merely-similar
+        // ones only pair up when the choice is mutual.
+        let mut parent: Vec<usize> = (0..n).collect();
+        fn find(parent: &mut Vec<usize>, i: usize) -> usize {
+            if parent[i] != i {
+                let root = find(parent, parent[i]);
+                parent[i] = root;
             }
-            let mut group = vec![memories[i].frontmatter.id.clone()];
-            assigned[i] = true;
+            parent[i]
+        }
+        for i in 0..n {
             for j in (i + 1)..n {
-                if !assigned[j] && cosine(&vectors[i], &vectors[j]) >= threshold as f32 {
-                    group.push(memories[j].frontmatter.id.clone());
-                    assigned[j] = true;
+                let s = sim(i, j);
+                let duplicate = s >= NEAR_IDENTICAL
+                    || (s >= floor && standout[i] == Some(j) && standout[j] == Some(i));
+                if duplicate {
+                    let (a, b) = (find(&mut parent, i), find(&mut parent, j));
+                    if a != b {
+                        parent[a] = b;
+                    }
                 }
             }
-            groups.push(group);
         }
-        Ok(groups)
+
+        let mut by_root: std::collections::HashMap<usize, Vec<String>> =
+            std::collections::HashMap::new();
+        for (i, m) in memories.iter().enumerate() {
+            let root = find(&mut parent, i);
+            by_root
+                .entry(root)
+                .or_default()
+                .push(m.frontmatter.id.clone());
+        }
+        Ok(by_root.into_values().collect())
     }
 
     /// Ask the distiller what to do with a cluster and apply it.
@@ -349,6 +395,7 @@ fn normalize(body: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     #[test]
@@ -358,6 +405,104 @@ mod tests {
             .unwrap();
         assert_eq!(v.action, ClusterAction::Merge);
         assert_eq!(v.body, "a\nb\nc");
+    }
+
+    /// An embedder whose vectors all sit very close together — exactly how a real small model
+    /// behaves (high baseline cosine), which is what made a fixed threshold catastrophic.
+    struct HighBaselineEmbedder;
+    impl crate::embed::Embedder for HighBaselineEmbedder {
+        fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, crate::embed::EmbedError> {
+            Ok(texts
+                .iter()
+                .enumerate()
+                .map(|(i, _)| {
+                    // Distinct notes that a real small model still rates ~0.88 alike — above the
+                    // 0.83 threshold, which is exactly why a bare threshold was catastrophic.
+                    let mut v = vec![1.0f32; 8];
+                    v[i % 8] += 0.9;
+                    v
+                })
+                .collect())
+        }
+        fn dim(&self) -> usize {
+            8
+        }
+    }
+
+    /// THE BUG THAT ATE A REAL STORE. Greedy clustering on a fixed cosine threshold swept DISTINCT
+    /// topics into one cluster and the merge retired all but one (71 of 72 memories superseded).
+    /// Even when every memory looks similar to the embedder, memories on DIFFERENT topics must
+    /// never be merged: `topic` is the identity of the thing being remembered.
+    #[test]
+    fn consolidation_never_merges_distinct_topics_even_when_embeddings_are_alike() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::init(dir.path()).unwrap();
+        store.embedder = Some(Box::new(HighBaselineEmbedder));
+
+        let distinct = [
+            (
+                "readme-rewrite",
+                "Restructured the README to lead with the quickstart.",
+            ),
+            (
+                "pluribus-story",
+                "The narrative opens with the Pluribus hive analogy.",
+            ),
+            (
+                "gtm-hub71",
+                "Applying to the Hub71 accelerator as a solo founder.",
+            ),
+            ("jwt-expiry", "Access tokens expire after fifteen minutes."),
+            (
+                "stripe-webhooks",
+                "Stripe webhooks are signature-verified before use.",
+            ),
+        ];
+        for (topic, body) in distinct {
+            write_fact(&store, topic, body);
+        }
+
+        let outcome = store.consolidate_apply(dir.path()).unwrap();
+        let survivors = store
+            .query(&Query {
+                status: Some(Status::Active),
+                ..Query::default()
+            })
+            .unwrap();
+        assert_eq!(
+            outcome.merged, 0,
+            "merged {} memories across different topics",
+            outcome.merged
+        );
+        assert_eq!(
+            survivors.len(),
+            distinct.len(),
+            "consolidation retired distinct topics. survivors: {:?}",
+            survivors
+                .iter()
+                .map(|m| m.frontmatter.topic.clone())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// The flip side: it must still do its job on genuine duplicates of the SAME topic.
+    #[test]
+    fn consolidation_still_merges_true_duplicates_on_one_topic() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::init(dir.path()).unwrap();
+        store.embedder = Some(Box::new(HighBaselineEmbedder));
+        write_fact(
+            &store,
+            "jwt-expiry",
+            "Access tokens expire after fifteen minutes.",
+        );
+        write_fact(&store, "jwt-expiry", "Access tokens expire after 15 min.");
+
+        let outcome = store.consolidate_apply(dir.path()).unwrap();
+        assert_eq!(
+            outcome.merged, 1,
+            "same-topic duplicates should still merge"
+        );
     }
 
     fn write_fact(store: &Store, topic: &str, body: &str) {

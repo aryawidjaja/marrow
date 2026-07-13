@@ -81,9 +81,33 @@ Marrow isn't a black box, it's a graph you can explore, like a second brain.
 marrow-serve          # opens the dashboard at http://localhost:8088
 ```
 
-Every memory is a neuron; links connect memories that share a topic, a tag, or **related meaning**
-(from embeddings). Drag, zoom, click to read, search, and **add, edit, or delete** memories right
-there. Add projects by browsing your folders. It's the whole product, visual and interactive.
+Every memory is a neuron, grouped into the area it belongs to, so the graph has real structure
+instead of being a hairball. Links connect memories that share a topic, a tag, or **related meaning**
+(from embeddings). Browse the tree, drag, zoom, click to read, search, and **add, edit, or delete**
+memories right there. The **Hive** tab shows every project at once.
+
+## Your memories are organised, not a pile
+
+Every memory lives in an **area** of the project: `auth`, `billing`, `infra`. The agent files it as it
+writes, so the brain has a shape you can navigate instead of one flat heap.
+
+```
+project  →  area  →  topic  →  versions
+```
+
+```bash
+marrow areas          # the map: auth 11 · billing 10 · infra 23 · monitoring 10
+```
+
+Your agent sees that same map the moment a session starts, so it knows what the project knows before
+it answers. It can also weight a recall toward one area without hiding the rest:
+
+```bash
+marrow add --kind decision --topic jwt-expiry --area auth "We use 15-minute JWTs."
+```
+
+Nothing is forced. If a memory fits no area, it stays unfiled and is still fully searchable. A wrong
+area is worse than none.
 
 ## One brain across your projects
 
@@ -102,17 +126,27 @@ central *core* neuron (you) with every project orbiting it, bridged where they s
 
 ## One brain across your devices
 
-Run the Marrow backbone once and point every machine at it. One hive mind, across computers:
+Each project is local and private by default. Share the *one* project you want synced, and the rest
+stay on your machine. It's like sharing a repo, not your whole disk.
 
 ```bash
-# on a server (Docker, Fly.io, or any host; see deploy/)
+# once, on a server (Docker, Fly.io, any host; see deploy/)
 MARROW_TOKEN=$(openssl rand -hex 16) marrow-server
 
-# on each device
-export MARROW_REMOTE=https://your-backbone   MARROW_TOKEN=…   MARROW_PROJECT=team-app
+# then in the project you want shared, on each machine
+marrow share --gateway https://your-gateway --space team-app --token <the-token>
 ```
 
-Now a decision saved on your laptop is there on your desktop, instantly. Full walkthrough in
+Same gateway + space + token on two machines = one brain. A decision saved on your laptop is on your
+desktop instantly. Every other project is untouched.
+
+```bash
+marrow status     # shows whether this project is shared or local
+marrow unshare    # back to local, nothing is deleted
+```
+
+Your agent is told which it's working in, so it knows whether it's writing to a shared brain. You can
+also do all of this from the dashboard's **Manage Projects** panel. Full walkthrough in
 [deploy/README.md](deploy/README.md).
 
 ## More install options
@@ -173,8 +207,9 @@ the text below is the memory. The SQLite index is a rebuildable cache over these
 
 - **Staleness detection**: a memory can cite a code symbol; Marrow fingerprints it and flags the note
   the moment the symbol changes, ignoring reformatting and renames.
-- **Consolidation**: clusters related memories by meaning, merges duplicates, resolves contradictions,
-  and retires expired notes, preserving lineage.
+- **Consolidation**: finds genuine duplicates (a near-identical restatement, or a pair that are
+  mutually each other's closest match) and merges them, preserving lineage. It will not merge notes
+  that are merely similar.
 - **Hive mind**: many sessions work as one: each joins warm, claims its work so two never collide, and
   reads a live activity trail. Unlike a black-box hive, every signal is in an auditable ledger.
 - **Audit & provenance**: every write, edit, and recall lands in an append-only, hash-chained ledger;
