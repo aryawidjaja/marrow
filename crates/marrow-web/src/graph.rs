@@ -18,6 +18,8 @@ pub struct Node {
     pub label: String,
     pub kind: String,
     pub group: String,
+    /// The feature area this memory lives in ("" when unfiled) — the layout groups by this.
+    pub area: String,
     pub snippet: String,
     pub degree: usize,
 }
@@ -178,7 +180,8 @@ pub fn project_graph(store: &Store, root: &Path) -> Graph {
                 r.topic.clone()
             },
             kind: r.kind.clone(),
-            group: r.kind.clone(),
+            group: r.area.clone(),
+            area: r.area.clone(),
             snippet: snippet(&r.body, 140),
             degree: 0,
         });
@@ -235,6 +238,7 @@ pub fn hive_graph(hub: &Hub) -> Graph {
         label: "core".into(),
         kind: "core".into(),
         group: "core".into(),
+        area: String::new(),
         snippet: "shared memory about you — the center of the hive".into(),
         degree: 0,
     }];
@@ -270,6 +274,7 @@ pub fn hive_graph(hub: &Hub) -> Graph {
                 label: p.name.clone(),
                 kind: "project".into(),
                 group: p.name.clone(),
+                area: String::new(),
                 snippet: format!("project: {}", p.root.display()),
                 degree: 0,
             });
@@ -317,6 +322,7 @@ pub fn hive_graph(hub: &Hub) -> Graph {
                 },
                 kind: r.kind.clone(),
                 group: p.name.clone(),
+                area: r.area.clone(),
                 snippet: snippet(&r.body, 140),
                 degree: 0,
             });

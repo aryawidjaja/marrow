@@ -184,11 +184,12 @@ const edgeStyle = {
 const colorMap = {};
 function colorFor(v, node) {
   if (node.kind === "core") return "#f5c518";
-  if (v === "project") return kindColor[node.kind] || "#8b93a4";
   if (node.kind === "project") return "#8b93a4";
+  if (!node.group) return "#6b7280";                    // unfiled: deliberately drab
   if (!(node.group in colorMap)) colorMap[node.group] = palette[Object.keys(colorMap).length % palette.length];
   return colorMap[node.group];
 }
+const groupLabel = g => g || "unfiled";
 
 let view = "project", raw = { nodes: [], links: [] }, nodes = [], links = [], byId = {};
 let filter = "", selected = null, linkMode = false, linkFrom = null, heat = 1, showSemantic = true;
@@ -223,34 +224,40 @@ async function load() {
 // In hive view, give each project its own region on a ring around the core so clusters separate
 // instead of piling on top of each other. Nodes start near their anchor and a gentle force holds
 // them there while links still pull related neurons together.
+// Both views cluster on `group`: in the hive that's the project, in a project it's the feature
+// AREA. Each group gets its own region on a ring, and its neurons are held inside it. The structure
+// is real (the agent filed each memory into an area), so the layout can show it instead of guessing.
 function assignAnchors() {
-  if (view !== "hive") { nodes.forEach(n => { n.ax = n.ay = null; }); return; }
   const groups = [...new Set(nodes.map(n => n.group))].filter(g => g !== "core");
-  const R = 520 + groups.length * 90;
+  // Bigger areas need more room; size each region by its member count.
+  const size = {};
+  for (const n of nodes) if (n.group !== "core") size[n.group] = (size[n.group] || 0) + 1;
+  const R = groupRingRadius(groups.length);
   const ang = {};
   groups.forEach((g, i) => ang[g] = (i / Math.max(1, groups.length)) * Math.PI * 2);
   for (const n of nodes) {
-    if (n.group === "core") { n.ax = 0; n.ay = 0; }
-    else { n.ax = Math.cos(ang[n.group]) * R; n.ay = Math.sin(ang[n.group]) * R; }
-    n.x = n.ax + (Math.random() - .5) * 160;
-    n.y = n.ay + (Math.random() - .5) * 160;
+    if (n.kind === "core") { n.ax = 0; n.ay = 0; n.rmax = 90; }
+    else {
+      n.ax = Math.cos(ang[n.group]) * R;
+      n.ay = Math.sin(ang[n.group]) * R;
+      n.rmax = groupRadius(size[n.group] || 1);
+    }
+    n.x = n.ax + (Math.random() - .5) * 120;
+    n.y = n.ay + (Math.random() - .5) * 120;
   }
 }
+// Room for a group of n neurons, and how far out to place the groups so they never overlap.
+function groupRadius(n) { return Math.max(70, Math.min(300, 26 * Math.sqrt(n) + 34)); }
+function groupRingRadius(count) { return count <= 1 ? 0 : Math.max(380, 150 * count); }
 
 function buildLegend() {
   const el = document.getElementById("legend");
   const dot = (c, label) => `<div class="li"><span class="dot" style="background:${c}"></span>${label}</div>`;
   const edge = (c, label) => `<div class="li"><span class="edge" style="background:${c}"></span>${label}</div>`;
 
-  let neurons;
-  if (view === "project") {
-    neurons = [...new Set(nodes.map(n => n.kind))].filter(k => k !== "core")
-      .map(k => dot(kindColor[k] || "#8b93a4", k)).join("");
-  } else {
-    neurons = dot("#f5c518", "core (you)") +
-      [...new Set(nodes.map(n => n.group))].filter(g => g !== "core")
-        .map(g => dot(colorFor("hive", { group: g, kind: "x" }), g)).join("");
-  }
+  const groupsOf = [...new Set(nodes.map(n => n.group))].filter(g => g !== "core");
+  let neurons = (view === "hive" ? dot("#f5c518", "core (you)") : "") +
+    groupsOf.map(g => dot(colorFor(view, { group: g, kind: "x" }), groupLabel(g))).join("");
 
   const present = new Set(links.map(l => l.rel));
   const conns = ["ref", "topic", "tag", "semantic", "hub", "cluster", "user"]
@@ -260,8 +267,8 @@ function buildLegend() {
   }).join("");
 
   const how = view === "hive"
-    ? "Every neuron is a memory. Links are real, not random: two memories connect when they share a <b>topic</b> or a <b>tag</b> the agent saved. Memories also link to their <b>project</b>, and two projects bridge when they share a tag. Bigger neuron = more connections."
-    : "Every neuron is a memory. Links are real, not random: two memories connect when they share a <b>topic</b> or a <b>tag</b> the agent saved on them. Draw your own with ✎ Link. Bigger neuron = more connections.";
+    ? "Every neuron is a memory, grouped into the <b>project</b> it belongs to. Links are real, not random: memories connect when they share a <b>topic</b>, a <b>tag</b>, or related <b>meaning</b>, and two projects bridge when they share something specific. Bigger neuron = more connections."
+    : "Every neuron is a memory, grouped into the <b>area</b> of the project it belongs to (auth, billing, infra…) — the agent files each memory into an area as it saves it. Links connect memories that share a <b>topic</b>, a <b>tag</b>, or related <b>meaning</b>. Grey <i>unfiled</i> neurons have no area yet; they're still fully searchable. Draw your own link with ✎ Link.";
 
   el.innerHTML =
     `<div class="lg-head">Neurons<span class="lg-help" id="lg-toggle">ⓘ how it works</span></div>` +
@@ -277,15 +284,15 @@ function buildTree() {
   const groups = {};
   for (const n of nodes) {
     if (n.kind === "core" || n.kind === "project") continue;
-    const g = view === "project" ? n.kind : n.group;
+    const g = n.group;
     (groups[g] = groups[g] || []).push(n);
   }
   t.innerHTML = "";
   for (const g of Object.keys(groups).sort()) {
     const wrap = document.createElement("div"); wrap.className = "tree-group";
     const head = document.createElement("div"); head.className = "row";
-    const c = view === "project" ? (kindColor[g] || "#8b93a4") : colorFor("hive", { group: g, kind: "x" });
-    head.innerHTML = `<span class="caret">▶</span><span class="dot" style="background:${c}"></span>${g}<span class="count">${groups[g].length}</span>`;
+    const c = colorFor(view, { group: g, kind: "x" });
+    head.innerHTML = `<span class="caret">▶</span><span class="dot" style="background:${c}"></span>${esc(groupLabel(g))}<span class="count">${groups[g].length}</span>`;
     const kids = document.createElement("div"); kids.className = "kids";
     groups[g].sort((a,b) => (a.label||"").localeCompare(b.label||"")).forEach(n => {
       const leaf = document.createElement("div"); leaf.className = "row leaf"; leaf.textContent = n.label || n.id;
@@ -340,7 +347,7 @@ function tick() {
     if (n.pin) { n.vx = n.vy = 0; continue; }
     n.x += n.vx*heat; n.y += n.vy*heat; n.vx *= 0.85; n.vy *= 0.85;
     // Hard boundary: no neuron may leave its cluster's disc.
-    const rmax = n.ax != null ? HIVE_RADIUS : PROJECT_RADIUS;
+    const rmax = n.rmax || (n.ax != null ? HIVE_RADIUS : PROJECT_RADIUS);
     const ox = n.x - hx, oy = n.y - hy, od = Math.hypot(ox, oy);
     if (od > rmax) { n.x = hx + ox/od*rmax; n.y = hy + oy/od*rmax; n.vx *= 0.4; n.vy *= 0.4; }
   }

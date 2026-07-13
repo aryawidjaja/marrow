@@ -56,8 +56,15 @@ pub fn validate(memory: &Memory) -> Result<(), Vec<Violation>> {
 
     // `topic` is the grouping key the whole brain hangs off (supersession, dedup, clustering), so
     // it has to stay a short label. Without this, agents dump whole paragraphs in here and the
-    // project loses its only stable key.
-    if let Some(topic) = fm.topic.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+    // project loses its only stable key. Only enforced on *active* memories: a superseded one is
+    // frozen history, it no longer groups anything, and rewriting it would falsify the record.
+    let topic_to_check = fm
+        .topic
+        .as_deref()
+        .filter(|_| fm.status == Status::Active)
+        .map(str::trim)
+        .filter(|t| !t.is_empty());
+    if let Some(topic) = topic_to_check {
         if topic.contains('\n') {
             v.push(viol("topic", "must be a single line, not prose"));
         }
