@@ -66,6 +66,15 @@
   .fico { width: 14px; height: 14px; vertical-align: -3px; margin-right: 6px; color: var(--muted); }
   .fico.on { color: var(--accent); }
   #detail .acts { display: flex; gap: 8px; margin-top: 12px; }
+  #detail .acts.col { flex-direction: column; gap: 6px; }
+  #detail .acts.col button { width: 100%; text-align: left; padding: 7px 10px; }
+  /* The two neurons a link joins, drawn as the link itself. */
+  #detail .pair { margin: 12px 0 10px; }
+  #detail .pair-row { display: flex; align-items: center; gap: 8px; font-size: 12px;
+    color: var(--text); line-height: 1.4; }
+  #detail .pair-row .dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+  #detail .pair-wire { width: 2px; height: 16px; margin: 3px 0 3px 3.5px; border-radius: 1px;
+    background: var(--accent); opacity: .75; }
   #detail .acts button { font-size: 11px; padding: 4px 10px; }
   .danger { color: #ff6b6b; }
   .pill { font-size: 10px; padding: 1px 7px; border-radius: 9px; background: var(--panel2);
@@ -167,12 +176,6 @@
   #toast.show { opacity: 1; }
   .tip { position: absolute; pointer-events: none; background: #0b0e13; border: 1px solid var(--line);
     padding: 5px 9px; border-radius: 7px; font-size: 12px; max-width: 260px; display: none; z-index: 9; }
-  #edgemenu { position: absolute; display: none; z-index: 12; background: var(--panel);
-    border: 1px solid var(--line); border-radius: 9px; padding: 6px; box-shadow: 0 12px 32px rgba(0,0,0,.5); min-width: 180px; }
-  #edgemenu .em-title { font-size: 11px; color: var(--muted); padding: 4px 8px 6px; text-transform: capitalize; }
-  #edgemenu button { display: block; width: 100%; text-align: left; border: 0; background: none;
-    padding: 6px 8px; border-radius: 6px; font-size: 12px; }
-  #edgemenu button:hover { background: var(--panel2); }
   #channel { position: absolute; inset: 0; display: none; overflow: auto; background: var(--bg); padding: 22px; }
   #channel.show { display: block; }
   #channel .wrap { max-width: 720px; margin: 0 auto; }
@@ -215,7 +218,6 @@
     <div class="legend" id="legend"></div>
     <div id="detail"></div>
     <div class="tip" id="tip"></div>
-    <div id="edgemenu"></div>
     <div id="channel"></div>
     <div class="linkbar" id="linkbar"></div>
     <div class="dock" id="dock" role="toolbar" aria-label="Canvas tools">
@@ -538,12 +540,15 @@ function draw() {
   ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,w,h);
   ctx.setTransform(T.k*devicePixelRatio,0,0,T.k*devicePixelRatio, T.x*devicePixelRatio, T.y*devicePixelRatio);
   const nb = neighbors(selected);
+  // Selecting a neuron OR a link fades everything else, so you read one thing at a time. A selected
+  // link also lights up the two neurons it joins — otherwise you can't tell which link you hit.
+  const ends = selectedEdge ? [selectedEdge.s, selectedEdge.t] : null;
   for (const l of links) {
-    const active = selected && (l.s === selected || l.t === selected);
-    // Selecting a neuron fades everything but its own links, so you read one thing at a time.
-    ctx.globalAlpha = active ? 0.95 : (selected ? 0.05 : 0.4);
-    ctx.strokeStyle = active ? "rgba(255,222,89,.95)" : (edgeStyle[l.rel]?.color || "rgba(120,130,150,.5)");
-    ctx.lineWidth = (l.rel === "user" ? 1.4 : active ? 1.5 : 0.7) / T.k;
+    const picked = l === selectedEdge;
+    const active = !selectedEdge && selected && (l.s === selected || l.t === selected);
+    ctx.globalAlpha = picked ? 1 : (selectedEdge || selected) ? 0.05 : (active ? 0.95 : 0.4);
+    ctx.strokeStyle = picked || active ? "rgba(255,222,89,.98)" : (edgeStyle[l.rel]?.color || "rgba(120,130,150,.5)");
+    ctx.lineWidth = (picked ? 3 : l.rel === "user" ? 1.4 : active ? 1.5 : 0.7) / T.k;
     // Bow each link slightly so overlapping links read as separate strands, not one straight tangle.
     const c = bow(l);
     ctx.beginPath(); ctx.moveTo(l.s.x, l.s.y); ctx.quadraticCurveTo(c.x, c.y, l.t.x, l.t.y); ctx.stroke();
@@ -559,11 +564,14 @@ function draw() {
   }
   for (const n of nodes) {
     const r = radius(n);
-    const dim = (filter && !match(n)) || (selected && n !== selected && !nb.has(n));
-    ctx.globalAlpha = dim ? 0.18 : 1;
+    const onEdge = ends && (n === ends[0] || n === ends[1]);
+    const dim = (filter && !match(n)) ||
+      (ends ? !onEdge : (selected && n !== selected && !nb.has(n)));
+    ctx.globalAlpha = dim ? 0.15 : 1;
     ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, 7);
     ctx.fillStyle = colorFor(view, n); ctx.fill();
-    if (n === selected || n === linkFrom) { ctx.lineWidth = 2/T.k; ctx.strokeStyle = "#fff"; ctx.stroke(); }
+    if (onEdge) { ctx.lineWidth = 2.5/T.k; ctx.strokeStyle = "#ffde59"; ctx.stroke(); }
+    else if (n === selected || n === linkFrom) { ctx.lineWidth = 2/T.k; ctx.strokeStyle = "#fff"; ctx.stroke(); }
     if (r*T.k > 9) {
       ctx.globalAlpha = dim ? 0.2 : 0.9; ctx.fillStyle = "#cdd3df";
       ctx.font = `${11/T.k}px -apple-system,Segoe UI,sans-serif`;
@@ -613,6 +621,7 @@ document.addEventListener("click", e => {
     case "browse": browseTo(d.path); break;
     case "addproj": addProj(d.path, d.name, d.marrow === "true"); break;
     case "closedetail": closeDetail(); break;
+    case "closeedge": closeEdgeMenu(); break;
     case "save": saveMem(d.id || null); break;
     case "edge-remove": removeEdge(); break;
     case "edge-insert": insertBetween(); break;
@@ -646,7 +655,7 @@ function nodeAt(px, py) {
 }
 
 async function select(n) {
-  selected = n; closeEdgeMenu(); invalidate();
+  selected = n; selectedEdge = null; invalidate();
   const token = ++selectToken;   // a slower earlier fetch must not clobber a newer selection
   document.querySelectorAll(".tnode.sel").forEach(e => e.classList.remove("sel"));
   const leaf = document.querySelector(`.tnode[data-id="${CSS.escape(n.id)}"]`);
@@ -704,7 +713,7 @@ window.addEventListener("mousemove", e => {
   const r = cv.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
   if (drag) { moved = true; const p = screenToWorld(px, py); drag.n.x = p.x; drag.n.y = p.y; drag.n.pin = true; heat = Math.max(heat, .5); invalidate(); }
   else if (panning) { if (downXY && Math.hypot(px - downXY.x, py - downXY.y) > 3) moved = true; T.x = px - panning.x; T.y = py - panning.y; invalidate(); }
-  else showTip(px, py);
+  else { showTip(px, py); cv.style.cursor = linkMode ? "crosshair" : (nodeAt(px, py) || edgeAt(px, py)) ? "pointer" : "grab"; }
   if (linkMode && linkFrom) { mouseWorld = screenToWorld(px, py); invalidate(); }
 });
 window.addEventListener("mouseup", () => {
@@ -718,7 +727,7 @@ window.addEventListener("mouseup", () => {
     else select(n);
   } else if (panning && !moved && downXY) {
     if (reconnect) { reconnect = null; setHint(); toast("reconnect cancelled"); }
-    else { const l = edgeAt(downXY.x, downXY.y); if (l) openEdgeMenu(l, downXY.x, downXY.y); else closeEdgeMenu(); }
+    else { const l = edgeAt(downXY.x, downXY.y); if (l) openEdgeMenu(l); else { closeEdgeMenu(); closeDetail(); } }
   }
   drag = panning = null;
 });
@@ -782,18 +791,36 @@ async function removeLink(l) {
   await post(l.rel === "user" ? "unlink" : "hide", a.id, b.id, a.project);
 }
 
-function openEdgeMenu(l, px, py) {
-  closeDetail(); selectedEdge = l;
+// A link opens the SAME panel a neuron does: what it is, which two memories it joins, what you can
+// do to it. A bare context menu told you none of that, and with links overlapping you could not even
+// tell which one you had hit.
+function openEdgeMenu(l) {
+  selected = null; selectedEdge = l; invalidate();
+  document.querySelectorAll(".tnode.sel").forEach(e => e.classList.remove("sel"));
+  const d = document.getElementById("detail");
   const label = (edgeStyle[l.rel] || {}).label || l.rel;
-  const em = document.getElementById("edgemenu");
-  em.innerHTML = `<div class="em-title">${label}</div>
-    <button data-act="edge-remove">Remove this link</button>
-    <button data-act="edge-insert">Insert a memory in the middle</button>
-    <button data-act="edge-reconnect">Reconnect an end…</button>`;
-  em.style.left = Math.min(px, cv.clientWidth - 200) + "px";
-  em.style.top = py + "px"; em.style.display = "block";
+  const end = n => `<div class="pair-row"><span class="dot" style="background:${colorFor(view, n)}"></span>${esc(n.label || n.id)}</div>`;
+  const drawn = l.rel === "user";
+  d.innerHTML = `<span class="x" data-act="closeedge">✕</span>
+    <span class="k">connection</span>
+    <h3>${esc(label)}</h3>
+    <div class="pair">${end(l.s)}<div class="pair-wire"></div>${end(l.t)}</div>
+    <div class="meta">${drawn
+      ? "You drew this link by hand."
+      : "Marrow inferred this link. Removing it hides it from the graph; the memories stay."}</div>
+    <div class="acts col">
+      <button class="danger" data-act="edge-remove">Remove this link</button>
+      <button data-act="edge-insert">Insert a memory between</button>
+      <button data-act="edge-reconnect">Reconnect an end</button>
+    </div>`;
+  d.classList.add("show");
 }
-function closeEdgeMenu() { document.getElementById("edgemenu").style.display = "none"; selectedEdge = null; }
+function closeEdgeMenu() {
+  if (!selectedEdge) return;
+  selectedEdge = null;
+  document.getElementById("detail").classList.remove("show");
+  invalidate();
+}
 async function removeEdge() { const l = selectedEdge; closeEdgeMenu(); if (!l) return; await removeLink(l); toast("link removed"); await load(); }
 function insertBetween() { const l = selectedEdge; closeEdgeMenu(); if (!l) return; pendingInsert = { source: l.source, target: l.target, rel: l.rel }; memForm(null); }
 function startReconnect() { const l = selectedEdge; closeEdgeMenu(); if (!l) return; reconnect = { keep: l.source, drop: l.target, rel: l.rel }; setHint(); toast("click the memory to connect this end to"); }
@@ -834,6 +861,7 @@ window.addEventListener("keydown", e => {
     case "Escape":
       if (document.getElementById("modal").classList.contains("show")) closeModal();
       else if (linkMode || reconnect) { setLinkMode(false); }
+      else if (selectedEdge) closeEdgeMenu();
       else if (selected) closeDetail();
       else { document.getElementById("search").value = ""; filter = ""; }
       break;
