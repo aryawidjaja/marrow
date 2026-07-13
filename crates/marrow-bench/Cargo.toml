@@ -1,6 +1,6 @@
 [package]
 name = "marrow-bench"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 description = "Reproducible benchmarks for Marrow: consolidation quality and retrieval token-efficiency."
 license = "AGPL-3.0-only"

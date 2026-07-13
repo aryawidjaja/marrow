@@ -1,6 +1,6 @@
 [package]
 name = "marrow-web"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 description = "A local dashboard for the Marrow memory store: see staleness and consolidation as they happen."
 license = "AGPL-3.0-only"

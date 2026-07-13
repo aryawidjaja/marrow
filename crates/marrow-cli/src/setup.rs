@@ -22,12 +22,16 @@ const MARROW_SAVE: &str = include_str!("../../../integrations/claude-code/comman
 const GUIDANCE: &str = "<!-- marrow:begin (managed by `marrow setup`) -->\n\
 ## Marrow shared memory\n\n\
 This project has a Marrow shared brain over MCP. Hooks load context at session start, prevent file\n\
-collisions, and record activity automatically. Two things are on you:\n\n\
+collisions, and record activity automatically. Three things are on you:\n\n\
 1. Recall before you answer. For any question about how this project works or what was decided, call\n\
 `mem_recall` first. Do not rely only on the start-of-session briefing; it can be stale.\n\
 2. Save as you go. The moment you reach a durable decision, fact, or gotcha, save it with `mem_write`\n\
-(kind `decision` or `fact`, a short topic). Call `mem_recall` first so you do not duplicate. If a\n\
-briefing suggests consolidation, run `mem_consolidate`.\n\n\
+(kind `decision` or `fact`). Call `mem_recall` first so you do not duplicate.\n\
+3. File it where it belongs. Every memory lives in an `area` of the project (`auth`, `billing`,\n\
+`infra`). Call `mem_areas` to see which areas already exist and REUSE one instead of inventing a\n\
+near-duplicate. If nothing fits, leave `area` out rather than forcing a wrong one: an unfiled memory\n\
+is still fully searchable, a misfiled one is a lie. Keep `topic` a SHORT LABEL of a few words, never\n\
+a sentence: it is the key the brain groups and de-duplicates by, and the detail belongs in the body.\n\n\
 Hive etiquette: you share this brain with other live sessions. Heed the notes about what they are\n\
 doing, do not edit a file another session has claimed, and if one looks stuck, offer to help. Check\n\
 `mem_claims` before a big change.\n\

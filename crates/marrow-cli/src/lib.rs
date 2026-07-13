@@ -796,7 +796,7 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
             if brief.suggest_consolidate {
                 writeln!(
                     out,
-                    "maintenance: many new memories since the last cleanup — run `marrow consolidate --apply` (or mem_consolidate) to merge duplicates and retire stale notes."
+                    "maintenance: many new memories since the last cleanup. Review duplicates with `marrow consolidate` (report only). Do NOT run `--apply` yet: it currently over-merges distinct topics."
                 )
                 .ok();
             }
