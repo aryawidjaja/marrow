@@ -326,6 +326,7 @@ pub fn hive_graph(hub: &Hub) -> Graph {
             store.vectors().unwrap_or_default().into_iter().collect();
         let mut local_topic: HashMap<String, Vec<String>> = HashMap::new();
         let mut local_tag: HashMap<String, Vec<String>> = HashMap::new();
+        let mut local_area: HashMap<String, Vec<String>> = HashMap::new();
         let rows = store.list().unwrap_or_default();
         for r in &rows {
             if r.status != "active" {
@@ -361,11 +362,46 @@ pub fn hive_graph(hub: &Hub) -> Graph {
                 snippet: snippet(&r.body, 140),
                 degree: 0,
             });
+            if r.area.is_empty() {
+                // Unfiled: hangs straight off the project, so it's never orphaned.
+                links.push(Link {
+                    source: hub_id.clone(),
+                    target: node_id,
+                    rel: "cluster".into(),
+                });
+            } else {
+                local_area
+                    .entry(r.area.clone())
+                    .or_default()
+                    .push(node_id.clone());
+            }
+        }
+        // The hive's skeleton is core -> project -> area -> memories. Each area gets its own hub
+        // neuron (labelled with the area) so you can see WHICH part of the project you're looking
+        // at, instead of one undifferentiated blob of the project's colour.
+        for (area, members) in &local_area {
+            let area_hub = format!("{hub_id}#area:{area}");
+            nodes.push(Node {
+                id: area_hub.clone(),
+                label: area.clone(),
+                kind: "area".into(),
+                group: p.name.clone(),
+                area: area.clone(),
+                snippet: format!("{} memories in `{area}` ({})", members.len(), p.name),
+                degree: 0,
+            });
             links.push(Link {
                 source: hub_id.clone(),
-                target: node_id,
+                target: area_hub.clone(),
                 rel: "cluster".into(),
             });
+            for m in members {
+                links.push(Link {
+                    source: area_hub.clone(),
+                    target: m.clone(),
+                    rel: "area".into(),
+                });
+            }
         }
         // Give each project's cluster internal structure — explicit refs, shared topic/tag, and
         // meaning — so it reads as a connected sub-brain, not a bare star around its hub.

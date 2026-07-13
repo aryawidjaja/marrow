@@ -179,7 +179,7 @@ const edgeStyle = {
   semantic: { color: "rgba(199,125,255,0.45)", label: "related meaning" },
   user:     { color: "rgba(245,197,24,0.65)",  label: "you linked" },
   hub:      { color: "rgba(245,197,24,0.30)",  label: "core ↔ project" },
-  cluster:  { color: "rgba(120,130,150,0.18)", label: "in project" },
+  cluster:  { color: "rgba(120,130,150,0.28)", label: "project → area" },
   area:     { color: "rgba(140,150,170,0.22)", label: "in area" },
 };
 const colorMap = {};
@@ -230,50 +230,74 @@ async function load() {
 // is real (the agent filed each memory into an area), so the layout can show it instead of guessing.
 function assignAnchors() {
   const groups = [...new Set(nodes.map(n => n.group))].filter(g => g !== "core");
-  const size = {};
-  for (const n of nodes) if (n.group !== "core") size[n.group] = (size[n.group] || 0) + 1;
-  const R = groupRingRadius(groups.length);
+  const isHub = n => n.kind === "project" || n.kind === "area" || n.kind === "core";
+
+  // How many memories in each group, and in each group's area.
+  const gCount = {}, gaCount = {};
+  for (const n of nodes) {
+    if (n.group === "core" || isHub(n)) continue;
+    gCount[n.group] = (gCount[n.group] || 0) + 1;
+    const k = n.group + "|" + (n.area || "");
+    gaCount[k] = (gaCount[k] || 0) + 1;
+  }
+
+  if (view !== "hive") {
+    // Project view: the groups ARE the areas. One ring, one pocket each.
+    const R = groupRingRadius(groups.length);
+    const ang = {};
+    groups.forEach((g, i) => ang[g] = (i / Math.max(1, groups.length)) * Math.PI * 2);
+    for (const n of nodes) {
+      n.ax = Math.cos(ang[n.group]) * R;
+      n.ay = Math.sin(ang[n.group]) * R;
+      n.rmax = groupRadius(gCount[n.group] || 1);
+      n.x = n.ax + (Math.random() - .5) * 90;
+      n.y = n.ay + (Math.random() - .5) * 90;
+    }
+    return;
+  }
+
+  // Hive: nest it — projects on an outer ring, and inside each project its AREAS get their own
+  // pockets on an inner ring. Both rings are sized from the pockets they must hold, so nothing
+  // can overlap (that was the bug: 10 pockets of r=78 crammed onto a ring of r=180).
+  const info = {};
+  for (const g of groups) {
+    const areas = [...new Set(nodes.filter(n => n.group === g && !isHub(n)).map(n => n.area || ""))].sort();
+    const rOf = a => pocketRadius(gaCount[g + "|" + a] || 1);
+    const biggest = Math.max(...areas.map(rOf), 44);
+    // ring radius so adjacent pockets clear each other
+    const inner = areas.length <= 1 ? 0 : (biggest / Math.sin(Math.PI / areas.length)) * 1.18;
+    const pockets = {};
+    areas.forEach((a, i) => {
+      const t = (i / Math.max(1, areas.length)) * Math.PI * 2;
+      pockets[a] = { dx: Math.cos(t) * inner, dy: Math.sin(t) * inner, r: rOf(a) };
+    });
+    info[g] = { pockets, span: inner + biggest };
+  }
+  const widest = Math.max(...groups.map(g => info[g].span), 120);
+  const R = groups.length <= 1 ? 0
+    : Math.max(600, (widest / Math.sin(Math.PI / Math.max(2, groups.length))) * 1.25);
   const ang = {};
   groups.forEach((g, i) => ang[g] = (i / Math.max(1, groups.length)) * Math.PI * 2);
-
-  // In the hive, nest one level deeper: projects sit on the outer ring, and inside each project its
-  // AREAS get their own sub-regions. So you see project -> area -> memories, not one project blob.
-  const sub = {};                                   // "project|area" -> {x, y, n}
-  if (view === "hive") {
-    const perProject = {};
-    for (const n of nodes) {
-      if (n.group === "core" || n.kind === "project") continue;
-      (perProject[n.group] = perProject[n.group] || new Set()).add(n.area || "");
-    }
-    for (const g of Object.keys(perProject)) {
-      const areas = [...perProject[g]].sort();
-      const gx = Math.cos(ang[g]) * R, gy = Math.sin(ang[g]) * R;
-      const inner = areas.length <= 1 ? 0 : Math.min(180, 46 * areas.length);
-      areas.forEach((a, i) => {
-        const t = (i / Math.max(1, areas.length)) * Math.PI * 2;
-        sub[g + "|" + a] = { x: gx + Math.cos(t) * inner, y: gy + Math.sin(t) * inner };
-      });
-    }
-  }
 
   for (const n of nodes) {
     if (n.kind === "core") { n.ax = 0; n.ay = 0; n.rmax = 90; }
     else {
-      const s = view === "hive" && n.kind !== "project" ? sub[n.group + "|" + (n.area || "")] : null;
-      if (s) {
-        n.ax = s.x; n.ay = s.y;
-        n.rmax = 78;                                // a snug pocket per area inside the project
+      const gx = Math.cos(ang[n.group]) * R, gy = Math.sin(ang[n.group]) * R;
+      if (n.kind === "project") {              // the project hub sits at its own centre
+        n.ax = gx; n.ay = gy; n.rmax = info[n.group].span + 40;
       } else {
-        n.ax = Math.cos(ang[n.group]) * R;
-        n.ay = Math.sin(ang[n.group]) * R;
-        n.rmax = groupRadius(size[n.group] || 1);
+        const pk = info[n.group].pockets[n.area || ""];
+        n.ax = gx + (pk ? pk.dx : 0);
+        n.ay = gy + (pk ? pk.dy : 0);
+        n.rmax = pk ? pk.r : 60;
       }
     }
-    n.x = n.ax + (Math.random() - .5) * 90;
-    n.y = n.ay + (Math.random() - .5) * 90;
+    n.x = n.ax + (Math.random() - .5) * 70;
+    n.y = n.ay + (Math.random() - .5) * 70;
   }
 }
-// Room for a group of n neurons, and how far out to place the groups so they never overlap.
+// Room an area needs for n memories, and how far out to place a ring of groups.
+function pocketRadius(n) { return Math.max(40, Math.min(150, 20 * Math.sqrt(n) + 24)); }
 function groupRadius(n) { return Math.max(70, Math.min(300, 26 * Math.sqrt(n) + 34)); }
 function groupRingRadius(count) { return count <= 1 ? 0 : Math.max(380, 150 * count); }
 
@@ -354,12 +378,9 @@ function tick() {
     }
   }
   for (const l of links) {
-    // Skip the in-project spokes in the hive: they'd make each project a 150-arm starburst. The
-    // project's region already groups its neurons; real content links give it internal structure.
-    if (view === "hive" && l.rel === "cluster") continue;
     let dx = l.t.x-l.s.x, dy = l.t.y-l.s.y, d = Math.hypot(dx,dy)+.01;
-    const rest = l.rel === "hub" ? 180 : l.rel === "area" ? 58 : l.rel === "semantic" ? 62 : 52;
-    const k = l.rel === "hub" ? 0.01 : l.rel === "area" ? 0.05 : 0.06;
+    const rest = l.rel === "hub" ? 180 : l.rel === "cluster" ? 150 : l.rel === "area" ? 58 : l.rel === "semantic" ? 62 : 52;
+    const k = (l.rel === "hub" || l.rel === "cluster") ? 0.01 : l.rel === "area" ? 0.05 : 0.06;
     const f = (d-rest)*k, ux = dx/d, uy = dy/d;
     l.s.vx += ux*f; l.s.vy += uy*f; l.t.vx -= ux*f; l.t.vy -= uy*f;
   }
@@ -400,7 +421,6 @@ function draw() {
   const nb = neighbors(selected);
   for (const l of links) {
     if (l.rel === "semantic" && !showSemantic) continue;
-    if (view === "hive" && l.rel === "cluster") continue;   // spokes are noise; grouping is spatial
     const active = selected && (l.s === selected || l.t === selected);
     // Select a neuron and everything but its own links fades away, so you read one thing at a time
     // instead of a web. Otherwise links are faint and thin so crossings don't shout.
