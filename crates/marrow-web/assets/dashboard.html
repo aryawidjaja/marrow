@@ -399,16 +399,23 @@ function tick() {
     const ox = n.x - hx, oy = n.y - hy, od = Math.hypot(ox, oy);
     if (od > rmax) { n.x = hx + ox/od*rmax; n.y = hy + oy/od*rmax; n.vx *= 0.4; n.vy *= 0.4; }
   }
-  // Seat each hub (a project in the hive, an area in a project) at the centre of its own cluster,
-  // so it reads as that cluster's core rather than dangling off to one side.
-  const gx = {}, gy = {}, gn = {};
+  // Seat each hub at the centre of ITS OWN cluster. A project hub centres on all its memories; an
+  // area hub centres on that area's memories only. Keying both by `group` stacked every area hub of
+  // a project onto one point (in the hive, `group` IS the project), so they piled up on each other.
+  const gx = {}, gy = {}, gn = {};      // per project/group
+  const ax = {}, ay = {}, an = {};      // per group|area
   for (const n of nodes) {
     if (n.kind === "project" || n.kind === "core" || n.kind === "area") continue;
     gx[n.group] = (gx[n.group]||0)+n.x; gy[n.group] = (gy[n.group]||0)+n.y; gn[n.group] = (gn[n.group]||0)+1;
+    const k = n.group + "|" + (n.area || "");
+    ax[k] = (ax[k]||0)+n.x; ay[k] = (ay[k]||0)+n.y; an[k] = (an[k]||0)+1;
   }
   for (const n of nodes) {
-    if ((n.kind === "project" || n.kind === "area") && gn[n.group]) {
+    if (n.kind === "project" && gn[n.group]) {
       n.x = gx[n.group]/gn[n.group]; n.y = gy[n.group]/gn[n.group]; n.vx = n.vy = 0;
+    } else if (n.kind === "area") {
+      const k = n.group + "|" + (n.area || "");
+      if (an[k]) { n.x = ax[k]/an[k]; n.y = ay[k]/an[k]; n.vx = n.vy = 0; }
     }
   }
   heat *= 0.985; if (heat < 0.03) heat = 0;
