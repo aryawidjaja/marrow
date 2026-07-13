@@ -214,4 +214,17 @@ check "past threshold, bootstrap nudges consolidation" "$(a bootstrap 'resume' -
 check "past threshold, --if-due applies" "$(a consolidate --if-due)" "applied:"
 check "after a pass, --if-due is a no-op again" "$(a consolidate --if-due)" "not due"
 
+echo "==> Dashboard: no JS handler references a missing element"
+# A deleted button left a dangling getElementById(), which threw and silently killed setView() —
+# the Hive tab stopped loading. Catch that class of bug statically.
+dangling="$(python3 - "$repo_root/crates/marrow-web/assets/dashboard.html" <<'EOF'
+import re, sys
+s = open(sys.argv[1], encoding="utf-8").read()
+ids  = set(re.findall(r'id="([\w-]+)"', s))
+used = set(re.findall(r'getElementById\("([\w-]+)"\)', s))
+print(",".join(sorted(used - ids)))
+EOF
+)"
+check "every getElementById target exists in the markup" "[$dangling]" "[]"
+
 printf '\nAll %d checks passed.\n' "$pass"

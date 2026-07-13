@@ -34,7 +34,8 @@
   .seg button:hover { color: var(--text); background: rgba(255,255,255,.04); }
   .seg button.on { background: var(--accent); color: #0d0f14; }
   .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  header button svg.ico { width: 13px; height: 13px; vertical-align: -2px; margin-right: 5px; }
+  button svg.ico { width: 14px; height: 14px; flex: 0 0 auto; vertical-align: -2px; }
+  .dock button[hidden] { display: none; }
   #proj[hidden] { display: none; }
   input[type=search], select, .modal-card input, .modal-card textarea, .modal-card select {
     background: var(--panel); border: 1px solid var(--line); color: var(--text);
@@ -82,7 +83,8 @@
   /* Sidebar = places. Actions on top, then the directory, which is the part that scrolls. */
   aside.side { display: flex; flex-direction: column; overflow: hidden; }
   .side-act { padding: 10px 8px 8px; border-bottom: 1px solid var(--line); }
-  .side-act button { width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; }
+  .side-act button { width: 100%; display: flex; align-items: center; justify-content: center; gap: 7px;
+    padding: 7px 10px; font-size: 12px; font-weight: 600; }
   #tree { flex: 1; overflow: auto; padding: 8px 0; scrollbar-width: thin; }
   /* Dock = tools that act on the canvas, so they live on the canvas. */
   .dock { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 20;
@@ -230,14 +232,14 @@
 </main>
 <div id="modal"><div class="modal-card"></div></div>
 <script>
-const palette = ["#6ea8fe","#46d39a","#ff8f5d","#c77dff","#ffd166","#4cc9f0","#f072b6","#90be6d","#e56b6f","#7bdff2"];
-const kindColor = { decision:"#6ea8fe", fact:"#46d39a", entity:"#c77dff", session:"#ffd166", skill:"#ff8f5d", project:"#8b93a4", core:"#ffde59" };
+const palette = ["#ffde59","#ffb057","#ff8a6b","#f2739f","#c78ef0","#8fb0f5","#5fc9d6","#57cf9c","#b5d35c","#e8b53c"];
+const kindColor = { decision:"#8fb0f5", fact:"#57cf9c", entity:"#c78ef0", session:"#ffde59", skill:"#ffb057", project:"#8b93a4", core:"#ffde59" };
 // Edge types are real relationships, each its own colour so the graph is legible.
 const edgeStyle = {
-  ref:      { color: "rgba(255,120,90,0.65)",  label: "explicit link" },
-  topic:    { color: "rgba(110,168,254,0.30)", label: "shared topic" },
-  tag:      { color: "rgba(70,211,154,0.32)",  label: "shared tag" },
-  semantic: { color: "rgba(199,125,255,0.45)", label: "related meaning" },
+  ref:      { color: "rgba(255,138,107,0.62)", label: "explicit link" },
+  topic:    { color: "rgba(143,176,245,0.32)", label: "shared topic" },
+  tag:      { color: "rgba(87,207,156,0.32)",  label: "shared tag" },
+  semantic: { color: "rgba(199,142,240,0.45)", label: "related meaning" },
   user:     { color: "rgba(255,222,89,0.70)",  label: "you linked" },
   hub:      { color: "rgba(255,222,89,0.32)",  label: "core ↔ project" },
   cluster:  { color: "rgba(120,130,150,0.28)", label: "project → area" },
@@ -799,19 +801,19 @@ function drawLinkbar() {
 }
 document.getElementById("refit").onclick = fit;
 function setView(v) {
-  view = v; selected = null; closeDetail(); closeEdgeMenu(); linkFrom = null; reconnect = null; setHint();
+  view = v; selected = null; closeDetail(); closeEdgeMenu(); linkFrom = null; reconnect = null;
+  if (linkMode) setLinkMode(false);
+  setHint();
   for (const t of ["project", "hive", "channel"]) {
     const b = document.getElementById("tab-" + t);
     b.classList.toggle("on", v === t);
     b.setAttribute("aria-selected", String(v === t));
   }
-  document.getElementById("proj").hidden = v !== "project";
-  document.getElementById("dock").hidden = v === "channel";
-  if (linkMode) setLinkMode(false);
-  const graph = v === "project" || v === "hive";
+  const graph = v !== "channel";
+  document.getElementById("proj").hidden = v !== "project";      // the hive spans every project
+  document.getElementById("dock").hidden = !graph;               // the dock acts on the canvas
+  document.getElementById("linkmode").hidden = v !== "project";  // hand-drawn links are a project overlay
   document.getElementById("channel").classList.toggle("show", v === "channel");
-  for (const id of ["proj", "add", "sem", "refit"]) document.getElementById(id).style.display = graph ? "" : "none";
-  document.getElementById("linkmode").style.display = v === "project" ? "" : "none";
   document.getElementById("legend").style.display = graph ? "" : "none";
   document.getElementById("hint").style.display = graph ? "" : "none";
   if (v === "channel") loadChannel(); else load();
