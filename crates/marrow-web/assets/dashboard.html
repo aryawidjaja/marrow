@@ -8,7 +8,7 @@
 <style>
   :root {
     --bg: #0d0f14; --panel: #151922; --panel2: #1b2029; --line: #262b36;
-    --text: #e6e9ef; --muted: #8b93a4; --accent: #6ea8fe; --gold: #f5c518;
+    --text: #e6e9ef; --muted: #8b93a4; --accent: #ffde59; --gold: #ffde59;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
@@ -24,7 +24,7 @@
   button, .seg { background: var(--panel); color: var(--text); border: 1px solid var(--line);
     padding: 6px 11px; border-radius: 7px; cursor: pointer; font-size: 12px; }
   button:hover { border-color: #3a4152; }
-  button.on { background: var(--accent); border-color: var(--accent); color: #06101f; font-weight: 600; }
+  button.on { background: var(--accent); border-color: var(--accent); color: #0d0f14; font-weight: 600; }
   /* Segmented control: one recessed track, the active tab raised out of it. */
   .seg { display: inline-flex; gap: 2px; padding: 3px; background: var(--panel2);
     border: 1px solid var(--line); border-radius: 9px; overflow: visible; }
@@ -71,7 +71,7 @@
   .danger { color: #ff6b6b; }
   .pill { font-size: 10px; padding: 1px 7px; border-radius: 9px; background: var(--panel2);
     color: var(--muted); border: 1px solid var(--line); vertical-align: middle; }
-  .pill.on { background: rgba(110,168,254,.14); color: var(--accent); border-color: transparent; }
+  .pill.on { background: rgba(255,222,89,.14); color: var(--accent); border-color: transparent; }
   .sharebox:empty { display: none; }
   .sharebox { padding: 2px 0 8px; }
   .sharegrid { display: flex; flex-direction: column; gap: 6px; }
@@ -95,7 +95,7 @@
   .tnode.folder { font-weight: 600; color: var(--text); }
   .tnode.leaf { color: var(--muted); font-weight: 400; }
   .tnode.leaf:hover { color: var(--text); }
-  .tnode.leaf.sel { background: rgba(110,168,254,.16); color: var(--text); }
+  .tnode.leaf.sel { background: rgba(255,222,89,.16); color: var(--text); }
   .tnode .dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
   .tnode .pad { width: 12px; flex: 0 0 auto; }
   /* Indent guide, so nesting is legible at a glance. */
@@ -130,7 +130,7 @@
   .hint { position: absolute; left: 12px; top: 12px; color: var(--muted); font-size: 11px;
     background: rgba(21,25,34,.7); padding: 4px 9px; border-radius: 7px; }
   #toast { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%);
-    background: var(--accent); color: #06101f; font-weight: 600; padding: 7px 14px; border-radius: 8px;
+    background: var(--accent); color: #0d0f14; font-weight: 600; padding: 7px 14px; border-radius: 8px;
     font-size: 12px; opacity: 0; transition: opacity .2s; pointer-events: none; }
   #toast.show { opacity: 1; }
   .tip { position: absolute; pointer-events: none; background: #0b0e13; border: 1px solid var(--line);
@@ -191,27 +191,26 @@
 <div id="modal"><div class="modal-card"></div></div>
 <script>
 const palette = ["#6ea8fe","#46d39a","#ff8f5d","#c77dff","#ffd166","#4cc9f0","#f072b6","#90be6d","#e56b6f","#7bdff2"];
-const kindColor = { decision:"#6ea8fe", fact:"#46d39a", entity:"#c77dff", session:"#ffd166", skill:"#ff8f5d", project:"#8b93a4", core:"#f5c518" };
+const kindColor = { decision:"#6ea8fe", fact:"#46d39a", entity:"#c77dff", session:"#ffd166", skill:"#ff8f5d", project:"#8b93a4", core:"#ffde59" };
 // Edge types are real relationships, each its own colour so the graph is legible.
 const edgeStyle = {
   ref:      { color: "rgba(255,120,90,0.65)",  label: "explicit link" },
   topic:    { color: "rgba(110,168,254,0.30)", label: "shared topic" },
   tag:      { color: "rgba(70,211,154,0.32)",  label: "shared tag" },
   semantic: { color: "rgba(199,125,255,0.45)", label: "related meaning" },
-  user:     { color: "rgba(245,197,24,0.65)",  label: "you linked" },
-  hub:      { color: "rgba(245,197,24,0.30)",  label: "core ↔ project" },
+  user:     { color: "rgba(255,222,89,0.70)",  label: "you linked" },
+  hub:      { color: "rgba(255,222,89,0.32)",  label: "core ↔ project" },
   cluster:  { color: "rgba(120,130,150,0.28)", label: "project → area" },
   area:     { color: "rgba(140,150,170,0.22)", label: "in area" },
 };
 const colorMap = {};
 function colorFor(v, node) {
-  if (node.kind === "core") return "#f5c518";
+  if (node.kind === "core") return "#ffde59";
   if (node.kind === "project") return "#8b93a4";
   if (!node.group) return "#6b7280";                    // unfiled: deliberately drab
   if (!(node.group in colorMap)) colorMap[node.group] = palette[Object.keys(colorMap).length % palette.length];
   return colorMap[node.group];
 }
-const groupLabel = g => g || "unfiled";
 
 let view = "project", raw = { nodes: [], links: [] }, nodes = [], links = [], byId = {};
 let filter = "", selected = null, linkMode = false, linkFrom = null, heat = 1, showSemantic = true;
@@ -324,12 +323,7 @@ function groupRingRadius(count) { return count <= 1 ? 0 : Math.max(380, 150 * co
 
 function buildLegend() {
   const el = document.getElementById("legend");
-  const dot = (c, label) => `<div class="li"><span class="dot" style="background:${c}"></span>${label}</div>`;
   const edge = (c, label) => `<div class="li"><span class="edge" style="background:${c}"></span>${label}</div>`;
-
-  const groupsOf = [...new Set(nodes.map(n => n.group))].filter(g => g !== "core");
-  let neurons = (view === "hive" ? dot("#f5c518", "core (you)") : "") +
-    groupsOf.map(g => dot(colorFor(view, { group: g, kind: "x" }), groupLabel(g))).join("");
 
   const present = new Set(links.map(l => l.rel));
   const conns = ["area", "ref", "topic", "tag", "semantic", "hub", "cluster", "user"]
@@ -343,9 +337,8 @@ function buildLegend() {
     : "Every neuron is a memory, grouped into the <b>area</b> of the project it belongs to (auth, billing, infra…) — the agent files each memory into an area as it saves it. Links connect memories that share a <b>topic</b>, a <b>tag</b>, or related <b>meaning</b>. Grey <i>unfiled</i> neurons have no area yet; they're still fully searchable. Draw your own link with the <b>Link</b> button.";
 
   el.innerHTML =
-    `<div class="lg-head">Neurons<span class="lg-help" id="lg-toggle">ⓘ how it works</span></div>` +
-    neurons +
-    `<div class="lg-sub">Connections</div>` + conns +
+    `<div class="lg-head">Connections<span class="lg-help" id="lg-toggle">ⓘ how it works</span></div>` +
+    conns +
     `<div class="lg-note" id="lg-note">${how}</div>`;
   document.getElementById("lg-toggle").onclick = () =>
     document.getElementById("lg-note").classList.toggle("show");
@@ -507,7 +500,7 @@ function draw() {
     // Select a neuron and everything but its own links fades away, so you read one thing at a time
     // instead of a web. Otherwise links are faint and thin so crossings don't shout.
     ctx.globalAlpha = active ? 0.95 : (selected ? 0.05 : 0.4);
-    ctx.strokeStyle = active ? "rgba(150,180,255,.95)" : (edgeStyle[l.rel]?.color || "rgba(120,130,150,.5)");
+    ctx.strokeStyle = active ? "rgba(255,222,89,.95)" : (edgeStyle[l.rel]?.color || "rgba(120,130,150,.5)");
     ctx.lineWidth = (l.rel === "user" ? 1.4 : active ? 1.5 : 0.7) / T.k;
     // Bow each link slightly so overlapping links read as separate strands, not one straight tangle.
     const dx = l.t.x - l.s.x, dy = l.t.y - l.s.y;
