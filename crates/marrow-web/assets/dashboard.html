@@ -156,9 +156,62 @@
   #detail .more { background: none; border: 0; color: var(--accent); cursor: pointer; padding: 3px 0; font-size: 12px; }
   #detail .meta { margin-top: 10px; color: var(--muted); font-size: 11px; }
   #detail .x { position: absolute; top: 8px; right: 10px; color: var(--muted); cursor: pointer; }
+  /* What the agents are doing, right now. */
+  .live { position: absolute; right: 12px; bottom: 12px; width: 268px; z-index: 12;
+    background: rgba(21,25,34,.92); backdrop-filter: blur(12px);
+    border: 1px solid var(--line); border-radius: 11px; padding: 10px 11px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.45); font-size: 11px; }
+  .live[hidden] { display: none; }
+  .live-head { display: flex; align-items: center; gap: 7px; font-weight: 600; color: var(--text);
+    font-size: 11px; margin-bottom: 8px; }
+  .live.collapsed { padding: 8px 11px; }
+  .live.collapsed .live-head { margin-bottom: 0; }
+  .live.collapsed .live-rows { display: none; }
+  .live-x { margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; padding: 0; border: 0; background: none; color: var(--muted);
+    border-radius: 5px; cursor: pointer; transition: background .14s ease, color .14s ease; }
+  .live-x:hover { background: var(--panel2); color: var(--text); }
+  .live-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .live-x svg { width: 14px; height: 14px; transition: transform .2s ease; }
+  .live.collapsed .live-x svg { transform: rotate(180deg); }
+  .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
+    box-shadow: 0 0 0 0 rgba(255,222,89,.6); animation: livepulse 2s ease-out infinite; }
+  @keyframes livepulse {
+    0%   { box-shadow: 0 0 0 0 rgba(255,222,89,.55); }
+    70%  { box-shadow: 0 0 0 7px rgba(255,222,89,0); }
+    100% { box-shadow: 0 0 0 0 rgba(255,222,89,0); }
+  }
+  .live-row { display: flex; gap: 7px; padding: 4px 0; color: var(--muted); line-height: 1.35;
+    border-top: 1px solid rgba(255,255,255,.04); animation: livein .35s ease; }
+  .live-row:first-child { border-top: 0; }
+  @keyframes livein { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+  .live-row .who { color: var(--accent); font-weight: 600; white-space: nowrap; }
+  .live-row .what { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+  .live-row .when { color: var(--muted); font-size: 10px; white-space: nowrap; }
+  .live-row.nofade { animation: none; }
+  .live-row.jump { cursor: pointer; border-radius: 5px; margin: 0 -4px; padding-left: 4px; padding-right: 4px;
+    transition: background .14s ease; }
+  .live-row.jump:hover { background: var(--panel2); }
+  .live-row.jump:hover .what { color: var(--accent); }
+  @media (prefers-reduced-motion: reduce) {
+    .live-dot { animation: none; } .live-row { animation: none; }
+  }
   .legend { position: absolute; left: 12px; bottom: 12px; background: rgba(21,25,34,.9);
     border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 11px; width: 232px; }
-  .legend .li { display: flex; align-items: center; gap: 8px; padding: 2px 0; color: var(--muted); }
+  .legend .li { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 6px;
+    margin: 0 -6px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 11px;
+    text-align: left; border-radius: 6px; cursor: pointer;
+    transition: background .14s ease, opacity .14s ease; }
+  .legend .li:hover { background: var(--panel2); color: var(--text); }
+  .legend .li:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .legend .li.off { opacity: .35; }
+  .legend .li.solo { background: rgba(255,222,89,.12); color: var(--text); }
+  .legend .lg-label { flex: 1; }
+  .legend .lg-count { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 10px; }
+  .legend .lg-reset { width: 100%; margin-top: 6px; padding: 5px 6px; border: 0; border-radius: 6px;
+    background: var(--panel2); color: var(--accent); font: inherit; font-size: 11px; font-weight: 600;
+    cursor: pointer; transition: background .14s ease; }
+  .legend .lg-reset:hover { background: #232936; }
   .legend .lg-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
     color: var(--text); font-weight: 600; margin-bottom: 5px; }
   .legend .lg-help { color: var(--accent); cursor: pointer; font-weight: 400; font-size: 10px; white-space: nowrap; }
@@ -216,6 +269,10 @@
     <canvas id="c"></canvas>
     <div class="hint" id="hint">drag to pan · scroll to zoom · drag a neuron · click a link to edit it</div>
     <div class="legend" id="legend"></div>
+    <div class="live" id="live" hidden>
+      <div class="live-head"><span class="live-dot"></span>Live<button class="live-x" id="live-x" aria-expanded="true" aria-label="Collapse activity" title="Collapse"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg></button></div>
+      <div class="live-rows" id="live-rows"></div>
+    </div>
     <div id="detail"></div>
     <div class="tip" id="tip"></div>
     <div id="channel"></div>
@@ -244,17 +301,23 @@ const edgeStyle = {
   area:     { color: "rgba(140,150,170,0.22)", label: "in area" },
 };
 const colorMap = {};
+// Zoomed out you need to tell PROJECTS apart; zoomed in, AREAS. Same neurons, different question.
+function groupKey(n) { return (unified && view === "project") ? (n.area || "") : n.group; }
 function colorFor(v, node) {
   if (node.kind === "core") return "#ffde59";
   if (node.kind === "project") return "#8b93a4";
-  if (!node.group) return "#6b7280";                    // unfiled: deliberately drab
-  if (!(node.group in colorMap)) colorMap[node.group] = palette[Object.keys(colorMap).length % palette.length];
-  return colorMap[node.group];
+  const g = groupKey(node);
+  if (!g) return "#6b7280";                             // unfiled: deliberately drab
+  if (!(g in colorMap)) colorMap[g] = palette[Object.keys(colorMap).length % palette.length];
+  return colorMap[g];
 }
-
-let view = "project", raw = { nodes: [], links: [] }, nodes = [], links = [], byId = {};
+// Where you were is part of the state: a refresh should not throw you back to the start.
+const saved = (() => { try { return JSON.parse(localStorage.getItem("marrow.view") || "{}"); } catch { return {}; } })();
+let view = ["project", "hive", "channel"].includes(saved.view) ? saved.view : "project";
+let raw = { nodes: [], links: [] }, nodes = [], links = [], byId = {};
 let filter = "", selected = null, linkMode = false, linkFrom = null, heat = 1;
-let project = "", projects = [];
+let edgeFilter = null;   // isolate one connection type from the legend; null shows them all
+let project = typeof saved.project === "string" ? saved.project : "", projects = [];
 const pq = (lead) => project ? (lead || "?") + "project=" + encodeURIComponent(project) : "";
 const cv = document.getElementById("c"), ctx = cv.getContext("2d");
 let mouseWorld = null;
@@ -266,21 +329,107 @@ async function loadProjects() {
   const sel = document.getElementById("proj");
   sel.innerHTML = projects.map(p => `<option value="${esc(p.project)}">${esc(p.name)}</option>`).join("")
     + `<option value="core">core (you)</option>`;
-  if (!projects.some(p => p.project === project) && project !== "core") project = projects[0] ? projects[0].project : "";
+  if (!projects.some(p => p.project === project) && project !== "core") {
+    project = projects[0] ? projects[0].project : "";
+    rememberView();
+  }
   sel.value = project;
 }
 
-async function load() {
-  const url = view === "project" ? "/api/graph" + pq() : "/api/hive";
-  raw = await (await fetch(url)).json();
-  for (const k in colorMap) delete colorMap[k];
+let unified = false;   // the hive has real projects, so Project view is just a zoom into one
+// The scene is the hive whenever there IS a hive. Layout and forces key off this, never off `view` —
+// otherwise zooming into a project silently re-scatters the neurons you were just looking at.
+const hiveScene = () => unified || view === "hive";
+
+async function load(opts = {}) {
+  // ONE SCENE. Fetch the whole hive; "project" is not a different graph, it's the camera flown into
+  // one cluster. That is what makes the transition a zoom instead of a page swap. A lone project with
+  // no hive registered has nothing to zoom out to, so it falls back to its own graph.
+  let data = await (await fetch("/api/hive")).json();
+  unified = data.nodes.some(n => n.kind === "project");
+  if (!unified) data = await (await fetch("/api/graph" + pq())).json();
+  raw = data;
+  // A LIVE refresh must not throw the layout away. Every neuron you already had keeps its exact
+  // position; only newcomers get placed. Otherwise the graph explodes each time an agent writes.
+  const prev = opts.keep ? byId : null;
+  const prevLinks = prev ? new Set(links.map(linkKey)) : null;
+  if (!prev) for (const k in colorMap) delete colorMap[k];
   byId = {};
-  nodes = raw.nodes.map(n => ({ ...n, x: (Math.random()-.5)*600, y: (Math.random()-.5)*600, vx: 0, vy: 0 }));
+  nodes = raw.nodes.map(n => {
+    const was = prev && prev[n.id];
+    return was
+      ? { ...n, x: was.x, y: was.y, vx: was.vx, vy: was.vy, pin: was.pin, placed: true }
+      : { ...n, x: (Math.random()-.5)*600, y: (Math.random()-.5)*600, vx: 0, vy: 0, isNew: !!prev };
+  });
   nodes.forEach(n => byId[n.id] = n);
   links = raw.links.filter(l => byId[l.source] && byId[l.target]).map(l => ({ ...l, s: byId[l.source], t: byId[l.target] }));
-  assignAnchors();
+  assignAnchors(!!prev);
   detectCommunities();
-  buildTree(); buildLegend(); fit(); heat = 1;
+
+  if (prev) {
+    // Real events, real motion: every genuinely new connection fires a signal down the wire, and
+    // every new memory flares as it arrives.
+    for (const l of links) if (!prevLinks.has(linkKey(l))) fire(l);
+    for (const n of nodes) if (n.isNew) flash(n);
+    heat = Math.max(heat, 0.3);   // settle the newcomers without shaking everything else loose
+  } else {
+    heat = 1;
+  }
+  buildTree(); buildLegend();
+  if (!prev) flyToView(0);
+  invalidate();
+}
+const linkKey = l => `${l.source}|${l.target}|${l.rel}`;
+
+// ---------- camera ----------
+let cam = null;
+function frameOf(list, pad = 110) {
+  if (!list.length) return null;
+  const xs = list.map(n => n.x), ys = list.map(n => n.y);
+  const minx = Math.min(...xs), maxx = Math.max(...xs), miny = Math.min(...ys), maxy = Math.max(...ys);
+  const w = cv.clientWidth, h = cv.clientHeight;
+  let k = Math.min(2.2, 0.92 * Math.min(w / (maxx - minx + pad * 2), h / (maxy - miny + pad * 2)));
+  if (!isFinite(k) || k <= 0) k = 1;
+  return { k, x: w/2 - (minx + maxx)/2 * k, y: h/2 - (miny + maxy)/2 * k };
+}
+// Fly, don't cut. The zoom IS the story: you are moving through one brain, not swapping pages.
+function flyTo(to, ms = 780) {
+  if (!to) return;
+  if (ms <= 0) { T.k = to.k; T.x = to.x; T.y = to.y; invalidate(); return; }
+  cam = { from: { ...T }, to, t0: now(), ms };
+  invalidate();
+}
+function stepCamera() {
+  if (!cam) return;
+  const p = Math.min(1, (now() - cam.t0) / cam.ms);
+  const e = p < .5 ? 4*p*p*p : 1 - Math.pow(-2*p + 2, 3) / 2;   // easeInOutCubic
+  T.k = cam.from.k + (cam.to.k - cam.from.k) * e;
+  T.x = cam.from.x + (cam.to.x - cam.from.x) * e;
+  T.y = cam.from.y + (cam.to.y - cam.from.y) * e;
+  if (p >= 1) cam = null;
+  invalidate();
+}
+// The neurons the camera should frame: one project when zoomed in, the whole hive when zoomed out.
+function inFocus(n) { return !unified || view !== "project" || !project || n.kind === "core" || n.group === project; }
+function focusNodes() { return unified && view === "project" && project ? nodes.filter(n => n.group === project) : nodes; }
+function flyToView(ms) { flyTo(frameOf(focusNodes()), ms === undefined ? 780 : ms); }
+function frameOn(n, k) {
+  const w = cv.clientWidth, h = cv.clientHeight;
+  const z = k || Math.max(T.k, 1.5);
+  return { k: z, x: w/2 - n.x*z, y: h/2 - n.y*z };
+}
+// Jump to a memory from the activity feed, whichever view you're in.
+function jumpToMemory(memId, proj) {
+  const n = nodes.find(x => x.id === memId || x.id.endsWith("#" + memId));
+  if (!n) { toast("that memory is not in this view"); return; }
+  if (unified && view === "project" && n.group !== project) {
+    project = n.group;
+    document.getElementById("proj").value = project;
+    rememberView(); buildTree(); buildLegend();
+  }
+  select(n);
+  flash(n);
+  flyTo(frameOn(n, Math.max(T.k, 1.6)));
 }
 
 // In hive view, give each project its own region on a ring around the core so clusters separate
@@ -289,7 +438,7 @@ async function load() {
 // Both views cluster on `group`: in the hive that's the project, in a project it's the feature
 // AREA. Each group gets its own region on a ring, and its neurons are held inside it. The structure
 // is real (the agent filed each memory into an area), so the layout can show it instead of guessing.
-function assignAnchors() {
+function assignAnchors(keep) {
   // Every group gets a home, including "core" (the shared core store's own memories), which sits at
   // the origin rather than on the ring. A group with no anchor yields NaN coordinates.
   const groups = [...new Set(nodes.map(n => n.group))];
@@ -305,8 +454,8 @@ function assignAnchors() {
     gaCount[k] = (gaCount[k] || 0) + 1;
   }
 
-  if (view !== "hive") {
-    // Project view: the groups ARE the areas. One ring, one pocket each.
+  if (!hiveScene()) {
+    // Lone project, no hive to nest inside: the groups ARE the areas. One ring, one pocket each.
     const R = groupRingRadius(ringGroups.length);
     const ang = {};
     ringGroups.forEach((g, i) => ang[g] = (i / Math.max(1, ringGroups.length)) * Math.PI * 2);
@@ -315,8 +464,7 @@ function assignAnchors() {
       n.ax = a === undefined ? 0 : Math.cos(a) * R;
       n.ay = a === undefined ? 0 : Math.sin(a) * R;
       n.rmax = groupRadius(gCount[n.group] || 1);
-      n.x = n.ax + (Math.random() - .5) * 90;
-      n.y = n.ay + (Math.random() - .5) * 90;
+      if (!keep || !n.placed) { n.x = n.ax + (Math.random() - .5) * 90; n.y = n.ay + (Math.random() - .5) * 90; n.placed = true; }
     }
     return;
   }
@@ -358,8 +506,7 @@ function assignAnchors() {
         n.rmax = pk ? pk.r : 60;
       }
     }
-    n.x = n.ax + (Math.random() - .5) * 70;
-    n.y = n.ay + (Math.random() - .5) * 70;
+    if (!keep || !n.placed) { n.x = n.ax + (Math.random() - .5) * 70; n.y = n.ay + (Math.random() - .5) * 70; n.placed = true; }
   }
 }
 // Room an area needs for n memories, and how far out to place a ring of groups.
@@ -369,25 +516,48 @@ function groupRingRadius(count) { return count <= 1 ? 0 : Math.max(380, 150 * co
 
 function buildLegend() {
   const el = document.getElementById("legend");
-  const edge = (c, label) => `<div class="li"><span class="edge" style="background:${c}"></span>${label}</div>`;
+  const order = ["area", "ref", "topic", "tag", "semantic", "hub", "cluster", "user"];
+  const count = {};
+  for (const l of links) count[l.rel] = (count[l.rel] || 0) + 1;
+  const kinds = order.filter(r => count[r] && !(hiveScene() && r === "cluster"));
 
-  const present = new Set(links.map(l => l.rel));
-  const conns = ["area", "ref", "topic", "tag", "semantic", "hub", "cluster", "user"]
-    .filter(r => present.has(r) && !(view === "hive" && r === "cluster")).map(r => {
+  const row = r => {
     const label = r === "tag" && view === "hive" ? "shared tag (bridge)" : edgeStyle[r].label;
-    return edge(edgeStyle[r].color, label);
-  }).join("");
+    const on = !edgeFilter || edgeFilter === r;
+    return `<button class="li${on ? "" : " off"}${edgeFilter === r ? " solo" : ""}" data-rel="${r}"
+      aria-pressed="${edgeFilter === r}" title="Show only these">
+      <span class="edge" style="background:${edgeStyle[r].color}"></span>
+      <span class="lg-label">${esc(label)}</span>
+      <span class="lg-count">${count[r]}</span>
+    </button>`;
+  };
 
   const how = view === "hive"
-    ? "Every neuron is a memory, grouped into the <b>project</b> it belongs to. Links are real, not random: memories connect when they share a <b>topic</b>, a <b>tag</b>, or related <b>meaning</b>, and two projects bridge when they share something specific. Bigger neuron = more connections."
-    : "Every neuron is a memory, grouped into the <b>area</b> of the project it belongs to (auth, billing, infra…) — the agent files each memory into an area as it saves it. Links connect memories that share a <b>topic</b>, a <b>tag</b>, or related <b>meaning</b>. Grey <i>unfiled</i> neurons have no area yet; they're still fully searchable. Draw your own link with the <b>Link</b> button.";
+    ? "Every neuron is a memory, grouped into the <b>project</b> it belongs to. Links are real, not random: memories connect when they share a <b>topic</b>, a <b>tag</b>, or related <b>meaning</b>, and two projects bridge when they share something specific."
+    : "Every neuron is a memory, grouped into the <b>area</b> of the project it belongs to (auth, billing, infra). Links connect memories that share a <b>topic</b>, a <b>tag</b>, or related <b>meaning</b>. Grey <i>unfiled</i> neurons have no area yet; they are still fully searchable.";
 
   el.innerHTML =
     `<div class="lg-head">Connections<span class="lg-help" id="lg-toggle">ⓘ how it works</span></div>` +
-    conns +
+    kinds.map(row).join("") +
+    (edgeFilter ? `<button class="lg-reset" id="lg-all">Show all connections</button>` : "") +
     `<div class="lg-note" id="lg-note">${how}</div>`;
+
   document.getElementById("lg-toggle").onclick = () =>
     document.getElementById("lg-note").classList.toggle("show");
+  const reset = document.getElementById("lg-all");
+  if (reset) reset.onclick = () => setEdgeFilter(null);
+  for (const b of el.querySelectorAll(".li")) {
+    // Click a type to isolate it; click it again to come back to everything.
+    b.onclick = () => setEdgeFilter(edgeFilter === b.dataset.rel ? null : b.dataset.rel);
+  }
+}
+
+function setEdgeFilter(rel) {
+  edgeFilter = rel;
+  selectedEdge = null;
+  closeEdgeMenu();
+  buildLegend();
+  invalidate();
 }
 
 function buildTree() {
@@ -420,9 +590,13 @@ function buildTree() {
       t.append(row, kids);
     }
   } else {
-    // area > memory
+    // area > memory (only the project we're framed on)
     const byArea = {};
-    for (const n of memories) (byArea[n.group || ""] = byArea[n.group || ""] || []).push(n);
+    for (const n of memories) {
+      if (!inFocus(n) || n.kind === "core") continue;
+      const a = unified ? (n.area || "") : (n.group || "");
+      (byArea[a] = byArea[a] || []).push(n);
+    }
     for (const a of sortAreas(Object.keys(byArea))) {
       const ms = byArea[a];
       const row = folderRow(areaName(a), ms.length, colorFor(view, { group: a, kind: "x" }));
@@ -481,7 +655,7 @@ function tick() {
   //  - a gentle pull toward each community's centre separates the sub-clusters into their own bubbles;
   //  - every neuron is kept inside its project's region (hive) or the canvas (project) by a hard clamp,
   //    so lone, link-less neurons stay home instead of scattering.
-  const rep = view === "project" ? 2800 : 2000;
+  const rep = hiveScene() ? 2000 : 2800;
   for (let i = 0; i < nodes.length; i++) {
     const a = nodes[i];
     for (let j = i+1; j < nodes.length; j++) {
@@ -539,16 +713,27 @@ function draw() {
   const w = cv.width = cv.clientWidth * devicePixelRatio, h = cv.height = cv.clientHeight * devicePixelRatio;
   ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,w,h);
   ctx.setTransform(T.k*devicePixelRatio,0,0,T.k*devicePixelRatio, T.x*devicePixelRatio, T.y*devicePixelRatio);
+  // Focus is expressed by CONTRAST, not decoration. Whatever you picked keeps its own colour at full
+  // strength; everything else recedes. No rings, no fattened lines — those read as clutter, and they
+  // fight the graph instead of clarifying it.
+  // The rest of the hive doesn't vanish when you zoom into a project, it recedes — so you always
+  // know you're inside one brain. Ease it so the fade rides along with the camera.
+  const want = (unified && view === "project" && project) ? 0.07 : 1;
+  if (Math.abs(rest - want) > 0.002) { rest += (want - rest) * 0.12; invalidate(); } else rest = want;
+
   const nb = neighbors(selected);
-  // Selecting a neuron OR a link fades everything else, so you read one thing at a time. A selected
-  // link also lights up the two neurons it joins — otherwise you can't tell which link you hit.
   const ends = selectedEdge ? [selectedEdge.s, selectedEdge.t] : null;
+  const focused = !!(selected || selectedEdge);
+  const touched = edgeFilter ? new Set(links.filter(linkShown).flatMap(l => [l.s, l.t])) : null;
   for (const l of links) {
-    const picked = l === selectedEdge;
-    const active = !selectedEdge && selected && (l.s === selected || l.t === selected);
-    ctx.globalAlpha = picked ? 1 : (selectedEdge || selected) ? 0.05 : (active ? 0.95 : 0.4);
-    ctx.strokeStyle = picked || active ? "rgba(255,222,89,.98)" : (edgeStyle[l.rel]?.color || "rgba(120,130,150,.5)");
-    ctx.lineWidth = (picked ? 3 : l.rel === "user" ? 1.4 : active ? 1.5 : 0.7) / T.k;
+    if (!linkShown(l)) continue;
+    // A link is lit when it IS the pick, or when it hangs off the picked neuron.
+    const lit = selectedEdge
+      ? l === selectedEdge
+      : selected && (l.s === selected || l.t === selected);
+    ctx.globalAlpha = (lit ? 1 : focused ? 0.06 : 0.38) * (inFocus(l.s) && inFocus(l.t) ? 1 : rest);
+    ctx.strokeStyle = edgeStyle[l.rel]?.color || "rgba(120,130,150,.5)";
+    ctx.lineWidth = (lit ? 1.7 : l.rel === "user" ? 1.3 : 0.7) / T.k;
     // Bow each link slightly so overlapping links read as separate strands, not one straight tangle.
     const c = bow(l);
     ctx.beginPath(); ctx.moveTo(l.s.x, l.s.y); ctx.quadraticCurveTo(c.x, c.y, l.t.x, l.t.y); ctx.stroke();
@@ -564,21 +749,25 @@ function draw() {
   }
   for (const n of nodes) {
     const r = radius(n);
-    const onEdge = ends && (n === ends[0] || n === ends[1]);
-    const dim = (filter && !match(n)) ||
-      (ends ? !onEdge : (selected && n !== selected && !nb.has(n)));
-    ctx.globalAlpha = dim ? 0.15 : 1;
+    const lit = ends
+      ? (n === ends[0] || n === ends[1])
+      : (!selected || n === selected || nb.has(n)) && (!touched || touched.has(n));
+    const hidden = filter && !match(n);
+    ctx.globalAlpha = (hidden ? 0.08 : lit ? 1 : 0.1) * (inFocus(n) ? 1 : rest);
     ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, 7);
     ctx.fillStyle = colorFor(view, n); ctx.fill();
-    if (onEdge) { ctx.lineWidth = 2.5/T.k; ctx.strokeStyle = "#ffde59"; ctx.stroke(); }
-    else if (n === selected || n === linkFrom) { ctx.lineWidth = 2/T.k; ctx.strokeStyle = "#fff"; ctx.stroke(); }
-    if (r*T.k > 9) {
-      ctx.globalAlpha = dim ? 0.2 : 0.9; ctx.fillStyle = "#cdd3df";
+    if (n === linkFrom) { ctx.lineWidth = 2/T.k; ctx.strokeStyle = "#ffde59"; ctx.stroke(); }
+    // Name what is in focus. When something is picked, only its own cluster is worth reading.
+    const named = (focused ? lit : r * T.k > 9) && inFocus(n);
+    if (named && !hidden) {
+      ctx.globalAlpha = lit ? 0.95 : 0.35;
+      ctx.fillStyle = "#cdd3df";
       ctx.font = `${11/T.k}px -apple-system,Segoe UI,sans-serif`;
-      ctx.fillText((n.label||"").slice(0,22), n.x + r + 3/T.k, n.y + 3/T.k);
+      ctx.fillText((n.label||"").slice(0,24), n.x + r + 4/T.k, n.y + 3.5/T.k);
     }
   }
   ctx.globalAlpha = 1;
+  drawSignals();   // signals ride on top of everything
 }
 
 // Communities of densely-connected neurons (label propagation over content links only, ignoring the
@@ -604,9 +793,71 @@ function detectCommunities() {
   }
 }
 
-function radius(n) { return n.kind === "core" ? 8 : n.kind === "project" ? 6 : n.kind === "area" ? 7 : 2.4 + Math.min(3.6, n.degree*0.45); }
-function neighbors(n) { const s = new Set(); if (!n) return s; for (const l of links) { if (l.s===n) s.add(l.t); if (l.t===n) s.add(l.s); } return s; }
+function radius(n) { return n.kind === "core" ? 6.5 : n.kind === "project" ? 5.5 : n.kind === "area" ? 5.5 : 2 + Math.min(2.6, n.degree * 0.3); }
+// Filtering from the legend hides links everywhere at once: what you see, what you can click, and
+// what counts as a neighbour. Otherwise you could select a link that isn't drawn.
+function linkShown(l) { return !edgeFilter || l.rel === edgeFilter; }
+function neighbors(n) { const s = new Set(); if (!n) return s; for (const l of links) { if (!linkShown(l)) continue; if (l.s===n) s.add(l.t); if (l.t===n) s.add(l.s); } return s; }
 function match(n) { return (n.label||"").toLowerCase().includes(filter) || (n.snippet||"").toLowerCase().includes(filter); }
+// A signal travelling a wire, and a neuron firing when it lands. These play only on REAL events —
+// a memory an agent wrote, a link that appeared — so motion always means something happened.
+const now = () => performance.now();
+const signals = [];   // { l, t0 }  an action potential running source -> target
+const flares = [];    // { n, t0 }  a neuron firing
+const SIGNAL_MS = 1100, FLARE_MS = 1500;
+function fire(l) { signals.push({ l, t0: now() }); invalidate(); }
+function flash(n) { flares.push({ n, t0: now() }); invalidate(); }
+// Position along the link's curve, using the same control point we draw and click with.
+function alongCurve(l, t) {
+  const c = bow(l), u = 1 - t;
+  return {
+    x: u*u*l.s.x + 2*u*t*c.x + t*t*l.t.x,
+    y: u*u*l.s.y + 2*u*t*c.y + t*t*l.t.y,
+  };
+}
+function drawSignals() {
+  const t = now();
+  for (let i = signals.length - 1; i >= 0; i--) {
+    const s = signals[i];
+    const p = (t - s.t0) / SIGNAL_MS;
+    if (p >= 1) { flash(s.l.t); signals.splice(i, 1); continue; }   // it arrives, the neuron fires
+    // Ease out, so it leaves fast and lands softly — like a real spike, not a constant-speed dot.
+    const e = 1 - Math.pow(1 - p, 2.2);
+    const at = alongCurve(s.l, e);
+    // A bright head with a soft halo, and a short comet tail behind it.
+    const tail = alongCurve(s.l, Math.max(0, e - 0.12));
+    const g = ctx.createLinearGradient(tail.x, tail.y, at.x, at.y);
+    g.addColorStop(0, "rgba(255,222,89,0)");
+    g.addColorStop(1, "rgba(255,222,89,.85)");
+    ctx.strokeStyle = g; ctx.lineWidth = 2.2 / T.k; ctx.globalAlpha = 1;
+    ctx.beginPath(); ctx.moveTo(tail.x, tail.y); ctx.lineTo(at.x, at.y); ctx.stroke();
+    ctx.globalAlpha = 0.28;
+    ctx.fillStyle = "#ffde59";
+    ctx.beginPath(); ctx.arc(at.x, at.y, 6 / T.k, 0, 7); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#fff8dc";
+    ctx.beginPath(); ctx.arc(at.x, at.y, 2.4 / T.k, 0, 7); ctx.fill();
+  }
+  for (let i = flares.length - 1; i >= 0; i--) {
+    const f = flares[i];
+    const p = (t - f.t0) / FLARE_MS;
+    if (p >= 1) { flares.splice(i, 1); continue; }
+    const r = radius(f.n);
+    // An expanding ring that fades: the neuron discharging.
+    ctx.globalAlpha = (1 - p) * 0.7;
+    ctx.strokeStyle = "#ffde59";
+    ctx.lineWidth = 1.8 / T.k;
+    ctx.beginPath(); ctx.arc(f.n.x, f.n.y, r + (18 * p) / T.k, 0, 7); ctx.stroke();
+    // ...and a warm core while it settles.
+    ctx.globalAlpha = (1 - p) * 0.5;
+    ctx.fillStyle = "#ffde59";
+    ctx.beginPath(); ctx.arc(f.n.x, f.n.y, r + 1, 0, 7); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  if (signals.length || flares.length) invalidate();
+}
+
+let rest = 1;   // how visible the rest of the hive is while a project is framed
 let dirty = true;
 const invalidate = () => { dirty = true; };
 // Delegated actions. Data lives in data-* attributes (inert), never interpolated into JS.
@@ -630,8 +881,12 @@ document.addEventListener("click", e => {
 });
 
 function loop() {
+  stepCamera();
   if (heat > 0) { tick(); dirty = true; }
-  if (dirty) { draw(); dirty = false; }
+  // Clear the flag BEFORE drawing. draw() is what runs the animations, and they ask for the next
+  // frame from inside it — clearing afterwards wiped that request, so every animation froze on its
+  // first frame.
+  if (dirty) { dirty = false; draw(); }
   requestAnimationFrame(loop);
 }
 
@@ -650,7 +905,11 @@ function screenToWorld(px, py) { return { x: (px - T.x)/T.k, y: (py - T.y)/T.k }
 function nodeAt(px, py) {
   const p = screenToWorld(px, py);
   let best = null, bd = 1e9;
-  for (const n of nodes) { const d = Math.hypot(n.x-p.x, n.y-p.y); if (d < radius(n)+6/T.k && d < bd) { bd = d; best = n; } }
+  for (const n of nodes) {
+    if (!inFocus(n)) continue;   // the rest of the hive is a ghost while a project is framed
+    const d = Math.hypot(n.x-p.x, n.y-p.y);
+    if (d < radius(n)+6/T.k && d < bd) { bd = d; best = n; }
+  }
   return best;
 }
 
@@ -664,9 +923,9 @@ async function select(n) {
   const nb = [...neighbors(n)].length;
   let body = n.snippet || "";
   const editable = view === "project" && !["core", "area", "project"].includes(n.kind);
-  const url = view === "project"
-    ? (n.kind !== "core" ? "/api/memory/" + encodeURIComponent(n.id) + pq() : null)
-    : (n.id.includes("#") ? `/api/hive/memory?project=${encodeURIComponent(n.group)}&id=${encodeURIComponent(n.id.split("#")[1])}` : null);
+  const url = n.id.includes("#")
+    ? `/api/hive/memory?project=${encodeURIComponent(n.group)}&id=${encodeURIComponent(n.id.split("#")[1])}`
+    : (["core", "area", "project"].includes(n.kind) ? null : "/api/memory/" + encodeURIComponent(n.id) + pq());
   if (url) {
     try { const full = await (await fetch(url)).json(); if (full && full.body) body = full.body; } catch {}
   }
@@ -697,7 +956,7 @@ async function toggleLink(a, b) {
   if (!ra || !rb) { toast("pick two memories"); return; }
   if (ra.project !== rb.project) { toast("a link has to stay inside one project"); return; }
   const existing = links.find(l => l.rel === "user" && ((l.s===a&&l.t===b) || (l.s===b&&l.t===a)));
-  await post(existing ? "unlink" : "link", ra.id, rb.id, ra.project);
+  if (!await post(existing ? "unlink" : "link", ra.id, rb.id, ra.project)) return;
   toast(existing ? "disconnected" : "connected");
   await load();
 }
@@ -760,7 +1019,9 @@ function distToCurve(px, py, l) {
 function edgeAt(px, py) {
   const p = screenToWorld(px, py); let best = null, bd = 8 / T.k;
   for (const l of links) {
-    if (view === "hive" && l.rel === "cluster") continue;
+    if (!linkShown(l)) continue;
+    if (!inFocus(l.s) || !inFocus(l.t)) continue;
+    if (hiveScene() && l.rel === "cluster") continue;
     if (!editableEdge(l)) continue;
     const d = distToCurve(p.x, p.y, l);
     if (d < bd) { bd = d; best = l; }
@@ -771,7 +1032,7 @@ function edgeAt(px, py) {
 // resolve which project owns it; hub neurons are not memories and can't be linked.
 function linkRef(n) {
   if (!n || ["core", "area", "project"].includes(n.kind)) return null;
-  if (view !== "hive") return { project: null, id: n.id };
+  if (!hiveScene()) return { project: null, id: n.id };
   const i = n.id.indexOf("#");
   return i < 0 ? null : { project: n.group, id: n.id.slice(i + 1) };
 }
@@ -781,14 +1042,23 @@ function editableEdge(l) {
   return a && b && a.project === b.project;
 }
 const enc = encodeURIComponent;
+// Returns true only if the write actually landed. Callers must not claim success on their own.
 async function post(kind, s, t, proj) {
   const scope = proj ? `&project=${enc(proj)}` : pq("&");
-  await fetch(`/api/${kind}?source=${enc(s)}&target=${enc(t)}` + scope, { method: "POST" });
+  try {
+    const r = await fetch(`/api/${kind}?source=${enc(s)}&target=${enc(t)}` + scope, { method: "POST" });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok || body.error) { toast(body.error || `couldn't ${kind} (${r.status})`); return false; }
+    return true;
+  } catch (e) {
+    toast("couldn't reach the server");
+    return false;
+  }
 }
 async function removeLink(l) {
   const a = linkRef(l.s), b = linkRef(l.t);
-  if (!a || !b || a.project !== b.project) { toast("that link can't be edited here"); return; }
-  await post(l.rel === "user" ? "unlink" : "hide", a.id, b.id, a.project);
+  if (!a || !b || a.project !== b.project) { toast("that link can't be edited here"); return false; }
+  return await post(l.rel === "user" ? "unlink" : "hide", a.id, b.id, a.project);
 }
 
 // A link opens the SAME panel a neuron does: what it is, which two memories it joins, what you can
@@ -821,7 +1091,7 @@ function closeEdgeMenu() {
   document.getElementById("detail").classList.remove("show");
   invalidate();
 }
-async function removeEdge() { const l = selectedEdge; closeEdgeMenu(); if (!l) return; await removeLink(l); toast("link removed"); await load(); }
+async function removeEdge() { const l = selectedEdge; closeEdgeMenu(); if (!l) return; if (!await removeLink(l)) return; toast("link removed"); await load(); }
 function insertBetween() { const l = selectedEdge; closeEdgeMenu(); if (!l) return; pendingInsert = { source: l.source, target: l.target, rel: l.rel }; memForm(null); }
 function startReconnect() { const l = selectedEdge; closeEdgeMenu(); if (!l) return; reconnect = { keep: l.source, drop: l.target, rel: l.rel }; setHint(); toast("click the memory to connect this end to"); }
 async function finishReconnect(n) {
@@ -871,7 +1141,7 @@ window.addEventListener("keydown", e => {
     case "ArrowDown": T.y -= step; break;
     case "+": case "=": zoomBy(1.15); break;
     case "-": case "_": zoomBy(0.87); break;
-    case "f": case "F": case "0": fit(); break;
+    case "f": case "F": case "0": flyToView(); break;
     case "h": case "H": setView("hive"); break;
     case "p": case "P": setView("project"); break;
     default: return;
@@ -912,9 +1182,12 @@ function drawLinkbar() {
     ? `<span class="step">2</span>Now click the neuron to connect it to — <b>${esc(linkFrom.label || linkFrom.id)}</b><kbd>Esc</kbd>to cancel`
     : `<span class="step">1</span>Click a neuron to start the link<kbd>Esc</kbd>to cancel`;
 }
-document.getElementById("refit").onclick = fit;
+document.getElementById("refit").onclick = () => flyToView();
+function rememberView() {
+  try { localStorage.setItem("marrow.view", JSON.stringify({ view, project })); } catch {}
+}
 function setView(v) {
-  view = v; selected = null; closeDetail(); closeEdgeMenu(); linkFrom = null; reconnect = null;
+  view = v; rememberView(); selected = null; edgeFilter = null; closeDetail(); closeEdgeMenu(); linkFrom = null; reconnect = null;
   if (linkMode) setLinkMode(false);
   setHint();
   for (const t of ["project", "hive", "channel"]) {
@@ -929,7 +1202,13 @@ function setView(v) {
   document.getElementById("channel").classList.toggle("show", v === "channel");
   document.getElementById("legend").style.display = graph ? "" : "none";
   document.getElementById("hint").style.display = graph ? "" : "none";
-  if (v === "channel") loadChannel(); else load();
+  if (v === "channel") { loadChannel(); return; }
+  // Same scene: if it's already loaded, just fly. Only fetch when we have nothing.
+  if (nodes.length && unified) {
+    for (const k in colorMap) delete colorMap[k];   // zoomed out we colour projects, zoomed in areas
+    buildTree(); buildLegend(); flyToView(); invalidate();
+  }
+  else load();
 }
 async function loadChannel() {
   const el = document.getElementById("channel");
@@ -950,7 +1229,12 @@ async function loadChannel() {
 document.getElementById("tab-project").onclick = () => setView("project");
 document.getElementById("tab-hive").onclick = () => setView("hive");
 document.getElementById("tab-channel").onclick = () => setView("channel");
-document.getElementById("proj").onchange = e => { project = e.target.value; if (view !== "project") setView("project"); else load(); };
+document.getElementById("proj").onchange = e => {
+  project = e.target.value; rememberView();
+  if (view !== "project") { setView("project"); return; }
+  if (unified) { for (const k in colorMap) delete colorMap[k]; buildTree(); buildLegend(); flyToView(); invalidate(); }
+  else load();
+};
 
 // modal + memory management
 function modal(html) { const m = document.getElementById("modal"); m.querySelector(".modal-card").innerHTML = html; m.classList.add("show"); }
@@ -1107,7 +1391,81 @@ function helpModal() {
 }
 document.getElementById("help").onclick = helpModal;
 
-loadProjects().then(load); loop();
+// LIVE. Poll a cheap fingerprint; only refetch the graph when something actually changed. Agents
+// write memories while you watch, so the brain should show it happening rather than going stale.
+let rev = null, livePaused = false;
+const VERBS = { write: "wrote", supersede: "revised", retrieve: "recalled", claim: "claimed",
+  release: "released", progress: "worked on", session_started: "started", finished: "finished",
+  consolidate: "consolidated", observe: "noted", message: "messaged" };
+
+async function pulse() {
+  if (document.hidden || livePaused || view === "channel") return;
+  try {
+    const q = view === "hive" ? "?view=hive" : pq();
+    const d = await (await fetch("/api/pulse" + q)).json();
+    if (rev !== null && d.rev !== rev) await load({ keep: true });   // keep the layout, animate what's new
+    rev = d.rev;
+    renderLive(d.activity || []);
+  } catch {}
+}
+
+// Only touch the DOM for rows that are actually NEW. Rewriting innerHTML every poll re-ran the entry
+// animation on every row, so the whole panel strobed even when nothing had happened.
+let liveSeen = new Set();
+function renderLive(events) {
+  const box = document.getElementById("live"), rows = document.getElementById("live-rows");
+  if (!events.length) { box.hidden = true; return; }
+  box.hidden = false;
+
+  const fresh = events.filter(e => !liveSeen.has(e.id));
+  if (!fresh.length) return;                       // nothing new: leave the panel completely alone
+  const first = liveSeen.size === 0;               // first paint shouldn't animate a whole backlog in
+
+  // Newest first, so prepend in reverse and let the older rows shift down beneath them.
+  for (const e of fresh.slice().reverse()) {
+    liveSeen.add(e.id);
+    const verb = VERBS[e.kind] || e.kind;
+    const what = (e.summary || "").replace(/^[a-z_]+:\s*/i, "");
+    const row = document.createElement("div");
+    row.className = "live-row" + (first ? " nofade" : "");
+    if (e.memory) { row.classList.add("jump"); row.dataset.mem = e.memory; if (e.project) row.dataset.proj = e.project; }
+    row.innerHTML = `<span class="who">${esc(e.actor || "agent")}</span>` +
+      `<span class="what">${esc(verb)} ${esc(what)}</span>` +
+      `<span class="when" data-ts="${esc(e.ts)}">${ago(e.ts)}</span>`;
+    rows.prepend(row);
+  }
+  while (rows.children.length > 6) rows.lastChild.remove();
+  // Keep the relative times honest without re-rendering anything.
+  for (const w of rows.querySelectorAll(".when")) w.textContent = ago(w.dataset.ts);
+  if (liveSeen.size > 400) liveSeen = new Set(events.map(e => e.id));
+}
+
+// Click an activity row to go to the memory it mentions, whichever view you're in.
+document.getElementById("live-rows").onclick = e => {
+  const row = e.target.closest(".jump");
+  if (!row) return;
+  jumpToMemory(row.dataset.mem, row.dataset.proj);
+};
+
+function ago(ts) {
+  const s = Math.max(0, (Date.now() - new Date(ts).getTime()) / 1000);
+  if (s < 60) return "now";
+  if (s < 3600) return `${Math.floor(s/60)}m`;
+  if (s < 86400) return `${Math.floor(s/3600)}h`;
+  return `${Math.floor(s/86400)}d`;
+}
+
+document.getElementById("live-x").onclick = () => {
+  livePaused = !livePaused;
+  const b = document.getElementById("live-x");
+  b.setAttribute("aria-expanded", String(!livePaused));
+  b.setAttribute("aria-label", livePaused ? "Expand activity" : "Collapse activity");
+  b.title = livePaused ? "Expand" : "Collapse";
+  document.getElementById("live").classList.toggle("collapsed", livePaused);
+};
+
+loadProjects().then(() => setView(view)).then(() => { pulse(); setInterval(pulse, 2500); });
+loop();
 </script>
 </body>
 </html>

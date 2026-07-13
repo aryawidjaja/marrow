@@ -1714,6 +1714,7 @@ dependencies = [
 name = "marrow-web"
 version = "0.3.0"
 dependencies = [
+ "marrow-episodic",
  "marrow-memdocs",
  "marrow-store",
  "serde",

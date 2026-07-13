@@ -282,6 +282,7 @@ pub fn hive_graph(hub: &Hub) -> Graph {
     let mut sem_nodes: Vec<(String, usize, Vec<f32>)> = Vec::new();
     let mut degree: HashMap<String, usize> = HashMap::new();
 
+    let mut hidden_pairs: Vec<(String, String)> = Vec::new();
     let mut projects = hub.projects();
     if let Ok(core) = hub.core() {
         // The core store is a project too, rooted at the central node.
@@ -406,6 +407,27 @@ pub fn hive_graph(hub: &Hub) -> Graph {
         // Give each project's cluster internal structure — explicit refs, shared topic/tag, and
         // meaning — so it reads as a connected sub-brain, not a bare star around its hub.
         let map = |id: &str| format!("{hub_id}#{id}");
+
+        // Links you drew by hand live in the project's own overlay, so the hive has to read it too.
+        // Without this the Link button appears to work here and then nothing shows up.
+        let active_ids: std::collections::HashSet<&str> = rows
+            .iter()
+            .filter(|r| r.status == "active")
+            .map(|r| r.id.as_str())
+            .collect();
+        let overlay = read_overlay(&overlay_path(&p.root));
+        for [a, b] in &overlay.links {
+            if active_ids.contains(a.as_str()) && active_ids.contains(b.as_str()) {
+                links.push(Link {
+                    source: map(a),
+                    target: map(b),
+                    rel: "user".into(),
+                });
+            }
+        }
+        for [a, b] in &overlay.hidden {
+            hidden_pairs.push((map(a), map(b)));
+        }
         links.extend(ref_edges(&rows, &map));
         for members in local_topic.values() {
             star(&mut links, members, "topic");
@@ -429,6 +451,15 @@ pub fn hive_graph(hub: &Hub) -> Graph {
     // The real cross-project bridges: memories whose meaning is close (embedding cosine), across
     // different projects. Silent for projects without embeddings.
     add_hive_semantic(&sem_nodes, &mut links);
+
+    // Drop any link you explicitly removed from the graph.
+    if !hidden_pairs.is_empty() {
+        links.retain(|l| {
+            !hidden_pairs
+                .iter()
+                .any(|(a, b)| same_pair(&[a.clone(), b.clone()], &l.source, &l.target))
+        });
+    }
 
     for l in &links {
         *degree.entry(l.source.clone()).or_default() += 1;

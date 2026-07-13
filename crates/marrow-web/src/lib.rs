@@ -38,6 +38,7 @@ pub fn route(default_root: Option<&Path>, method: &str, target: &str, body: &str
         ("GET", "/api/projects") => return projects_list(default_root),
         ("GET", "/api/channel") => return channel(default_root),
         ("GET", "/api/browse") => return browse(&query),
+        ("GET", "/api/pulse") => return pulse(default_root, &query),
         ("POST", "/api/project/register") => return hub_register(body),
         ("POST", "/api/project/forget") => return hub_forget(body),
         ("POST", "/api/project/init") => return hub_init(body),
@@ -62,8 +63,8 @@ pub fn route(default_root: Option<&Path>, method: &str, target: &str, body: &str
         ("GET", "/api/history") => history(&store),
         ("GET", "/api/audit") => audit(&store),
         ("POST", "/api/memory") => create_memory(&store, body),
-        ("POST", "/api/link") => link(&root, &query, true),
-        ("POST", "/api/unlink") => link(&root, &query, false),
+        ("POST", "/api/link") => link(&store, &root, &query, true),
+        ("POST", "/api/unlink") => link(&store, &root, &query, false),
         ("POST", "/api/hide") => hide(&root, &query, true),
         ("POST", "/api/unhide") => hide(&root, &query, false),
         ("POST", "/api/consolidate") => consolidate(&store, &root, &query),
@@ -136,6 +137,88 @@ fn project_item(name: &str, project: &str, root: &Path) -> Value {
         item["space"] = json!(remote.space);
     }
     item
+}
+
+/// The ledger records lease bookkeeping (renew/release) alongside real work. A live feed of what
+/// your agents are DOING should not be 90% lease renewals, so those never reach the panel.
+const ACTIVITY_NOISE: &[&str] = &["renew", "release", "claim", "session_started", "finished"];
+
+fn worth_showing(kind: &str) -> bool {
+    !ACTIVITY_NOISE.contains(&kind)
+}
+
+/// Which memory should an activity row take you to?
+///
+/// A write names its memory directly. A recall doesn't, but it records the ids it pulled, so send the
+/// user to the first one — that IS what the agent read. Everything else (a claim, a progress note)
+/// points at no memory, and must not pretend to be clickable.
+fn activity_target(e: &marrow_episodic::Event) -> Option<String> {
+    if let Some(id) = &e.memory_id {
+        return Some(id.clone());
+    }
+    e.data
+        .get("ids")
+        .and_then(|v| v.as_array())
+        .and_then(|a| a.first())
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+}
+
+/// Has anything changed, and what have the agents been doing?
+///
+/// The dashboard polls this every couple of seconds, so it must be cheap: a SQL fingerprint plus the
+/// tail of the activity ledger. When `rev` changes, the dashboard refetches the graph — and only then.
+fn pulse(default_root: Option<&Path>, query: &HashMap<String, String>) -> Response {
+    let hive = query.get("view").map(String::as_str) == Some("hive");
+    let stamp = |root: &Path, store: &Store| {
+        let rev = store.revision().unwrap_or_default();
+        // A hand-drawn link changes the graph without touching any memory, so fold the overlay in.
+        let drawn = std::fs::metadata(root.join(".marrow").join(".graph").join("links.json"))
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        format!("{rev}:{drawn}")
+    };
+
+    let (rev, events) = if hive {
+        let Ok(hub) = Hub::open() else {
+            return json_ok(json!({ "rev": "", "activity": [] }));
+        };
+        let mut parts = Vec::new();
+        for p in hub.projects() {
+            if let Ok(store) = Store::open(&p.root) {
+                parts.push(stamp(&p.root, &store));
+            }
+        }
+        let acts: Vec<Value> = hub
+            .activity(80)
+            .into_iter()
+            .filter(|e| worth_showing(&e.event.kind))
+            .take(10)
+            .map(|e| json!({"id": format!("{}:{}", e.project, e.event.seq), "kind": e.event.kind, "actor": e.event.actor, "summary": e.event.summary, "ts": e.event.ts, "memory": activity_target(&e.event), "project": e.project}))
+            .collect();
+        (parts.join("|"), acts)
+    } else {
+        let Some(root) = project_root(default_root, query.get("project").map(String::as_str))
+        else {
+            return json_ok(json!({ "rev": "", "activity": [] }));
+        };
+        let Ok(store) = Store::open(&root) else {
+            return json_ok(json!({ "rev": "", "activity": [] }));
+        };
+        let acts: Vec<Value> = store
+            .activity(80)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|e| worth_showing(&e.kind))
+            .take(10)
+            .map(|e| json!({"id": e.seq.to_string(), "kind": e.kind, "actor": e.actor, "summary": e.summary, "ts": e.ts, "memory": activity_target(&e)}))
+            .collect();
+        (stamp(&root, &store), acts)
+    };
+    json_ok(json!({ "rev": rev, "activity": events }))
 }
 
 /// List sub-directories of a path so the UI can navigate the filesystem to add a project. Local
@@ -483,10 +566,24 @@ fn hive_memory(query: &HashMap<String, String>) -> Response {
     }
 }
 
-fn link(root: &Path, query: &HashMap<String, String>, add: bool) -> Response {
+fn link(store: &Store, root: &Path, query: &HashMap<String, String>, add: bool) -> Response {
     let (Some(source), Some(target)) = (query.get("source"), query.get("target")) else {
         return error("link needs source and target");
     };
+    if source == target {
+        return error("a memory can't link to itself");
+    }
+    // Refuse to record a link to a memory that isn't there. Otherwise the write "succeeds", the graph
+    // quietly drops the dangling link, and the user is told it worked when nothing happened.
+    if add {
+        for id in [source, target] {
+            match store.read(id) {
+                Ok(Some(_)) => {}
+                Ok(None) => return error(&format!("no memory with id {id}")),
+                Err(e) => return error(&e.to_string()),
+            }
+        }
+    }
     match graph::edit_link(root, source, target, add) {
         Ok(count) => json_ok(json!({ "ok": true, "links": count })),
         Err(e) => error(&e.to_string()),

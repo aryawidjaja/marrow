@@ -424,6 +424,16 @@ impl Store {
         )?)
     }
 
+    /// A cheap fingerprint of the store's current state: enough to tell whether anything changed,
+    /// without reading a single memory body. The dashboard polls this, so it must stay trivial.
+    pub fn revision(&self) -> Result<String, Error> {
+        let mut stmt = self.conn.prepare(
+            "SELECT COUNT(*), COALESCE(MAX(updated_at), '') FROM memories WHERE status = 'active'",
+        )?;
+        let (count, latest): (i64, String) = stmt.query_row([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(format!("{count}:{latest}"))
+    }
+
     /// The project's feature areas with their memory counts, busiest first — the table of contents
     /// for this brain. An agent reads this before writing so it files into an area that already
     /// exists instead of inventing a near-duplicate ("auth" vs "authentication"). Memories with no
