@@ -188,6 +188,41 @@ pub fn project_graph(store: &Store, root: &Path) -> Graph {
     }
 
     let mut links = ref_edges(&rows, &|id: &str| id.to_string());
+
+    // Give every area a hub neuron its memories hang off, so an area reads as one connected flower
+    // instead of a handful of loose dots. The hub is the area's name, and it's the thing you click
+    // to see everything filed there.
+    let mut by_area: HashMap<String, Vec<String>> = HashMap::new();
+    for r in rows.iter().filter(|r| r.status == "active") {
+        if !r.area.is_empty() {
+            by_area
+                .entry(r.area.clone())
+                .or_default()
+                .push(r.id.clone());
+        }
+    }
+    let mut area_hubs: Vec<Node> = Vec::new();
+    for (area, members) in &by_area {
+        let hub_id = format!("area:{area}");
+        area_hubs.push(Node {
+            id: hub_id.clone(),
+            label: area.clone(),
+            kind: "area".into(),
+            group: area.clone(),
+            area: area.clone(),
+            snippet: format!("{} memories filed under `{area}`", members.len()),
+            degree: 0,
+        });
+        for m in members {
+            links.push(Link {
+                source: hub_id.clone(),
+                target: m.clone(),
+                rel: "area".into(),
+            });
+        }
+    }
+    nodes.extend(area_hubs);
+
     for members in by_topic.values() {
         star(&mut links, members, "topic");
     }
