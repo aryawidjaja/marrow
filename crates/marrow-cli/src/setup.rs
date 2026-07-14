@@ -19,14 +19,12 @@ const RELEASE: &str = include_str!("../../../integrations/claude-code/hooks/marr
 const SETTINGS: &str = include_str!("../../../integrations/claude-code/settings.example.json");
 const MARROW_SAVE: &str = include_str!("../../../integrations/claude-code/commands/marrow-save.md");
 
-const GUIDANCE: &str = "<!-- marrow:begin (managed by `marrow setup`) -->\n\
-## Marrow shared memory\n\n\
-This project has a Marrow shared brain over MCP. Hooks load context at session start, prevent file\n\
-collisions, and record activity automatically. Five things are on you:\n\n\
+/// The rules that hold for every agent, whatever it is running in.
+const CORE_RULES: &str = "\
 1. Recall before you answer. For any question about how this project works or what was decided, call\n\
-`mem_recall` first. Do not rely only on the start-of-session briefing; it can be stale. It returns the\n\
-matches AND the memories connected to them; a neighbour with `hops` of 2 or more did not match your\n\
-words at all, so read it, it is often the thing you did not know to ask for.\n\
+`mem_recall` first. It returns the matches AND the memories connected to them; a neighbour with `hops`\n\
+of 2 or more did not match your words at all, so read it, it is often the thing you did not know to\n\
+ask for.\n\
 2. Save as you go. The moment you reach a durable decision, fact, or gotcha, save it with `mem_write`\n\
 (kind `decision` or `fact`). Call `mem_recall` first so you do not duplicate.\n\
 3. File it where it belongs. Every memory lives in an `area` of the project (`auth`, `billing`,\n\
@@ -40,10 +38,119 @@ findable long after anyone stops searching for its words. Link generously.\n\n\
 5. Anchor what is about code. If a memory describes how a specific function or type behaves, pass\n\
 `anchor: {file, symbol}` to `mem_write`. Marrow fingerprints that symbol and flags the memory the\n\
 moment the code changes, so the brain warns you instead of confidently telling you something stale.\n\n\
+6. Talk to the other agents. If `mem_ask` is in your tools you share a channel with every live\n\
+session on this machine, whatever tool it runs in. `mem_rooms` lists the conversations, `mem_inbox`\n\
+is what was said to you, `mem_reply` answers. Open a room with `mem_ask` (always give it a `topic`)\n\
+when another session knows something you do not, or when you are about to change something they are\n\
+working on.\n";
+
+/// Guidance for Claude Code, where hooks warm-start the session and manage file claims.
+fn claude_guidance() -> String {
+    format!(
+        "<!-- marrow:begin (managed by `marrow setup`) -->\n\
+## Marrow shared memory\n\n\
+This project has a Marrow shared brain over MCP. Hooks load context at session start, prevent file\n\
+collisions, and record activity automatically. Five things are on you:\n\n\
+{CORE_RULES}\n\
 Hive etiquette: you share this brain with other live sessions. Heed the notes about what they are\n\
 doing, and do not edit a file another session has claimed. The hooks claim and release files for you;\n\
 you do not manage claims yourself.\n\
-<!-- marrow:end -->\n";
+<!-- marrow:end -->\n"
+    )
+}
+
+/// Guidance for agents without Marrow's hooks (Codex, Cursor, anything else over MCP). Nothing
+/// warm-starts them, so rule zero is "call `mem_bootstrap` yourself" — the Claude Code text would
+/// promise a briefing that never arrives.
+fn agents_guidance() -> String {
+    format!(
+        "<!-- marrow:begin (managed by `marrow setup`) -->\n\
+## Marrow shared memory\n\n\
+This project has a Marrow shared brain, and you reach it through the `mem_*` MCP tools. Nothing runs\n\
+automatically for you here, so the loop is yours to drive:\n\n\
+0. Start warm. At the START of a task, call `mem_bootstrap` with your goal. It hands you the\n\
+project's areas, what other sessions are doing, and the memories relevant to your goal. Do this\n\
+BEFORE re-scanning the codebase — that is the whole point of the shared brain.\n\
+{CORE_RULES}\n\
+You share this brain with other sessions, so what you write outlives you: another agent, in another\n\
+tool, on another day, starts from what you saved.\n\
+<!-- marrow:end -->\n"
+    )
+}
+
+/// Is Codex on this machine? Either it has a config directory or the CLI is on PATH.
+fn codex_present() -> bool {
+    home_dir().is_some_and(|h| h.join(".codex").is_dir()) || which("codex")
+}
+
+fn which(bin: &str) -> bool {
+    Command::new("sh")
+        .arg("-c")
+        .arg(format!("command -v {bin}"))
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
+
+/// The `marrow-mcp` server, as a Codex `config.toml` table.
+fn codex_server_block(bin_dir: &str) -> String {
+    // Absolute path: Codex launches the server itself and its PATH is not the shell's.
+    let cmd = if bin_dir.is_empty() {
+        "marrow-mcp".to_string()
+    } else {
+        format!("{bin_dir}/marrow-mcp")
+    };
+    format!("[mcp_servers.marrow]\ncommand = \"{cmd}\"\nargs = [\"--root\", \".\"]\n")
+}
+
+/// Register `marrow-mcp` in `~/.codex/config.toml`, merging rather than clobbering.
+fn register_codex_mcp(bin_dir: &str, out: &mut impl Write) -> Result<(), String> {
+    let Some(home) = home_dir() else {
+        return Err("could not determine home directory".into());
+    };
+    let dir = home.join(".codex");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let config = dir.join("config.toml");
+    let block = codex_server_block(bin_dir);
+
+    let existing = fs::read_to_string(&config).unwrap_or_default();
+    let updated = match replace_toml_table(&existing, "mcp_servers.marrow", &block) {
+        Some(replaced) => replaced,
+        None if existing.trim().is_empty() => block,
+        None => format!("{}\n\n{block}", existing.trim_end()),
+    };
+    fs::write(&config, updated).map_err(|e| e.to_string())?;
+    writeln!(
+        out,
+        "  codex mcp   -> ~/.codex/config.toml ([mcp_servers.marrow])"
+    )
+    .ok();
+    Ok(())
+}
+
+/// Replace an existing `[table]` section (header through to the next header, or EOF) with `block`.
+/// Returns `None` when the table isn't there, so the caller can append instead.
+fn replace_toml_table(content: &str, table: &str, block: &str) -> Option<String> {
+    let header = format!("[{table}]");
+    let start = content.lines().position(|l| l.trim() == header)?;
+    let lines: Vec<&str> = content.lines().collect();
+    let end = lines[start + 1..]
+        .iter()
+        .position(|l| l.trim_start().starts_with('['))
+        .map(|i| start + 1 + i)
+        .unwrap_or(lines.len());
+    let mut out = lines[..start].join("\n");
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    out.push_str(block.trim_end());
+    out.push('\n');
+    if end < lines.len() {
+        out.push('\n');
+        out.push_str(&lines[end..].join("\n"));
+        out.push('\n');
+    }
+    Some(out)
+}
 
 /// Add the marrow binary's own directory to a hook's lookup chain, so the hook finds `marrow`
 /// regardless of how it was installed (brew, cargo, curl) or the hook shell's PATH.
@@ -164,6 +271,14 @@ pub fn run(root: &Path, global: bool, out: &mut impl Write) -> Result<(), String
     )?;
     register_mcp(&bin_dir, out);
 
+    // Codex reads neither `.claude/` nor CLAUDE.md, so it needs its own MCP registration and its
+    // own guidance in AGENTS.md.
+    let codex = codex_present();
+    if codex {
+        register_codex_mcp(&bin_dir, out)?;
+        write_agents_md(root, out)?;
+    }
+
     writeln!(
         out,
         "\nDone. Next:\n  \
@@ -179,6 +294,46 @@ pub fn run(root: &Path, global: bool, out: &mut impl Write) -> Result<(), String
          search (opt-in, needs an embedding model): see `marrow embed` and the README."
     )
     .ok();
+
+    if codex {
+        writeln!(
+            out,
+            "\n  Codex is wired too. Restart it to pick up the tools. Codex has no hooks, so its\n  \
+             AGENTS.md tells it to call mem_bootstrap itself at the start of a task.\n\n  \
+             To let Claude Code and Codex TALK to each other, register this project in the hive:\n    \
+             marrow hub register --name <project>\n  \
+             That turns on the shared channel (mem_ask / mem_inbox / mem_reply), and both agents\n  \
+             land in the same inbox whichever tool they run in."
+        )
+        .ok();
+    }
+    Ok(())
+}
+
+/// Write (or refresh) the Marrow block in the project's `AGENTS.md` — the file Codex and other
+/// non-Claude agents read.
+fn write_agents_md(root: &Path, out: &mut impl Write) -> Result<(), String> {
+    let agents_md = root.join("AGENTS.md");
+    let existing = fs::read_to_string(&agents_md).unwrap_or_default();
+    match replace_block(&existing, &agents_guidance()) {
+        Some(updated) => {
+            fs::write(&agents_md, updated).map_err(|e| e.to_string())?;
+            writeln!(
+                out,
+                "  codex guide -> refreshed the Marrow block in AGENTS.md"
+            )
+            .ok();
+        }
+        None => {
+            let mut f = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&agents_md)
+                .map_err(|e| e.to_string())?;
+            write!(f, "\n{}", agents_guidance()).map_err(|e| e.to_string())?;
+            writeln!(out, "  codex guide -> added the Marrow block to AGENTS.md").ok();
+        }
+    }
     Ok(())
 }
 
@@ -264,7 +419,7 @@ fn install(
     // 5) Add or refresh the guidance block in CLAUDE.md. Re-running setup updates the block in
     //    place (between the markers) so the guidance stays current across versions.
     let existing = fs::read_to_string(claude_md).unwrap_or_default();
-    if let Some(updated) = replace_block(&existing) {
+    if let Some(updated) = replace_block(&existing, &claude_guidance()) {
         fs::write(claude_md, updated).map_err(|e| e.to_string())?;
         writeln!(
             out,
@@ -280,7 +435,7 @@ fn install(
             .append(true)
             .open(claude_md)
             .map_err(|e| e.to_string())?;
-        write!(f, "\n{GUIDANCE}").map_err(|e| e.to_string())?;
+        write!(f, "\n{}", claude_guidance()).map_err(|e| e.to_string())?;
         writeln!(out, "  guidance    -> added the Marrow block to CLAUDE.md").ok();
     }
 
@@ -292,14 +447,14 @@ fn install(
 }
 
 /// If `content` already has a Marrow guidance block, return it with that block replaced by the
-/// current `GUIDANCE`. Returns `None` when there's no block to replace (caller appends instead).
-fn replace_block(content: &str) -> Option<String> {
+/// `guidance`. Returns `None` when there's no block to replace (caller appends instead).
+fn replace_block(content: &str, guidance: &str) -> Option<String> {
     let start = content.find("<!-- marrow:begin")?;
     let end_marker = "<!-- marrow:end -->";
     let end = content[start..].find(end_marker)? + start + end_marker.len();
     let mut out = String::with_capacity(content.len());
     out.push_str(&content[..start]);
-    out.push_str(GUIDANCE.trim_end());
+    out.push_str(guidance.trim_end());
     out.push_str(&content[end..]);
     Some(out)
 }
@@ -534,7 +689,7 @@ mod tests {
     #[test]
     fn guidance_block_refreshes_in_place_and_preserves_surrounding_text() {
         let before = "# My Project\n\nSome notes.\n\n<!-- marrow:begin (old) -->\nOLD GUIDANCE\n<!-- marrow:end -->\n\nMore project notes.\n";
-        let updated = replace_block(before).unwrap();
+        let updated = replace_block(before, &claude_guidance()).unwrap();
         assert!(updated.contains("# My Project"));
         assert!(updated.contains("More project notes."));
         assert!(!updated.contains("OLD GUIDANCE"));
@@ -542,7 +697,51 @@ mod tests {
         // Still exactly one block.
         assert_eq!(updated.matches("marrow:begin").count(), 1);
         // No block present -> None (caller appends).
-        assert!(replace_block("# Just a readme\n").is_none());
+        assert!(replace_block("# Just a readme\n", &claude_guidance()).is_none());
+    }
+
+    #[test]
+    fn codex_registration_preserves_the_rest_of_the_config() {
+        let existing = "model = \"o3\"\n\n[mcp_servers.other]\ncommand = \"other-mcp\"\n";
+        let block = codex_server_block("/usr/local/bin");
+        // Nothing to replace yet, so the caller appends: the user's own settings must survive.
+        assert!(replace_toml_table(existing, "mcp_servers.marrow", &block).is_none());
+        let appended = format!("{}\n\n{block}", existing.trim_end());
+        assert!(appended.contains("model = \"o3\""));
+        assert!(appended.contains("[mcp_servers.other]"));
+        assert!(appended.contains("[mcp_servers.marrow]"));
+        assert!(appended.contains("/usr/local/bin/marrow-mcp"));
+    }
+
+    #[test]
+    fn re_running_setup_replaces_marrow_without_touching_other_servers() {
+        let existing = "[mcp_servers.marrow]\ncommand = \"/old/path/marrow-mcp\"\nargs = [\"--root\", \".\"]\n\n[mcp_servers.other]\ncommand = \"other-mcp\"\n";
+        let block = codex_server_block("/new/path");
+        let updated = replace_toml_table(existing, "mcp_servers.marrow", &block).unwrap();
+        assert!(updated.contains("/new/path/marrow-mcp"), "{updated}");
+        assert!(
+            !updated.contains("/old/path"),
+            "the stale command must be gone: {updated}"
+        );
+        // The neighbouring server is somebody else's; clobbering it would break their Codex.
+        assert!(updated.contains("[mcp_servers.other]"), "{updated}");
+        assert!(updated.contains("command = \"other-mcp\""), "{updated}");
+        assert_eq!(updated.matches("[mcp_servers.marrow]").count(), 1);
+    }
+
+    #[test]
+    fn codex_guidance_tells_the_agent_to_warm_start_itself() {
+        // Codex has no hooks. Handing it the Claude Code text would promise a briefing that never
+        // arrives, and the agent would never call mem_bootstrap.
+        let codex = agents_guidance();
+        assert!(
+            codex.contains("mem_bootstrap"),
+            "codex must be told to bootstrap itself"
+        );
+        assert!(!codex.contains("The hooks claim and release files for you"));
+        assert!(claude_guidance().contains("The hooks claim and release files for you"));
+        // Both must point at the shared channel, or the two agents can't reach each other.
+        assert!(codex.contains("mem_inbox") && claude_guidance().contains("mem_inbox"));
     }
 
     #[test]

@@ -200,6 +200,15 @@ pub enum Cmd {
     Unshare,
     /// The project's feature areas and how many memories each holds — the table of contents.
     Areas,
+    /// Read the agent channel: the rooms your agents are talking in, and what was said.
+    Inbox {
+        /// Who you are. Messages addressed to this name (or to "all") are yours.
+        #[arg(long, default_value = "all")]
+        me: String,
+        /// Read one room in full instead of listing them.
+        #[arg(long)]
+        thread: Option<String>,
+    },
 }
 
 /// Subcommands for the cross-project hub.
@@ -911,6 +920,46 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
             write!(out, "{}", ingest_report(&docs)).ok();
             Ok(())
         }
+        Cmd::Inbox { me, thread } => {
+            let store = if marrow_store::Hub::active() {
+                marrow_store::Hub::open()
+                    .and_then(|h| h.core())
+                    .map_err(|e| e.to_string())?
+            } else {
+                open(&cli.root)?
+            };
+            let names = vec![me.clone()];
+            if let Some(t) = thread {
+                for m in store.thread(&t).map_err(|e| e.to_string())? {
+                    writeln!(out, "{:>10}: {}", m.from, m.body.trim()).ok();
+                }
+                return Ok(());
+            }
+            let rooms = store.rooms(&names, 20).map_err(|e| e.to_string())?;
+            if rooms.is_empty() {
+                writeln!(out, "no rooms yet — agents talk here with mem_ask.").ok();
+                return Ok(());
+            }
+            for r in &rooms {
+                let unread = if r.unread > 0 {
+                    format!(" · {} unread", r.unread)
+                } else {
+                    String::new()
+                };
+                writeln!(
+                    out,
+                    "[{}]{unread}\n  {} message(s) · {}\n  last — {}: {}\n  {}",
+                    r.topic,
+                    r.messages,
+                    r.participants.join(", "),
+                    r.last_from,
+                    r.last_body,
+                    r.thread,
+                )
+                .ok();
+            }
+            Ok(())
+        }
         Cmd::Watch { session } => {
             let store = open(&cli.root)?;
             write!(out, "{}", watch_report(&store, &session)?).ok();
@@ -1139,6 +1188,43 @@ fn ingest_report(docs: &[(String, u64)]) -> String {
     s
 }
 
+/// Messages other agents have sent this session and it hasn't seen. Does NOT mark them read: the
+/// agent hasn't engaged until it calls `mem_inbox` itself, and a message shown once in a turn it
+/// ignored would otherwise never surface again.
+fn unread_report(session: &str) -> Option<String> {
+    let channel = if marrow_store::Hub::active() {
+        marrow_store::Hub::open().and_then(|h| h.core()).ok()?
+    } else {
+        return None;
+    };
+    let me: Vec<String> = vec![session.to_string(), "claude".into(), "claude-code".into()];
+    let msgs = channel.unread(&me, 12).ok()?;
+    if msgs.is_empty() {
+        return None;
+    }
+
+    let mut out = format!(
+        "Marrow — {} unread message(s) from other agents:\n",
+        msgs.len()
+    );
+    for m in &msgs {
+        let subject = m.topic.as_deref().unwrap_or("(no subject)");
+        let body: String = m.body.chars().take(160).collect();
+        out.push_str(&format!("  [{subject}] {}: {body}\n", m.from));
+    }
+    out.push_str(
+        "  Reply with mem_reply(thread) — call mem_inbox to read them in full and mark them read.\n",
+    );
+    for m in &msgs {
+        out.push_str(&format!(
+            "  thread {} = [{}]\n",
+            m.thread,
+            m.topic.as_deref().unwrap_or("(no subject)")
+        ));
+    }
+    Some(out)
+}
+
 fn watch_report(store: &Store, session: &str) -> Result<String, String> {
     use std::collections::HashSet;
     let wm_path = store.root().join(".marrow/.watch").join(session);
@@ -1184,6 +1270,13 @@ fn watch_report(store: &Store, session: &str) -> Result<String, String> {
     }
 
     let mut out = String::new();
+
+    // Mail first: this hook runs every turn, so it is where an agent finds out it is being talked
+    // to, rather than having to suspect an inbox it has no reason to check.
+    if let Some(mail) = unread_report(session) {
+        out.push_str(&mail);
+    }
+
     if !lines.is_empty() || !others.is_empty() {
         out.push_str("Marrow — what other sessions are doing:\n");
         out.push_str(&lines.join("\n"));

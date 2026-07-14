@@ -50,6 +50,7 @@ const HUB_TOOLS: &[&str] = &[
     "mem_hub_recall",
     "mem_hub_activity",
     "mem_ask",
+    "mem_rooms",
     "mem_inbox",
     "mem_reply",
 ];
@@ -197,24 +198,35 @@ pub(crate) fn all_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {"limit": {"type": "integer", "description": "max events (default 20)"}}
         })),
-        tool("mem_ask", "Ask another agent (in this or another project) a question, or share a note — a message in the shared channel. `to` is who: a session id, a name, a project, or \"all\". Non-destructive; the human can read it.", json!({
+        tool("mem_ask", "Open a ROOM with the other agents, or speak into one. Every live session on this machine shares this channel, whatever tool it runs in — a Claude Code session and a Codex session reach each other here. ALWAYS pass a `topic`: it is the room's subject, and it is what stops separate conversations blurring into one thread nobody can follow. To speak in a room that already exists, pass its `thread` (from mem_rooms) instead of a topic.", json!({
             "type": "object",
             "properties": {
-                "to": {"type": "string", "description": "recipient: session id, name, project, or \"all\""},
+                "to": {"type": "string", "description": "who this is for: an agent name (`claude`, `codex`), a session id, a project, or \"all\" to open it to everyone"},
+                "topic": {"type": "string", "description": "SHORT subject for the room, e.g. `auth-refactor`. Required when opening a new room. Anyone can join a room by replying to it."},
+                "thread": {"type": "string", "description": "speak into an EXISTING room (its id, from mem_rooms) instead of opening a new one"},
                 "body": {"type": "string"},
-                "by": {"type": "string", "description": "your name/session"}
+                "by": {"type": "string", "description": "your name/session, so others know who is talking"}
             },
             "required": ["to","body"]
         })),
-        tool("mem_inbox", "Messages waiting for you from other agents (newest first) — check this to see if anyone asked you something. Pass your session/name so it knows what's addressed to you.", json!({
+        tool("mem_rooms", "The conversations you can see: each room's subject, who is in it, how many messages you have not read, and its id. Call this to find the RIGHT room before you speak, instead of starting yet another thread about something already being discussed.", json!({
             "type": "object",
             "properties": {
+                "me": {"type": "string", "description": "your name/session"},
+                "limit": {"type": "integer"}
+            }
+        })),
+        tool("mem_inbox", "Everything said to you since you last checked — every unread message, oldest first, grouped by room. Reading it marks it read, so the next call shows only what is new. Check it when you start, when you are stuck, and before you change something another agent may be working on.", json!({
+            "type": "object",
+            "properties": {
+                "me": {"type": "string", "description": "your name/session"},
                 "session": {"type": "string"},
                 "by": {"type": "string"},
+                "thread": {"type": "string", "description": "read one room in full instead of just what is unread"},
                 "project": {"type": "string"}
             }
         })),
-        tool("mem_reply", "Reply to a message thread (from mem_inbox). The reply goes back to whoever asked.", json!({
+        tool("mem_reply", "Reply into a room (its `thread`, from mem_inbox or mem_rooms). Everyone in that room sees it, so this is a group conversation, not a private answer.", json!({
             "type": "object",
             "properties": {
                 "thread": {"type": "string"},
@@ -281,7 +293,7 @@ pub fn dispatch(root: &Path, name: &str, args: &Value) -> Result<String, String>
     if crate::remote::endpoint().is_some() {
         return crate::remote::forward(name, args);
     }
-    call(root, name, args)
+    call(root, name, args).map(|text| with_inbox_notice(root, name, args, text))
 }
 
 /// Run a tool by name against the local store. `Ok` text is the result; `Err` text is a tool error.
@@ -291,6 +303,7 @@ pub fn call(root: &Path, name: &str, args: &Value) -> Result<String, String> {
         "mem_hub_recall" => return hub_recall(args),
         "mem_hub_activity" => return hub_activity(args),
         "mem_ask" => return ask(root, args),
+        "mem_rooms" => return rooms(root, args),
         "mem_inbox" => return inbox(root, args),
         "mem_reply" => return reply(root, args),
         _ => {}
@@ -713,10 +726,46 @@ fn ask(root: &Path, args: &Value) -> Result<String, String> {
     let to = str_arg(args, "to")?;
     let body = str_arg(args, "body")?;
     let by = opt_arg(args, "by").unwrap_or_else(|| "mcp".into());
-    let thread = channel_store(root)?
-        .post_message(&by, &to, None, "ask", &body)
+    let thread = opt_arg(args, "thread");
+    let topic = opt_arg(args, "topic");
+    let t = channel_store(root)?
+        .post_to_room(&by, &to, thread.as_deref(), "ask", &body, topic.as_deref())
         .map_err(|e| e.to_string())?;
-    Ok(json!({"posted": true, "thread": thread}).to_string())
+    let mut out = json!({"posted": true, "thread": t});
+    if thread.is_none() && topic.is_none() {
+        out["note"] = json!(
+            "opened a room with no topic — pass `topic` next time so the other agents can tell \
+             this conversation apart from the others"
+        );
+    }
+    Ok(out.to_string())
+}
+
+fn rooms(root: &Path, args: &Value) -> Result<String, String> {
+    let me = me_from(args);
+    let limit = args
+        .get("limit")
+        .and_then(Value::as_u64)
+        .map(|n| n as usize)
+        .unwrap_or(12);
+    let rooms = channel_store(root)?
+        .rooms(&me, limit)
+        .map_err(|e| e.to_string())?;
+    let items: Vec<Value> = rooms
+        .iter()
+        .map(|r| {
+            json!({
+                "thread": r.thread,
+                "topic": r.topic,
+                "participants": r.participants,
+                "messages": r.messages,
+                "unread": r.unread,
+                "last_from": r.last_from,
+                "last": r.last_body,
+            })
+        })
+        .collect();
+    Ok(json!({"rooms": items, "count": items.len()}).to_string())
 }
 
 fn reply(root: &Path, args: &Value) -> Result<String, String> {
@@ -738,24 +787,93 @@ fn reply(root: &Path, args: &Value) -> Result<String, String> {
     Ok(json!({"posted": true, "thread": t}).to_string())
 }
 
-fn inbox(root: &Path, args: &Value) -> Result<String, String> {
-    let me: Vec<String> = ["session", "by", "project"]
+/// Every name this agent answers to.
+fn me_from(args: &Value) -> Vec<String> {
+    let me: Vec<String> = ["me", "session", "by", "project"]
         .iter()
         .filter_map(|k| opt_arg(args, k))
         .collect();
-    let me = if me.is_empty() {
+    if me.is_empty() {
         vec!["mcp".into()]
     } else {
         me
-    };
-    let msgs = channel_store(root)?
-        .inbox(&me, 10)
-        .map_err(|e| e.to_string())?;
+    }
+}
+
+fn inbox(root: &Path, args: &Value) -> Result<String, String> {
+    let me = me_from(args);
+    let store = channel_store(root)?;
+
+    if let Some(thread) = opt_arg(args, "thread") {
+        let msgs = store.thread(&thread).map_err(|e| e.to_string())?;
+        let items: Vec<Value> = msgs
+            .iter()
+            .map(|m| json!({"from": m.from, "role": m.role, "body": m.body, "at": m.ts}))
+            .collect();
+        let topic = msgs.iter().find_map(|m| m.topic.clone());
+        store.mark_read(&me[0]).map_err(|e| e.to_string())?;
+        return Ok(
+            json!({"thread": thread, "topic": topic, "messages": items, "count": items.len()})
+                .to_string(),
+        );
+    }
+
+    let msgs = store.unread(&me, 30).map_err(|e| e.to_string())?;
     let items: Vec<Value> = msgs
         .iter()
-        .map(|m| json!({"thread": m.thread, "from": m.from, "role": m.role, "body": m.body}))
+        .map(|m| {
+            json!({
+                "thread": m.thread,
+                "topic": m.topic,
+                "from": m.from,
+                "role": m.role,
+                "body": m.body,
+                "at": m.ts,
+            })
+        })
         .collect();
-    Ok(json!({"messages": items, "count": items.len()}).to_string())
+    store.mark_read(&me[0]).map_err(|e| e.to_string())?;
+    Ok(json!({
+        "messages": items,
+        "count": items.len(),
+        "hint": if items.is_empty() { Value::Null } else {
+            json!("reply into a room with mem_reply(thread), or list every room with mem_rooms")
+        },
+    })
+    .to_string())
+}
+
+/// Tell an agent it has mail on the way out of whatever tool it just called. MCP cannot wake an
+/// agent up, and Codex has no hooks, so a tool result it was already reading is the only place it
+/// reliably finds out.
+fn with_inbox_notice(root: &Path, name: &str, args: &Value, text: String) -> String {
+    if name == "mem_inbox" || !marrow_store::Hub::active() {
+        return text;
+    }
+    let Ok(store) = channel_store(root) else {
+        return text;
+    };
+    let me = me_from(args);
+    let Ok(n) = store.unread_count(&me) else {
+        return text;
+    };
+    if n == 0 {
+        return text;
+    }
+    // Only decorate a JSON object: mem_write returns a bare id, and appending would corrupt it.
+    let Ok(mut v) = serde_json::from_str::<Value>(&text) else {
+        return text;
+    };
+    let Some(obj) = v.as_object_mut() else {
+        return text;
+    };
+    obj.insert(
+        "inbox".into(),
+        json!(format!(
+            "{n} unread message(s) from other agents — call mem_inbox to read them"
+        )),
+    );
+    v.to_string()
 }
 
 fn hub_activity(args: &Value) -> Result<String, String> {
