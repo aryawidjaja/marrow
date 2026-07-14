@@ -310,7 +310,8 @@
   #channel .msg.reply .bubble { background: #3b3413; border: 1px solid #5c5220; border-top-right-radius: 4px; }
   #channel .empty { color: var(--muted); text-align: center; margin-top: 60px; }
   .detail .by { display: inline-block; border: 1px solid var(--line); border-radius: 20px;
-    padding: 1px 9px; font-size: 10px; margin-bottom: 8px; }
+    padding: 1px 9px; font-size: 10px; margin-bottom: 8px; margin-right: 4px; }
+  .detail .by.model { color: var(--muted); border-color: var(--line); font-family: ui-monospace, monospace; }
 </style>
 </head>
 <body>
@@ -647,7 +648,7 @@ function buildLegend() {
       return `<button class="li${on ? "" : " off"}${byFilter === a ? " solo" : ""}" data-by="${esc(a)}"
         aria-pressed="${byFilter === a}" title="Show only what ${esc(a)} wrote">
         <span class="edge" style="background:${authorColor(a)}"></span>
-        <span class="lg-label">${esc(a)}</span>
+        <span class="lg-label">${esc(agentName(a))}</span>
         <span class="lg-count">${authors[a]}</span>
       </button>`;
     }).join("");
@@ -674,6 +675,15 @@ function buildLegend() {
     };
   }
 }
+
+// The client id an agent reports is a slug (`claude-code`); people read names. Presentation only —
+// the stored value is never rewritten.
+const AGENT_NAMES = {
+  "claude-code": "Claude Code", "claude": "Claude Code", "claude-desktop": "Claude Desktop",
+  "codex": "Codex", "cursor": "Cursor", "gemini-cli": "Gemini CLI", "windsurf": "Windsurf",
+  "cli": "Terminal (you)", "mcp": "Unknown agent",
+};
+const agentName = a => AGENT_NAMES[a] || a;
 
 // One stable colour per agent, so claude-code is the same colour everywhere you look.
 const AUTHOR_COLORS = ["#ffde59", "#6fd3ff", "#a78bfa", "#57d9a3", "#ff9f7f", "#f472b6"];
@@ -1135,7 +1145,8 @@ async function select(n) {
   // Who wrote it, right in the header. Which agent knew a thing is half the story when two of them
   // tell you different things.
   const author = n.by
-    ? `<span class="by" style="border-color:${authorColor(n.by)};color:${authorColor(n.by)}">${esc(n.by)}</span>`
+    ? `<span class="by" style="border-color:${authorColor(n.by)};color:${authorColor(n.by)}">${esc(agentName(n.by))}</span>` +
+      (n.model ? `<span class="by model">${esc(n.model)}</span>` : "")
     : "";
 
   d.innerHTML = `<span class="x" data-act="closedetail">✕</span>

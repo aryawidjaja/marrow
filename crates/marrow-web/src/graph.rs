@@ -24,6 +24,8 @@ pub struct Node {
     pub born: String,
     /// Which agent wrote it, so you can see (and filter by) who knew what.
     pub by: String,
+    /// Which model wrote it ("" when the agent didn't say).
+    pub model: String,
     pub snippet: String,
     pub degree: usize,
 }
@@ -188,6 +190,7 @@ pub fn project_graph(store: &Store, root: &Path) -> Graph {
             area: r.area.clone(),
             born: r.created_at.clone(),
             by: r.written_by.clone(),
+            model: r.model.clone(),
             snippet: snippet(&r.body, 140),
             degree: 0,
         });
@@ -218,6 +221,7 @@ pub fn project_graph(store: &Store, root: &Path) -> Graph {
             area: area.clone(),
             born: String::new(),
             by: String::new(),
+            model: String::new(),
             snippet: format!("{} memories filed under `{area}`", members.len()),
             degree: 0,
         });
@@ -284,6 +288,7 @@ pub fn hive_graph(hub: &Hub) -> Graph {
         area: String::new(),
         born: String::new(),
         by: String::new(),
+        model: String::new(),
         snippet: "shared memory about you — the center of the hive".into(),
         degree: 0,
     }];
@@ -323,6 +328,7 @@ pub fn hive_graph(hub: &Hub) -> Graph {
                 area: String::new(),
                 born: String::new(),
                 by: String::new(),
+                model: String::new(),
                 snippet: format!("project: {}", p.root.display()),
                 degree: 0,
             });
@@ -374,6 +380,7 @@ pub fn hive_graph(hub: &Hub) -> Graph {
                 area: r.area.clone(),
                 born: r.created_at.clone(),
                 by: r.written_by.clone(),
+                model: r.model.clone(),
                 snippet: snippet(&r.body, 140),
                 degree: 0,
             });
@@ -404,6 +411,7 @@ pub fn hive_graph(hub: &Hub) -> Graph {
                 area: area.clone(),
                 born: String::new(),
                 by: String::new(),
+                model: String::new(),
                 snippet: format!("{} memories in `{area}` ({})", members.len(), p.name),
                 degree: 0,
             });
@@ -641,6 +649,7 @@ mod tests {
                 decay: None,
                 provenance: Provenance {
                     written_by: "t".into(),
+                    model: None,
                     session_id: None,
                     sources: vec![],
                 },

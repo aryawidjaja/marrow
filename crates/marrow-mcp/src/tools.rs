@@ -109,6 +109,7 @@ pub(crate) fn all_definitions() -> Vec<Value> {
                 "sources": {"type": "array", "items": {"type": "string"}, "description": "Where this came from: file paths, URLs, docs you distilled it from."},
                 "project": {"type": "string"},
                 "by": {"type": "string", "description": "author for provenance"},
+                "model": {"type": "string", "description": "YOUR model id, e.g. `claude-opus-4-8` or `gpt-5-codex`. Marrow cannot see this — the MCP handshake names your client, never the model — so pass it, or nobody will know which model formed this belief."},
                 "session": {"type": "string", "description": "your session id, so the hive can attribute this"},
                 "tags": {"type": "array", "items": {"type": "string"}}
             },
@@ -1056,6 +1057,7 @@ fn memory_from(args: &Value) -> Result<Memory, String> {
             }),
             provenance: Provenance {
                 written_by: author(args),
+                model: opt_arg(args, "model"),
                 session_id: opt_arg(args, "session"),
                 sources: str_list(args, "sources"),
             },

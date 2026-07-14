@@ -1339,6 +1339,7 @@ fn build_memory(
             decay: None,
             provenance: Provenance {
                 written_by: by,
+                model: None,
                 session_id: None,
                 sources: vec![],
             },

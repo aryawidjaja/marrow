@@ -72,6 +72,10 @@ pub struct Decay {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Provenance {
     pub written_by: String,
+    /// The model that wrote it, e.g. `claude-opus-4-8`. Self-reported: the MCP handshake names the
+    /// client, never the model, so only the agent can say which one was thinking.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub session_id: Option<String>,
     #[serde(default)]

@@ -470,6 +470,7 @@ fn new_memory(
             decay: None,
             provenance: Provenance {
                 written_by: "web".into(),
+                model: None,
                 session_id: None,
                 sources: vec![],
             },

@@ -23,6 +23,7 @@ fn mem(kind: MemoryKind, topic: &str, body: &str) -> Memory {
             decay: None,
             provenance: Provenance {
                 written_by: "agent".into(),
+                model: None,
                 session_id: None,
                 sources: vec![],
             },

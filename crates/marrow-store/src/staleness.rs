@@ -77,6 +77,7 @@ mod tests {
                 decay: None,
                 provenance: Provenance {
                     written_by: "a".into(),
+                    model: None,
                     session_id: None,
                     sources: vec![],
                 },

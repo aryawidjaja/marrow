@@ -26,7 +26,9 @@ const CORE_RULES: &str = "\
 of 2 or more did not match your words at all, so read it, it is often the thing you did not know to\n\
 ask for.\n\
 2. Save as you go. The moment you reach a durable decision, fact, or gotcha, save it with `mem_write`\n\
-(kind `decision` or `fact`). Call `mem_recall` first so you do not duplicate.\n\
+(kind `decision` or `fact`). Call `mem_recall` first so you do not duplicate. Pass `model` with YOUR\n\
+model id: Marrow cannot see which model you are, and knowing that a belief came from a small fast\n\
+model rather than a big careful one is exactly what a human needs when two memories disagree.\n\
 3. File it where it belongs. Every memory lives in an `area` of the project (`auth`, `billing`,\n\
 `infra`). Call `mem_areas` to see which areas already exist and REUSE one instead of inventing a\n\
 near-duplicate. If nothing fits, leave `area` out rather than forcing a wrong one: an unfiled memory\n\

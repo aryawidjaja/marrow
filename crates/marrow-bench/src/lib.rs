@@ -31,6 +31,7 @@ fn mem(kind: MemoryKind, topic: &str, body: &str, confidence: f64) -> Memory {
             decay: None,
             provenance: Provenance {
                 written_by: "bench".into(),
+                model: None,
                 session_id: None,
                 sources: vec![],
             },
