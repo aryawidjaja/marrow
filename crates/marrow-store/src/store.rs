@@ -726,6 +726,7 @@ impl Store {
             topic: fm.topic.clone().unwrap_or_default(),
             area: fm.area.clone().unwrap_or_default(),
             project_id: fm.scope.project_id.clone(),
+            written_by: fm.provenance.written_by.clone(),
             confidence: fm.confidence,
             created_at: fm.created_at.clone(),
             updated_at: fm.updated_at.clone(),

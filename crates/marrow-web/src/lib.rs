@@ -263,25 +263,27 @@ fn channel(default_root: Option<&Path>) -> Response {
         Ok(s) => s,
         Err(e) => return error(&e.to_string()),
     };
-    match store.channel_threads(50) {
-        Ok(threads) => {
-            let items: Vec<Value> = threads
-                .iter()
-                .filter_map(|ms| {
-                    ms.first().map(|first| {
-                        json!({
-                            "thread": first.thread,
-                            "messages": ms.iter().map(|m| json!({
-                                "from": m.from, "to": m.to, "role": m.role, "body": m.body, "ts": m.ts
-                            })).collect::<Vec<_>>(),
-                        })
-                    })
-                })
-                .collect();
-            json_ok(json!({ "threads": items }))
-        }
-        Err(e) => error(&e.to_string()),
-    }
+    // The human reads every room, so ask as "all" rather than as one agent.
+    let rooms = match store.rooms(&["all".to_string()], 50) {
+        Ok(r) => r,
+        Err(e) => return error(&e.to_string()),
+    };
+    let items: Vec<Value> = rooms
+        .iter()
+        .map(|r| {
+            let msgs = store.thread(&r.thread).unwrap_or_default();
+            json!({
+                "thread": r.thread,
+                "topic": r.topic,
+                "participants": r.participants,
+                "last_ts": r.last_ts,
+                "messages": msgs.iter().map(|m| json!({
+                    "from": m.from, "to": m.to, "role": m.role, "body": m.body, "ts": m.ts
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    json_ok(json!({ "rooms": items }))
 }
 
 fn home_dir() -> PathBuf {

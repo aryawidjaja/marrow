@@ -1,10 +1,41 @@
 //! Tool definitions and execution against a Marrow store.
 
 use std::path::{Path, PathBuf};
+use std::sync::RwLock;
 
 use marrow_memdocs::{Decay, Frontmatter, Memory, MemoryKind, Provenance, Scope, Status};
 use marrow_store::{knowledge_docs, ClaimScope, Hub, Query, Store};
 use serde_json::{json, Value};
+
+/// Who is on the other end of this MCP connection, from the `initialize` handshake.
+static CLIENT: RwLock<Option<String>> = RwLock::new(None);
+
+/// Record the connecting agent, so its writes are attributed to it rather than to "mcp".
+pub fn remember_client(client: &Value) {
+    let name = client.get("name").and_then(Value::as_str).unwrap_or("");
+    if name.is_empty() {
+        return;
+    }
+    if let Ok(mut w) = CLIENT.write() {
+        *w = Some(name.to_string());
+    }
+}
+
+/// The author to record when a tool call does not name one: the connected agent, e.g. `claude-code`
+/// or `codex`. An agent that passes `by` explicitly still wins.
+fn author(args: &Value) -> String {
+    if let Some(by) = opt_arg(args, "by") {
+        return by;
+    }
+    if let Some(session) = opt_arg(args, "session") {
+        return session;
+    }
+    CLIENT
+        .read()
+        .ok()
+        .and_then(|c| c.clone())
+        .unwrap_or_else(|| "mcp".into())
+}
 
 /// The tool catalog advertised via `tools/list`.
 ///
@@ -394,7 +425,7 @@ fn areas(store: &Store) -> Result<String, String> {
 
 fn recall(store: &Store, args: &Value) -> Result<String, String> {
     let text = str_arg(args, "text")?;
-    let by = opt_arg(args, "by").unwrap_or_else(|| "mcp".into());
+    let by = author(args);
     // Associative recall: the matches plus the memories connected to them (one fetch, the related
     // cluster). `connect` caps the extras (0 turns it off); neighbours come back terse.
     let max_neighbors = args
@@ -556,7 +587,7 @@ fn audit(store: &Store) -> Result<String, String> {
 fn claim(store: &Store, args: &Value) -> Result<String, String> {
     let session = str_arg(args, "session")?;
     let intent = str_arg(args, "intent")?;
-    let by = opt_arg(args, "by").unwrap_or_else(|| "mcp".into());
+    let by = author(args);
     let ttl = args.get("ttl_secs").and_then(Value::as_i64).unwrap_or(900);
     let c = store
         .claim(&session, &by, scope_from(args), &intent, ttl)
@@ -568,7 +599,7 @@ fn claim(store: &Store, args: &Value) -> Result<String, String> {
 
 fn release(store: &Store, args: &Value) -> Result<String, String> {
     let claim_id = str_arg(args, "claim_id")?;
-    let by = opt_arg(args, "by").unwrap_or_else(|| "mcp".into());
+    let by = author(args);
     store.release(&claim_id, &by).map_err(|e| e.to_string())?;
     Ok(json!({"released": claim_id}).to_string())
 }
@@ -588,7 +619,7 @@ fn claims(store: &Store, args: &Value) -> Result<String, String> {
 fn progress(store: &Store, args: &Value) -> Result<String, String> {
     let summary = str_arg(args, "summary")?;
     let session = opt_arg(args, "session").unwrap_or_else(|| "mcp".into());
-    let by = opt_arg(args, "by").unwrap_or_else(|| "mcp".into());
+    let by = author(args);
     let files = arr_arg(args, "files");
     store
         .progress(&session, &by, &summary, &files)
@@ -618,7 +649,7 @@ fn activity(store: &Store, args: &Value) -> Result<String, String> {
 fn bootstrap(store: &Store, root: &Path, args: &Value) -> Result<String, String> {
     let goal = str_arg(args, "goal")?;
     let project = opt_arg(args, "project").unwrap_or_else(|| "default".into());
-    let by = opt_arg(args, "by").unwrap_or_else(|| "mcp".into());
+    let by = author(args);
     let max_tokens = args
         .get("max_tokens")
         .and_then(Value::as_u64)
@@ -725,7 +756,7 @@ fn channel_store(root: &Path) -> Result<Store, String> {
 fn ask(root: &Path, args: &Value) -> Result<String, String> {
     let to = str_arg(args, "to")?;
     let body = str_arg(args, "body")?;
-    let by = opt_arg(args, "by").unwrap_or_else(|| "mcp".into());
+    let by = author(args);
     let thread = opt_arg(args, "thread");
     let topic = opt_arg(args, "topic");
     let t = channel_store(root)?
@@ -771,7 +802,7 @@ fn rooms(root: &Path, args: &Value) -> Result<String, String> {
 fn reply(root: &Path, args: &Value) -> Result<String, String> {
     let thread = str_arg(args, "thread")?;
     let body = str_arg(args, "body")?;
-    let by = opt_arg(args, "by").unwrap_or_else(|| "mcp".into());
+    let by = author(args);
     let store = channel_store(root)?;
     // A reply goes back to whoever started the thread (unless a recipient is named).
     let to = opt_arg(args, "to").or_else(|| {
@@ -1024,7 +1055,7 @@ fn memory_from(args: &Value) -> Result<Memory, String> {
                 expires_at: Some(expires_at),
             }),
             provenance: Provenance {
-                written_by: opt_arg(args, "by").unwrap_or_else(|| "mcp".into()),
+                written_by: author(args),
                 session_id: opt_arg(args, "session"),
                 sources: str_list(args, "sources"),
             },

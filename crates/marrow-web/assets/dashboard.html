@@ -286,15 +286,31 @@
   #channel .wrap { max-width: 720px; margin: 0 auto; }
   #channel .ch-head { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
   #channel .thread { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-    padding: 14px 16px; margin-bottom: 14px; }
-  #channel .msg { display: flex; flex-direction: column; margin: 8px 0; max-width: 82%; }
+    margin-bottom: 12px; overflow: hidden; }
+  /* A room announces its subject and who is in it, so the channel reads as a set of conversations
+     rather than one undifferentiated pile of messages. */
+  #channel .room-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+    cursor: pointer; user-select: none; }
+  #channel .room-head:hover { background: var(--panel2); }
+  #channel .room-head .caret { color: var(--muted); font-size: 11px; width: 10px; transition: transform .15s; }
+  #channel .thread.open .room-head .caret { transform: rotate(90deg); }
+  #channel .room-head .subject { font-weight: 600; font-size: 13px; color: var(--accent); }
+  #channel .room-head .meta { color: var(--muted); font-size: 11px; margin-left: auto; text-align: right; }
+  #channel .who-chip { display: inline-block; background: var(--panel2); border: 1px solid var(--line);
+    border-radius: 20px; padding: 1px 8px; font-size: 10px; color: var(--fg); margin-left: 4px; }
+  #channel .room-body { display: none; padding: 4px 16px 14px; border-top: 1px solid var(--line); }
+  #channel .thread.open .room-body { display: block; }
+  #channel .msg { display: flex; flex-direction: column; margin: 10px 0; max-width: 82%; }
   #channel .msg .who { font-size: 11px; color: var(--muted); margin-bottom: 3px; }
-  #channel .msg .bubble { padding: 8px 12px; border-radius: 12px; font-size: 13px; line-height: 1.45; }
+  #channel .msg .bubble { padding: 8px 12px; border-radius: 12px; font-size: 13px; line-height: 1.45;
+    white-space: pre-wrap; }
   #channel .msg.ask { align-self: flex-start; }
   #channel .msg.ask .bubble { background: var(--panel2); border-top-left-radius: 4px; }
   #channel .msg.reply { align-self: flex-end; align-items: flex-end; }
-  #channel .msg.reply .bubble { background: #24406b; border-top-right-radius: 4px; }
+  #channel .msg.reply .bubble { background: #3b3413; border: 1px solid #5c5220; border-top-right-radius: 4px; }
   #channel .empty { color: var(--muted); text-align: center; margin-top: 60px; }
+  .detail .by { display: inline-block; border: 1px solid var(--line); border-radius: 20px;
+    padding: 1px 9px; font-size: 10px; margin-bottom: 8px; }
 </style>
 </head>
 <body>
@@ -378,6 +394,7 @@ let view = ["project", "hive", "channel"].includes(saved.view) ? saved.view : "p
 let raw = { nodes: [], links: [] }, nodes = [], links = [], byId = {};
 let filter = "", selected = null, linkMode = false, linkFrom = null, heat = 1;
 let edgeFilter = null;   // isolate one connection type from the legend; null shows them all
+let byFilter = null;     // isolate one agent's memories; null shows every author
 let project = typeof saved.project === "string" ? saved.project : "", projects = [];
 const pq = (lead) => project ? (lead || "?") + "project=" + encodeURIComponent(project) : "";
 const cv = document.getElementById("c"), ctx = cv.getContext("2d");
@@ -618,20 +635,52 @@ function buildLegend() {
     ? "Every neuron is a memory, grouped into the <b>project</b> it belongs to. Links are real, not random: memories connect when they share a <b>topic</b>, a <b>tag</b>, or related <b>meaning</b>, and two projects bridge when they share something specific."
     : "Every neuron is a memory, grouped into the <b>area</b> of the project it belongs to (auth, billing, infra). Links connect memories that share a <b>topic</b>, a <b>tag</b>, or related <b>meaning</b>. Grey <i>unfiled</i> neurons have no area yet; they are still fully searchable.";
 
+  // Who wrote what. A machine runs several agents, and "show me only what Codex learned" is the
+  // question you actually ask when two of them disagree.
+  const authors = {};
+  for (const n of nodes) if (n.by) authors[n.by] = (authors[n.by] || 0) + 1;
+  const names = Object.keys(authors).sort((a, b) => authors[b] - authors[a]);
+  const whoRows = names.length < 2 ? "" :
+    `<div class="lg-head" style="margin-top:12px">Written by</div>` +
+    names.map(a => {
+      const on = !byFilter || byFilter === a;
+      return `<button class="li${on ? "" : " off"}${byFilter === a ? " solo" : ""}" data-by="${esc(a)}"
+        aria-pressed="${byFilter === a}" title="Show only what ${esc(a)} wrote">
+        <span class="edge" style="background:${authorColor(a)}"></span>
+        <span class="lg-label">${esc(a)}</span>
+        <span class="lg-count">${authors[a]}</span>
+      </button>`;
+    }).join("");
+
   el.innerHTML =
     `<div class="lg-head">Connections<span class="lg-help" id="lg-toggle">ⓘ how it works</span></div>` +
     kinds.map(row).join("") +
-    (edgeFilter ? `<button class="lg-reset" id="lg-all">Show all connections</button>` : "") +
+    whoRows +
+    (edgeFilter || byFilter ? `<button class="lg-reset" id="lg-all">Show everything</button>` : "") +
     `<div class="lg-note" id="lg-note">${how}</div>`;
 
   document.getElementById("lg-toggle").onclick = () =>
     document.getElementById("lg-note").classList.toggle("show");
   const reset = document.getElementById("lg-all");
-  if (reset) reset.onclick = () => setEdgeFilter(null);
-  for (const b of el.querySelectorAll(".li")) {
+  if (reset) reset.onclick = () => { byFilter = null; setEdgeFilter(null); };
+  for (const b of el.querySelectorAll(".li[data-rel]")) {
     // Click a type to isolate it; click it again to come back to everything.
     b.onclick = () => setEdgeFilter(edgeFilter === b.dataset.rel ? null : b.dataset.rel);
   }
+  for (const b of el.querySelectorAll(".li[data-by]")) {
+    b.onclick = () => {
+      byFilter = byFilter === b.dataset.by ? null : b.dataset.by;
+      buildLegend(); invalidate();
+    };
+  }
+}
+
+// One stable colour per agent, so claude-code is the same colour everywhere you look.
+const AUTHOR_COLORS = ["#ffde59", "#6fd3ff", "#a78bfa", "#57d9a3", "#ff9f7f", "#f472b6"];
+function authorColor(name) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return AUTHOR_COLORS[h % AUTHOR_COLORS.length];
 }
 
 function setEdgeFilter(rel) {
@@ -835,7 +884,7 @@ function draw() {
     const lit = ends
       ? (n === ends[0] || n === ends[1])
       : (!selected || n === selected || nb.has(n)) && (!touched || touched.has(n));
-    const hidden = filter && !match(n);
+    const hidden = (filter && !match(n)) || (byFilter && n.by !== byFilter);
     ctx.globalAlpha = (hidden ? 0.08 : lit ? 1 : 0.1) * (inFocus(n) ? 1 : rest);
     ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, 7);
     ctx.fillStyle = colorFor(view, n); ctx.fill();
@@ -1083,9 +1132,16 @@ async function select(n) {
       (trail.sources && trail.sources.length ? `<br>from ${trail.sources.map(esc).join(", ")}` : "") + `</div>`
     : "";
 
+  // Who wrote it, right in the header. Which agent knew a thing is half the story when two of them
+  // tell you different things.
+  const author = n.by
+    ? `<span class="by" style="border-color:${authorColor(n.by)};color:${authorColor(n.by)}">${esc(n.by)}</span>`
+    : "";
+
   d.innerHTML = `<span class="x" data-act="closedetail">✕</span>
     <span class="k">${n.kind}${n.group && (view === "hive" || unified) ? " · " + esc(n.group) : ""}${n.area ? " · " + esc(n.area) : ""}</span>
     <h3>${esc(n.label || n.id)}</h3>
+    ${author}
     ${warn}
     <div class="body">${shown}</div>` +
     (long ? `<button class="more" onclick="expandBody(this)">read more</button>` : "") +
@@ -1391,19 +1447,33 @@ function setView(v) {
 }
 async function loadChannel() {
   const el = document.getElementById("channel");
-  let threads = [];
-  try { threads = (await (await fetch("/api/channel")).json()).threads || []; } catch {}
-  if (!threads.length) {
-    el.innerHTML = `<div class="empty">No agent messages yet.<br><br>This is where your agents talk to each other — one project's agent can ask another
-      "how's the training going?" and get a reply, all with you able to read along. Agents use mem_ask / mem_inbox / mem_reply.</div>`;
+  let rooms = [];
+  try { rooms = (await (await fetch("/api/channel")).json()).rooms || []; } catch {}
+  if (!rooms.length) {
+    el.innerHTML = `<div class="empty">No agent conversations yet.<br><br>This is where your agents talk to each other — a Claude Code session and a
+      Codex session reach each other here, each conversation in its own room. Agents use mem_ask / mem_rooms / mem_inbox / mem_reply.</div>`;
     return;
   }
-  el.innerHTML = `<div class="wrap"><div class="ch-head">${threads.length} conversation(s) between your agents — newest first.</div>` +
-    threads.map(t => `<div class="thread">` + t.messages.map(m => `
-      <div class="msg ${m.role === "reply" ? "reply" : "ask"}">
-        <div class="who">${esc(m.from)} ${m.role === "ask" ? "asked " + esc(m.to) : "replied"}</div>
-        <div class="bubble">${esc(m.body)}</div>
-      </div>`).join("") + `</div>`).join("") + `</div>`;
+  // Rooms are collapsed by default and the newest opens: a busy channel should be scannable by
+  // subject, not a wall of every message ever sent.
+  el.innerHTML = `<div class="wrap"><div class="ch-head">${rooms.length} room(s) — most recently active first. Click one to read it.</div>` +
+    rooms.map((r, i) => `
+      <div class="thread${i === 0 ? " open" : ""}" data-room="${esc(r.thread)}">
+        <div class="room-head">
+          <span class="caret">▶</span>
+          <span class="subject">${esc(r.topic || "(no subject)")}</span>
+          <span class="meta">${r.messages.length} message${r.messages.length === 1 ? "" : "s"} · ${ago(r.last_ts)}<br>
+            ${(r.participants || []).map(p => `<span class="who-chip">${esc(p)}</span>`).join("")}</span>
+        </div>
+        <div class="room-body">` + r.messages.map(m => `
+          <div class="msg ${m.role === "reply" ? "reply" : "ask"}">
+            <div class="who">${esc(m.from)}${m.role === "ask" && m.to !== "all" ? " → " + esc(m.to) : ""} · ${ago(m.ts)}</div>
+            <div class="bubble">${esc(m.body)}</div>
+          </div>`).join("") + `</div>
+      </div>`).join("") + `</div>`;
+
+  el.querySelectorAll(".room-head").forEach(h =>
+    h.onclick = () => h.parentElement.classList.toggle("open"));
 }
 document.getElementById("tab-project").onclick = () => setView("project");
 document.getElementById("tab-hive").onclick = () => setView("hive");
@@ -1678,11 +1748,14 @@ function renderLive(events) {
     liveSeen.add(e.id);
     const verb = VERBS[e.kind] || e.kind;
     const what = (e.summary || "").replace(/^[a-z_]+:\s*/i, "");
+    // Most summaries are already a sentence ("wrote fact 'x'"); prefixing the verb again read
+    // "wrote wrote fact 'x'".
+    const line = what.toLowerCase().startsWith(verb.toLowerCase()) ? what : `${verb} ${what}`;
     const row = document.createElement("div");
     row.className = "live-row" + (first ? " nofade" : "");
     if (e.memory) { row.classList.add("jump"); row.dataset.mem = e.memory; if (e.project) row.dataset.proj = e.project; }
     row.innerHTML = `<span class="who">${esc(e.actor || "agent")}</span>` +
-      `<span class="what">${esc(verb)} ${esc(what)}</span>` +
+      `<span class="what">${esc(line)}</span>` +
       `<span class="when" data-ts="${esc(e.ts)}">${ago(e.ts)}</span>`;
     rows.prepend(row);
   }

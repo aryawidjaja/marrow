@@ -16,6 +16,8 @@ pub struct IndexRow {
     pub topic: String,
     pub area: String,
     pub project_id: String,
+    /// Which agent wrote this, e.g. `claude-code` or `codex`.
+    pub written_by: String,
     pub confidence: f64,
     pub created_at: String,
     pub updated_at: String,
@@ -35,6 +37,7 @@ pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
             topic TEXT NOT NULL DEFAULT '',
             area TEXT NOT NULL DEFAULT '',
             project_id TEXT NOT NULL DEFAULT '',
+            written_by TEXT NOT NULL DEFAULT '',
             confidence REAL NOT NULL DEFAULT 1.0,
             created_at TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL DEFAULT '',
@@ -57,9 +60,13 @@ pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
             n INTEGER NOT NULL DEFAULT 0
         );",
     )?;
-    // Older stores predate `area`; add it in place rather than forcing a full reindex.
+    // Older stores predate these columns; add them in place rather than forcing a full reindex.
     let _ = conn.execute(
         "ALTER TABLE memories ADD COLUMN area TEXT NOT NULL DEFAULT ''",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE memories ADD COLUMN written_by TEXT NOT NULL DEFAULT ''",
         [],
     );
     Ok(())
@@ -137,8 +144,8 @@ pub fn upsert(conn: &Connection, row: &IndexRow) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT OR REPLACE INTO memories
          (id, kind, status, topic, project_id,
-          confidence, created_at, updated_at, expires_at, tags, path, body, area)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+          confidence, created_at, updated_at, expires_at, tags, path, body, area, written_by)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
         params![
             row.id,
             row.kind,
@@ -152,7 +159,8 @@ pub fn upsert(conn: &Connection, row: &IndexRow) -> rusqlite::Result<()> {
             row.tags,
             row.path,
             row.body,
-            row.area
+            row.area,
+            row.written_by
         ],
     )?;
     conn.execute("DELETE FROM memories_fts WHERE id = ?1", params![row.id])?;
@@ -240,7 +248,7 @@ fn filters(q: &Query, now: &str) -> (String, Vec<String>) {
     (where_sql, binds)
 }
 
-const COLS: &str = "id,kind,status,topic,project_id,confidence,created_at,updated_at,expires_at,tags,path,body,area";
+const COLS: &str = "id,kind,status,topic,project_id,confidence,created_at,updated_at,expires_at,tags,path,body,area,written_by";
 
 fn row_from(r: &rusqlite::Row) -> rusqlite::Result<IndexRow> {
     Ok(IndexRow {
@@ -257,6 +265,7 @@ fn row_from(r: &rusqlite::Row) -> rusqlite::Result<IndexRow> {
         path: r.get(10)?,
         body: r.get(11)?,
         area: r.get(12)?,
+        written_by: r.get(13).unwrap_or_default(),
     })
 }
 

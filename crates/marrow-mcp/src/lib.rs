@@ -23,14 +23,21 @@ pub fn handle(root: &Path, req: &Value) -> Option<Value> {
     let method = req.get("method").and_then(Value::as_str).unwrap_or("");
 
     match method {
-        "initialize" => Some(success(
-            id,
-            json!({
-                "protocolVersion": PROTOCOL_VERSION,
-                "capabilities": {"tools": {}, "prompts": {}},
-                "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION}
-            }),
-        )),
+        "initialize" => {
+            // The handshake says who is connecting. Remember it, or every memory an agent writes is
+            // filed under "mcp" and you can never tell which agent knew what.
+            if let Some(client) = req.pointer("/params/clientInfo") {
+                tools::remember_client(client);
+            }
+            Some(success(
+                id,
+                json!({
+                    "protocolVersion": PROTOCOL_VERSION,
+                    "capabilities": {"tools": {}, "prompts": {}},
+                    "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION}
+                }),
+            ))
+        }
         "notifications/initialized" => None,
         "ping" => Some(success(id, json!({}))),
         "tools/list" => Some(success(id, json!({"tools": tools::definitions()}))),

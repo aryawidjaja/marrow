@@ -22,6 +22,8 @@ pub struct Node {
     pub area: String,
     /// When this memory was written. Lets the dashboard replay the brain's growth over time.
     pub born: String,
+    /// Which agent wrote it, so you can see (and filter by) who knew what.
+    pub by: String,
     pub snippet: String,
     pub degree: usize,
 }
@@ -185,6 +187,7 @@ pub fn project_graph(store: &Store, root: &Path) -> Graph {
             group: r.area.clone(),
             area: r.area.clone(),
             born: r.created_at.clone(),
+            by: r.written_by.clone(),
             snippet: snippet(&r.body, 140),
             degree: 0,
         });
@@ -214,6 +217,7 @@ pub fn project_graph(store: &Store, root: &Path) -> Graph {
             group: area.clone(),
             area: area.clone(),
             born: String::new(),
+            by: String::new(),
             snippet: format!("{} memories filed under `{area}`", members.len()),
             degree: 0,
         });
@@ -279,6 +283,7 @@ pub fn hive_graph(hub: &Hub) -> Graph {
         group: "core".into(),
         area: String::new(),
         born: String::new(),
+        by: String::new(),
         snippet: "shared memory about you — the center of the hive".into(),
         degree: 0,
     }];
@@ -317,6 +322,7 @@ pub fn hive_graph(hub: &Hub) -> Graph {
                 group: p.name.clone(),
                 area: String::new(),
                 born: String::new(),
+                by: String::new(),
                 snippet: format!("project: {}", p.root.display()),
                 degree: 0,
             });
@@ -367,6 +373,7 @@ pub fn hive_graph(hub: &Hub) -> Graph {
                 group: p.name.clone(),
                 area: r.area.clone(),
                 born: r.created_at.clone(),
+                by: r.written_by.clone(),
                 snippet: snippet(&r.body, 140),
                 degree: 0,
             });
@@ -396,6 +403,7 @@ pub fn hive_graph(hub: &Hub) -> Graph {
                 group: p.name.clone(),
                 area: area.clone(),
                 born: String::new(),
+                by: String::new(),
                 snippet: format!("{} memories in `{area}` ({})", members.len(), p.name),
                 degree: 0,
             });
