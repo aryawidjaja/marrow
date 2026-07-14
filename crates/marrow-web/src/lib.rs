@@ -263,8 +263,8 @@ fn channel(default_root: Option<&Path>) -> Response {
         Ok(s) => s,
         Err(e) => return error(&e.to_string()),
     };
-    // The human reads every room, so ask as "all" rather than as one agent.
-    let rooms = match store.rooms(&["all".to_string()], 50) {
+    // The human reads every room, including ones two agents addressed only to each other.
+    let rooms = match store.all_rooms(50) {
         Ok(r) => r,
         Err(e) => return error(&e.to_string()),
     };

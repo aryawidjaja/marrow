@@ -177,8 +177,22 @@ impl Store {
     /// The rooms `me` can see, most recently active first, each with its unread count — so an
     /// agent can find the right conversation instead of opening yet another one.
     pub fn rooms(&self, me: &[String], limit: usize) -> Result<Vec<Room>, Error> {
-        let watermark = self.read_watermark(me)?;
-        let is_me = |s: &str| me.iter().any(|m| m == s);
+        self.rooms_seen_by(Some(me), limit)
+    }
+
+    /// Every room on the channel, whoever it was addressed to. This is the human's view: an agent
+    /// only needs the conversations it is in, but a person watching their agents work has to see all
+    /// of them, including the ones two agents are holding privately.
+    pub fn all_rooms(&self, limit: usize) -> Result<Vec<Room>, Error> {
+        self.rooms_seen_by(None, limit)
+    }
+
+    /// `me = None` observes everything; `Some(names)` shows only the rooms those names can see.
+    fn rooms_seen_by(&self, me: Option<&[String]>, limit: usize) -> Result<Vec<Room>, Error> {
+        let empty: [String; 0] = [];
+        let me_names: &[String] = me.unwrap_or(&empty);
+        let watermark = self.read_watermark(me_names)?;
+        let is_me = |s: &str| me_names.iter().any(|m| m == s);
         let topics = self.thread_topics()?;
 
         let mut order: Vec<String> = Vec::new();
@@ -196,9 +210,11 @@ impl Store {
             let Some(msgs) = by_thread.remove(&id) else {
                 continue;
             };
-            let mine = msgs
-                .iter()
-                .any(|m| m.to == "all" || is_me(&m.to) || is_me(&m.from));
+            // An agent sees the rooms it is in; an observer sees them all.
+            let mine = me.is_none()
+                || msgs
+                    .iter()
+                    .any(|m| m.to == "all" || is_me(&m.to) || is_me(&m.from));
             if !mine {
                 continue;
             }
@@ -492,5 +508,38 @@ mod room_tests {
             "you do not have mail from yourself"
         );
         assert_eq!(store.unread_count(&["codex".into()]).unwrap(), 1);
+    }
+
+    #[test]
+    fn the_human_sees_rooms_two_agents_addressed_only_to_each_other() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::init(dir.path()).unwrap();
+        // A room one agent opened for another. Nobody said "all", so it is private between them.
+        store
+            .post_to_room(
+                "claude",
+                "codex",
+                None,
+                "ask",
+                "Take a look at this.",
+                Some("handoff"),
+            )
+            .unwrap();
+
+        // A third agent is not in it, and should not see it.
+        assert!(store
+            .rooms(&["someone-else".to_string()], 10)
+            .unwrap()
+            .is_empty());
+
+        // But the person watching their agents work must see every conversation, or the dashboard
+        // silently hides the ones that matter most.
+        let seen = store.all_rooms(10).unwrap();
+        assert_eq!(
+            seen.len(),
+            1,
+            "the human's view must not filter by recipient"
+        );
+        assert_eq!(seen[0].topic, "handoff");
     }
 }
