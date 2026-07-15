@@ -15,7 +15,7 @@ marrow-store = { path = "../marrow-store" }
 marrow-memdocs = { path = "../marrow-memdocs" }
 marrow-core = { path = "../marrow-core" }
 serde_json = "1"
-ureq = { version = "2", features = ["json"] }
+ureq = { version = "3", features = ["json"] }
 
 [features]
 embed-fastembed = ["marrow-store/embed-fastembed"]
