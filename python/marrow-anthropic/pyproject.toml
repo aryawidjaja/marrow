@@ -1,4 +1,26 @@
 
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "marrow-anthropic"
+version = "0.5.0"
+description = "Filesystem backend for Anthropic's memory tool"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Mutaqin Aryawijaya" }]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: Apache Software License",
+]
+dependencies = []
+
+[project.optional-dependencies]
+sdk = ["anthropic>=0.67"]
+test = ["pytest>=8"]
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]

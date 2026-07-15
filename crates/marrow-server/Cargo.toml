@@ -1,6 +1,6 @@
 [package]
 name = "marrow-server"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 description = "Marrow served backbone: an authenticated HTTP endpoint so agents across devices share one brain."
 license = "AGPL-3.0-only"

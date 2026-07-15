@@ -44,6 +44,25 @@ impl Default for ConsolidationConfig {
     }
 }
 
+/// How memory-returning tools render their results.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ResponseMode {
+    /// Full memory bodies (current behavior, default).
+    #[default]
+    Full,
+    /// Terse, token-budgeted lines.
+    Snippet,
+}
+
+/// Retrieval / response-rendering configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct RetrievalConfig {
+    /// Full bodies vs terse budgeted lines.
+    #[serde(default)]
+    pub response_mode: ResponseMode,
+}
+
 /// Per-store configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
@@ -58,6 +77,9 @@ pub struct Config {
     /// Consolidation behavior.
     #[serde(default)]
     pub consolidation: ConsolidationConfig,
+    /// Retrieval / response rendering.
+    #[serde(default)]
+    pub retrieval: RetrievalConfig,
 }
 
 impl Default for Config {
@@ -67,6 +89,7 @@ impl Default for Config {
             sign: false,
             embedding: EmbeddingConfig::default(),
             consolidation: ConsolidationConfig::default(),
+            retrieval: RetrievalConfig::default(),
         }
     }
 }
@@ -97,6 +120,7 @@ mod tests {
                 ..EmbeddingConfig::default()
             },
             consolidation: ConsolidationConfig::default(),
+            retrieval: RetrievalConfig::default(),
         };
         let parsed = Config::from_toml(&c.to_toml()).unwrap();
         assert_eq!(c, parsed);
@@ -114,5 +138,23 @@ mod tests {
         let c = Config::from_toml("project_id = \"x\"\n").unwrap();
         assert_eq!(c.embedding.provider, "none");
         assert_eq!(c.embedding.default_weight, 0.5);
+    }
+
+    #[test]
+    fn retrieval_defaults_to_full() {
+        let c = Config::from_toml("project_id = \"x\"\n").unwrap();
+        assert_eq!(c.retrieval.response_mode, ResponseMode::Full);
+    }
+
+    #[test]
+    fn retrieval_response_mode_round_trips() {
+        let c = Config {
+            retrieval: RetrievalConfig {
+                response_mode: ResponseMode::Snippet,
+            },
+            ..Config::default()
+        };
+        let parsed = Config::from_toml(&c.to_toml()).unwrap();
+        assert_eq!(parsed.retrieval.response_mode, ResponseMode::Snippet);
     }
 }

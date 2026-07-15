@@ -12,17 +12,17 @@ You need the repo (for `deploy/`) and the Fly CLI once:
 brew install flyctl                 # or: curl -L https://fly.io/install.sh | sh
 fly auth login                      # or `fly auth signup`
 git clone https://github.com/aryawidjaja/marrow
-cd marrow/deploy
+cd marrow
 ```
 
 Then create and deploy the app (the Dockerfile builds the backbone straight from GitHub, so this
 folder is all Fly needs):
 
 ```sh
-fly launch --no-deploy --copy-config          # accept the app name/region it proposes
+fly launch --no-deploy --copy-config -c deploy/fly.toml
 fly secrets set MARROW_TOKEN=$(openssl rand -hex 32)   # your shared key. SAVE IT (password manager)
 fly volumes create marrow_data --size 1       # persistent storage for the memories
-fly deploy
+fly deploy -c deploy/fly.toml
 ```
 
 Fly gives you an HTTPS URL like `https://your-app.fly.dev`. Check it:
@@ -31,7 +31,8 @@ Fly gives you an HTTPS URL like `https://your-app.fly.dev`. Check it:
 curl -s https://your-app.fly.dev/health        # {"ok":true,...}
 ```
 
-Any Docker host works the same way (Render, Railway, a VPS): build `deploy/Dockerfile`, set
+Any Docker host works the same way (Render, Railway, a VPS): build `deploy/Dockerfile` from the
+repository root, set
 `MARROW_TOKEN`, mount a volume at `/data`, expose `8787`, terminate TLS at the platform. To run it
 locally instead: `MARROW_TOKEN=$(openssl rand -hex 32) docker compose -f deploy/docker-compose.yml up`.
 
@@ -41,7 +42,7 @@ Each project on your machine is local and private by default. You share the *one
 synced. Everything else stays put. In that project, on **every** machine:
 
 ```bash
-marrow share --gateway https://your-app.fly.dev --space team-app --token <the-token>
+MARROW_TOKEN=<the-token> marrow share --gateway https://your-app.fly.dev --space team-app
 ```
 
 The rule: **same gateway + same space + same token = one brain.** `--space` is any label you pick,
@@ -106,4 +107,7 @@ marrow-serve --root <data-dir>/shared-brain --port 8088   # open http://localhos
 
 This is a beta backbone: auth is a single shared bearer token and isolation is per-project directory.
 It's the foundation for the hosted/team edition (per-tenant API keys, quotas, backups), which is
-roadmap. Run it on infrastructure you control, always over HTTPS for anything off your own machine.
+roadmap. Run it on infrastructure you control, always over HTTPS for anything off your own machine,
+and back up the mounted data volume. The local dashboard does not yet proxy the remote store; use it
+to configure sharing and use MCP tools to read or write the shared brain. Code anchors and freshness
+checks remain local-only because the backbone cannot see a client machine's source tree.

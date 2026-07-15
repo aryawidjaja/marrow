@@ -111,9 +111,19 @@ fn rpc(cfg: &Config, body: &str) -> Reply {
     let Some(tool) = req.get("tool").and_then(Value::as_str) else {
         return reply(400, json!({"ok": false, "error": "missing 'tool'"}));
     };
-    let args = req.get("args").cloned().unwrap_or_else(|| json!({}));
-    let project = req.get("project").and_then(Value::as_str).unwrap_or("");
-    let root = match store_root(cfg, project) {
+    let project = match safe_project(req.get("project").and_then(Value::as_str).unwrap_or("")) {
+        Some(project) => project,
+        None => return reply(400, json!({"ok": false, "error": "invalid project name"})),
+    };
+    let mut args = req.get("args").cloned().unwrap_or_else(|| json!({}));
+    let Some(fields) = args.as_object_mut() else {
+        return reply(
+            400,
+            json!({"ok": false, "error": "'args' must be an object"}),
+        );
+    };
+    fields.insert("project".into(), json!(project));
+    let root = match store_root(cfg, &project) {
         Ok(r) => r,
         Err(e) => return reply(400, json!({"ok": false, "error": e})),
     };
@@ -233,6 +243,15 @@ mod tests {
             r#"{"tool":"mem_search","project":"team","args":{"text":"JWT"}}"#,
         );
         assert!(search.body.contains("Use JWT"), "{}", search.body);
+
+        let bootstrap = handle(
+            &c,
+            "POST",
+            "/v1/rpc",
+            None,
+            r#"{"tool":"mem_bootstrap","project":"team","args":{"goal":"authentication"}}"#,
+        );
+        assert!(bootstrap.body.contains("Use JWT"), "{}", bootstrap.body);
     }
 
     #[test]

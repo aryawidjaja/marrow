@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use marrow_memdocs::{Frontmatter, Memory, MemoryKind, Provenance, Scope, Status};
+use marrow_memdocs::{Decay, Frontmatter, Memory, MemoryKind, Provenance, Scope, Status};
 use marrow_store::{Hub, Store};
 use serde_json::{json, Value};
 
@@ -34,9 +34,10 @@ pub fn route(default_root: Option<&Path>, method: &str, target: &str, body: &str
     match (method, p) {
         ("GET", "/") | ("GET", "/index.html") => return html(DASHBOARD),
         ("GET", "/api/hive") => return graph_hive(),
+        ("GET", "/api/hive/path") => return graph_hive_path(&query),
         ("GET", "/api/hive/memory") => return hive_memory(&query),
         ("GET", "/api/projects") => return projects_list(default_root),
-        ("GET", "/api/channel") => return channel(default_root),
+        ("GET", "/api/channel") => return channel(default_root, &query),
         ("GET", "/api/browse") => return browse(&query),
         ("GET", "/api/stale/hive") => return stale_hive(),
         ("GET", "/api/audit/hive") => return audit_hive(),
@@ -46,6 +47,7 @@ pub fn route(default_root: Option<&Path>, method: &str, target: &str, body: &str
         ("POST", "/api/project/init") => return hub_init(body),
         ("POST", "/api/project/share") => return project_share(body),
         ("POST", "/api/project/unshare") => return project_unshare(body),
+        ("POST", "/api/channel/reply") => return channel_reply(default_root, body),
         _ => {}
     }
 
@@ -59,8 +61,10 @@ pub fn route(default_root: Option<&Path>, method: &str, target: &str, body: &str
     };
     match (method, p) {
         ("GET", "/api/graph") => graph_project(&store, &root),
+        ("GET", "/api/path") => graph_project_path(&store, &root, &query),
         ("GET", "/api/stale") => stale(&store, &root),
         ("GET", "/api/audit") => audit(&store),
+        ("GET", "/api/onboarding") => onboarding(&store, &root),
         ("POST", "/api/memory") => create_memory(&store, body),
         ("POST", "/api/link") => link(&store, &root, &query, true),
         ("POST", "/api/unlink") => link(&store, &root, &query, false),
@@ -251,18 +255,40 @@ fn browse(query: &HashMap<String, String>) -> Response {
 
 /// The agent channel: conversation threads from the shared `core` bus (or the served store if
 /// there's no hive), for the dashboard's Channel view.
-fn channel(default_root: Option<&Path>) -> Response {
+fn channel_store(default_root: Option<&Path>) -> Result<Store, String> {
     let store = if Hub::active() {
         Hub::open().and_then(|h| h.core())
     } else if let Some(r) = default_root {
         Store::open(r)
     } else {
-        return json_ok(json!({ "threads": [] }));
+        return Err("no channel store is available".into());
     };
-    let store = match store {
+    store.map_err(|e| e.to_string())
+}
+
+fn channel(default_root: Option<&Path>, query: &HashMap<String, String>) -> Response {
+    let store = match channel_store(default_root) {
         Ok(s) => s,
-        Err(e) => return error(&e.to_string()),
+        Err(_) => return json_ok(json!({ "rooms": [] })),
     };
+
+    // Room summaries are intentionally cheap. The dashboard fetches one conversation only after
+    // the person opens it, instead of serializing every message in the busiest 50 rooms up front.
+    if let Some(thread) = query.get("thread").filter(|s| !s.is_empty()) {
+        let messages = match store.thread(thread) {
+            Ok(messages) => messages,
+            Err(e) => return error(&e.to_string()),
+        };
+        let topic = messages.iter().find_map(|m| m.topic.clone());
+        return json_ok(json!({
+            "thread": thread,
+            "topic": topic,
+            "messages": messages.iter().map(|m| json!({
+                "from": m.from, "to": m.to, "role": m.role, "body": m.body, "ts": m.ts
+            })).collect::<Vec<_>>(),
+        }));
+    }
+
     // The human reads every room, including ones two agents addressed only to each other.
     let rooms = match store.all_rooms(50) {
         Ok(r) => r,
@@ -271,19 +297,48 @@ fn channel(default_root: Option<&Path>) -> Response {
     let items: Vec<Value> = rooms
         .iter()
         .map(|r| {
-            let msgs = store.thread(&r.thread).unwrap_or_default();
             json!({
                 "thread": r.thread,
                 "topic": r.topic,
                 "participants": r.participants,
                 "last_ts": r.last_ts,
-                "messages": msgs.iter().map(|m| json!({
-                    "from": m.from, "to": m.to, "role": m.role, "body": m.body, "ts": m.ts
-                })).collect::<Vec<_>>(),
+                "message_count": r.messages,
+                "last_from": r.last_from,
+                "last_body": r.last_body,
             })
         })
         .collect();
     json_ok(json!({ "rooms": items }))
+}
+
+fn channel_reply(default_root: Option<&Path>, body: &str) -> Response {
+    let v = parse_body(body);
+    let Some(thread) = v
+        .get("thread")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+    else {
+        return error("reply needs a thread");
+    };
+    let Some(text) = v
+        .get("body")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    else {
+        return error("reply needs a body");
+    };
+    let store = match channel_store(default_root) {
+        Ok(store) => store,
+        Err(e) => return error(&e),
+    };
+    if store.thread(thread).map(|m| m.is_empty()).unwrap_or(true) {
+        return error("that room does not exist");
+    }
+    match store.post_to_room("human", "all", Some(thread), "reply", text, None) {
+        Ok(_) => json_ok(json!({ "ok": true, "thread": thread })),
+        Err(e) => error(&e.to_string()),
+    }
 }
 
 fn home_dir() -> PathBuf {
@@ -385,7 +440,7 @@ fn create_memory(store: &Store, body: &str) -> Response {
     let v = parse_body(body);
     let kind = match v.get("kind").and_then(Value::as_str).map(parse_kind) {
         Some(Ok(k)) => k,
-        _ => return error("memory needs a valid kind (fact|decision|entity|session|skill)"),
+        _ => return error("memory needs a valid kind (fact|decision|entity)"),
     };
     let Some(text) = v.get("body").and_then(Value::as_str) else {
         return error("memory needs a body");
@@ -397,6 +452,21 @@ fn create_memory(store: &Store, body: &str) -> Response {
         text,
         str_list(&v, "tags"),
     );
+    if let Some(confidence) = v.get("confidence").and_then(Value::as_f64) {
+        if !(0.0..=1.0).contains(&confidence) {
+            return error("confidence must be between 0 and 1");
+        }
+        memory.frontmatter.confidence = confidence;
+    }
+    memory.frontmatter.provenance.sources = str_list(&v, "sources");
+    memory.frontmatter.decay = v
+        .get("expires_at")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|expires_at| Decay {
+            expires_at: Some(expires_at.to_string()),
+        });
     match store.write(&mut memory) {
         Ok(id) => json_ok(json!({ "ok": true, "id": id })),
         Err(e) => error(&e.to_string()),
@@ -492,12 +562,78 @@ fn graph_project(store: &Store, root: &Path) -> Response {
     }
 }
 
+fn onboarding(store: &Store, root: &Path) -> Response {
+    let memories = store
+        .list()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|memory| memory.status == "active")
+        .count();
+    let docs: Vec<Value> = marrow_store::knowledge_docs(root)
+        .into_iter()
+        .map(|(path, bytes)| json!({ "path": path, "bytes": bytes }))
+        .collect();
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let registered = Hub::open()
+        .map(|hub| {
+            hub.projects()
+                .into_iter()
+                .any(|project| project.root == root)
+        })
+        .unwrap_or(false);
+    let remote = marrow_store::SharedRemote::load(&root);
+    json_ok(json!({
+        "memories": memories,
+        "docs": docs,
+        "registered": registered,
+        "shared": remote.is_some(),
+        "space": remote.as_ref().map(|remote| remote.space.as_str()),
+        "root": root.display().to_string(),
+    }))
+}
+
 fn graph_hive() -> Response {
     match Hub::open() {
         Ok(hub) => Response {
             status: 200,
             content_type: "application/json",
             body: graph::to_json(&graph::hive_graph(&hub)),
+        },
+        Err(e) => error(&e.to_string()),
+    }
+}
+
+fn path_ends(query: &HashMap<String, String>) -> Result<(&str, &str), Response> {
+    match (query.get("source"), query.get("target")) {
+        (Some(source), Some(target)) if !source.is_empty() && !target.is_empty() => {
+            Ok((source, target))
+        }
+        _ => Err(error("path needs source and target")),
+    }
+}
+
+fn graph_project_path(store: &Store, root: &Path, query: &HashMap<String, String>) -> Response {
+    let (source, target) = match path_ends(query) {
+        Ok(ends) => ends,
+        Err(response) => return response,
+    };
+    Response {
+        status: 200,
+        content_type: "application/json",
+        body: graph::path_to_json(&graph::project_graph(store, root), source, target),
+    }
+}
+
+fn graph_hive_path(query: &HashMap<String, String>) -> Response {
+    let (source, target) = match path_ends(query) {
+        Ok(ends) => ends,
+        Err(response) => return response,
+    };
+    match Hub::open() {
+        Ok(hub) => Response {
+            status: 200,
+            content_type: "application/json",
+            body: graph::path_to_json(&graph::hive_graph(&hub), source, target),
         },
         Err(e) => error(&e.to_string()),
     }
@@ -594,29 +730,61 @@ pub fn serve(root: Option<PathBuf>, addr: &str) -> Result<(), String> {
             println!("Marrow dashboard on http://{addr}  (centralized — every registered project)")
         }
     }
-    for mut request in server.incoming_requests() {
-        let method = request.method().as_str().to_string();
-        let target = request.url().to_string();
-        let mut body = String::new();
-        if method == "POST" {
-            let mut reader = std::io::Read::take(request.as_reader(), 1 << 20);
-            let _ = std::io::Read::read_to_string(&mut reader, &mut body);
-        }
-        let resp = route(root.as_deref(), &method, &target, &body);
-        let ctype =
-            tiny_http::Header::from_bytes(&b"Content-Type"[..], resp.content_type.as_bytes())
-                .unwrap();
-        // Never cache: the dashboard is a single-file app, and a cached copy after an upgrade is a
-        // real source of "it's broken after I refreshed" confusion.
-        let nocache =
-            tiny_http::Header::from_bytes(&b"Cache-Control"[..], &b"no-store"[..]).unwrap();
-        let http = tiny_http::Response::from_string(resp.body)
-            .with_status_code(resp.status)
-            .with_header(ctype)
-            .with_header(nocache);
-        let _ = request.respond(http);
+    for request in server.incoming_requests() {
+        // Anchor validation and hive graphs can be expensive. A single slow read must not freeze
+        // every pulse, message, and detail request behind it.
+        let request_root = root.clone();
+        std::thread::spawn(move || respond(request, request_root.as_deref()));
     }
     Ok(())
+}
+
+fn respond(mut request: tiny_http::Request, root: Option<&Path>) {
+    let method = request.method().as_str().to_string();
+    let target = request.url().to_string();
+    if method == "POST" && !same_origin(request.headers()) {
+        let response =
+            tiny_http::Response::from_string("foreign origin is not allowed").with_status_code(403);
+        let _ = request.respond(response);
+        return;
+    }
+    let mut body = String::new();
+    if method == "POST" {
+        let mut reader = std::io::Read::take(request.as_reader(), 1 << 20);
+        let _ = std::io::Read::read_to_string(&mut reader, &mut body);
+    }
+    let resp = route(root, &method, &target, &body);
+    let ctype =
+        tiny_http::Header::from_bytes(&b"Content-Type"[..], resp.content_type.as_bytes()).unwrap();
+    // Never cache: the dashboard is a single-file app, and a cached copy after an upgrade is a
+    // real source of "it's broken after I refreshed" confusion.
+    let nocache = tiny_http::Header::from_bytes(&b"Cache-Control"[..], &b"no-store"[..]).unwrap();
+    let http = tiny_http::Response::from_string(resp.body)
+        .with_status_code(resp.status)
+        .with_header(ctype)
+        .with_header(nocache);
+    let _ = request.respond(http);
+}
+
+/// Browser writes must come from the dashboard that received the request. Requests without an
+/// Origin remain available to local CLI/curl clients; a foreign web page cannot silently mutate a
+/// person's local memory store.
+fn same_origin(headers: &[tiny_http::Header]) -> bool {
+    let origin = headers
+        .iter()
+        .find(|header| header.field.equiv("Origin"))
+        .map(|header| header.value.as_str());
+    let Some(origin) = origin else { return true };
+    let host = headers
+        .iter()
+        .find(|header| header.field.equiv("Host"))
+        .map(|header| header.value.as_str());
+    let Some(host) = host else { return false };
+    origin
+        .strip_prefix("http://")
+        .or_else(|| origin.strip_prefix("https://"))
+        .and_then(|authority| authority.split('/').next())
+        == Some(host)
 }
 
 fn memory(store: &Store, id: &str) -> Response {
@@ -765,5 +933,27 @@ fn error(message: &str) -> Response {
         status: 500,
         content_type: "application/json",
         body: json!({ "error": message }).to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::same_origin;
+
+    fn header(name: &str, value: &str) -> tiny_http::Header {
+        tiny_http::Header::from_bytes(name.as_bytes(), value.as_bytes()).unwrap()
+    }
+
+    #[test]
+    fn browser_writes_require_the_request_host() {
+        assert!(same_origin(&[header("Host", "127.0.0.1:8088")]));
+        assert!(same_origin(&[
+            header("Host", "127.0.0.1:8088"),
+            header("Origin", "http://127.0.0.1:8088"),
+        ]));
+        assert!(!same_origin(&[
+            header("Host", "127.0.0.1:8088"),
+            header("Origin", "https://attacker.example"),
+        ]));
     }
 }

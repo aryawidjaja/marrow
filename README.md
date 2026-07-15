@@ -40,9 +40,10 @@ code changes, and lets many agents work together without stepping on each other.
 files you can read, edit, and commit, not a black box. A new session starts already knowing what the
 others learned.
 
-And it pays for itself in tokens. Ask the same "understand this codebase" question through Claude Code
-once cold and once warm with Marrow, and the warm run uses about **72% fewer tokens** and finishes
-about **57% faster**, because it recalls a small distilled briefing instead of re-reading every file.
+In one repeated Claude Code orientation benchmark on this repository, a populated Marrow run used
+about **72% fewer tokens** and finished about **57% faster** than cold exploration because it recalled
+a small distilled briefing instead of re-reading every file. This is an amortized, workload-specific
+result, not a guarantee for every task; the method and limitations are in [bench/REPORT.md](bench/REPORT.md).
 
 <img src="assets/benchmark.png" width="720" alt="Marrow: 72% fewer tokens, 57% faster, 25% cheaper">
 
@@ -67,9 +68,11 @@ brew install aryawidjaja/marrow/marrow
 marrow setup          # add --global to wire every repo at once
 ```
 
-**3. Restart your agent.** That's it. Sessions now start warm, capture decisions as they work, and
-claim files so parallel agents don't collide. Already mid-session? Run **`/marrow-save`** once to
-pour what it knows into the brain.
+**3. Check setup, then restart your agent.** `marrow setup` reports any missing prerequisite. Claude
+Code sessions then warm-start, capture activity, and use best-effort file claims to prevent local
+parallel edits from colliding. The hooks require `jq` (`brew install jq` or `apt install jq`) and
+fail open if a dependency or store is unavailable. Already mid-session? Run **`/marrow-save`** once
+to capture durable decisions from the current context.
 
 The memory lives in `.marrow/` in your project.
 
@@ -124,7 +127,7 @@ marrow hub recall "how do we do auth"   # searches every project, tagged by proj
 Now an agent working in `api` can ask what `webapp` knows. In the dashboard, the **Hive** tab shows a
 central *core* neuron (you) with every project orbiting it, bridged where they share ideas.
 
-## One brain across your devices
+## One brain across your devices (beta)
 
 Each project is local and private by default. Share the *one* project you want synced, and the rest
 stay on your machine. It's like sharing a repo, not your whole disk.
@@ -134,20 +137,24 @@ stay on your machine. It's like sharing a repo, not your whole disk.
 MARROW_TOKEN=$(openssl rand -hex 16) marrow-server
 
 # then in the project you want shared, on each machine
-marrow share --gateway https://your-gateway --space team-app --token <the-token>
+MARROW_TOKEN=<the-token> marrow share --gateway https://your-gateway --space team-app
 ```
 
-Same gateway + space + token on two machines = one brain. A decision saved on your laptop is on your
-desktop instantly. Every other project is untouched.
+Same gateway + space + token on two machines routes their MCP memory tools to one remote project
+store. A decision saved through an agent on your laptop is available to an agent on your desktop.
+Every other project is untouched. The backbone currently uses one bearer token; run it on
+infrastructure you control over HTTPS and back up its data volume.
 
 ```bash
 marrow status     # shows whether this project is shared or local
 marrow unshare    # back to local, nothing is deleted
 ```
 
-Your agent is told which it's working in, so it knows whether it's writing to a shared brain. You can
-also do all of this from the dashboard's **Manage Projects** panel. Full walkthrough in
-[deploy/README.md](deploy/README.md).
+Your agent is told which mode it is working in. You can configure sharing from the dashboard's
+**Manage Projects** panel. The local dashboard still visualizes the local project store;
+shared-memory reads and writes happen through the agent's MCP tools. Full scope and deployment
+guidance are in [deploy/README.md](deploy/README.md). Code anchors and freshness checks need the
+source tree, so they remain local-only.
 
 ## More install options
 
@@ -157,9 +164,9 @@ curl -fsSL https://raw.githubusercontent.com/aryawidjaja/marrow/main/install.sh 
 ```
 From source:
 ```bash
-cargo install --git https://github.com/aryawidjaja/marrow marrow-cli marrow-mcp marrow-web
+cargo install --git https://github.com/aryawidjaja/marrow marrow-cli marrow-mcp marrow-web marrow-server
 ```
-This puts `marrow`, `marrow-mcp`, and `marrow-serve` on your PATH.
+This puts `marrow`, `marrow-mcp`, `marrow-serve`, and the cross-device `marrow-server` on your PATH.
 
 ## Bringing in an existing project
 
@@ -218,21 +225,21 @@ for.
 reaching for gets easier to reach again; one nobody has ever touched stays where it is. Recall a
 thing enough and it comes to you.
 
-The size never runs away either, because a new memory on an existing topic *supersedes* the old one
-rather than piling on top. The brain grows with how much your project knows, not with how much your
-agents type.
+When a decision changes, the agent supersedes the old memory instead of appending another active
+version. Marrow preserves the lineage so the current answer stays clear without losing history.
 
 ## What's under the hood
 
-- **Staleness detection**: a memory can cite a code symbol; Marrow fingerprints it and flags the note
-  the moment the symbol changes, ignoring reformatting and renames.
+- **Staleness detection for Rust**: a memory can cite a Rust symbol; Marrow fingerprints it and flags
+  the note when that symbol changes, while tolerating formatting changes and supported relocations.
 - **Consolidation**: finds genuine duplicates (a near-identical restatement, or a pair that are
   mutually each other's closest match) and merges them, preserving lineage. It will not merge notes
   that are merely similar.
 - **Associative recall**: a question returns the matches *and* the memories connected to them, found
   by following links, shared topics and related meaning outward from the hits.
-- **Hive mind**: many sessions work as one: each joins warm, claims its work so two never collide, and
-  reads a live activity trail. Unlike a black-box hive, every signal is in an auditable ledger.
+- **Hive mind**: sessions join warm, publish best-effort file claims, and read a live activity trail.
+  Claude Code hooks can block a detected local collision, but deliberately fail open rather than
+  risk blocking work when their prerequisites are unavailable.
 - **Audit & provenance**: every write, edit, and recall lands in an append-only, hash-chained ledger;
   any answer traces back to its sources. Turn signing on and `marrow audit` also catches a memory
   file edited on disk behind Marrow's back.

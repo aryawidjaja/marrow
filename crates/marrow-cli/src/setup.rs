@@ -8,7 +8,8 @@
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, ExitStatus, Stdio};
+use std::time::{Duration, Instant};
 
 const BOOTSTRAP: &str = include_str!("../../../integrations/claude-code/hooks/marrow-bootstrap.sh");
 const GUARD: &str = include_str!("../../../integrations/claude-code/hooks/marrow-guard.sh");
@@ -104,13 +105,15 @@ fn codex_server_block(bin_dir: &str) -> String {
     format!("[mcp_servers.marrow]\ncommand = \"{cmd}\"\nargs = [\"--root\", \".\"]\n")
 }
 
-/// Register `marrow-mcp` in `~/.codex/config.toml`, merging rather than clobbering.
-fn register_codex_mcp(bin_dir: &str, out: &mut impl Write) -> Result<(), String> {
-    let Some(home) = home_dir() else {
-        return Err("could not determine home directory".into());
-    };
-    let dir = home.join(".codex");
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+/// Register `marrow-mcp` in a Codex config, merging rather than clobbering. Project setup stays
+/// inside the project; only explicit `--global` setup touches the user's home configuration.
+fn register_codex_mcp(
+    bin_dir: &str,
+    dir: &Path,
+    label: &str,
+    out: &mut impl Write,
+) -> Result<(), String> {
+    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let config = dir.join("config.toml");
     let block = codex_server_block(bin_dir);
 
@@ -123,7 +126,7 @@ fn register_codex_mcp(bin_dir: &str, out: &mut impl Write) -> Result<(), String>
     fs::write(&config, updated).map_err(|e| e.to_string())?;
     writeln!(
         out,
-        "  codex mcp   -> ~/.codex/config.toml ([mcp_servers.marrow])"
+        "  codex mcp   -> {label}/config.toml ([mcp_servers.marrow])"
     )
     .ok();
     Ok(())
@@ -277,7 +280,15 @@ pub fn run(root: &Path, global: bool, out: &mut impl Write) -> Result<(), String
     // own guidance in AGENTS.md.
     let codex = codex_present();
     if codex {
-        register_codex_mcp(&bin_dir, out)?;
+        let codex_dir = if global {
+            home_dir()
+                .ok_or("could not determine home directory")?
+                .join(".codex")
+        } else {
+            root.join(".codex")
+        };
+        let codex_label = if global { "~/.codex" } else { ".codex" };
+        register_codex_mcp(&bin_dir, &codex_dir, codex_label, out)?;
         write_agents_md(root, out)?;
     }
 
@@ -306,6 +317,20 @@ pub fn run(root: &Path, global: bool, out: &mut impl Write) -> Result<(), String
              marrow hub register --name <project>\n  \
              That turns on the shared channel (mem_ask / mem_inbox / mem_reply), and both agents\n  \
              land in the same inbox whichever tool they run in."
+        )
+        .ok();
+    }
+    if Command::new("jq")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| !status.success())
+        .unwrap_or(true)
+    {
+        writeln!(
+            out,
+            "\n  Hooks need jq, but it is not on PATH. Memory tools still work; automatic\n  collision checks and activity capture will stay off until you install jq\n  (`brew install jq` or `apt install jq`) and restart Claude Code."
         )
         .ok();
     }
@@ -472,34 +497,77 @@ fn register_mcp(bin_dir: &str, out: &mut impl Write) {
     // at THIS binary. A leftover registration at a higher-precedence scope (a project .mcp.json or
     // a local entry) would otherwise shadow the user-scope one with a stale path (e.g. an old cargo
     // build), showing "Failed to connect".
+    let timeout = Duration::from_millis(1200);
+    let mut responsive = true;
     for scope in ["local", "project", "user"] {
-        let _ = Command::new("claude")
-            .args(["mcp", "remove", "marrow", "-s", scope])
-            .output();
+        let mut command = Command::new("claude");
+        command.args(["mcp", "remove", "marrow", "-s", scope]);
+        match command_status_with_timeout(&mut command, timeout) {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                responsive = false;
+                break;
+            }
+            Err(_) => {
+                responsive = false;
+                break;
+            }
+        }
     }
-    match Command::new("claude")
-        .args([
-            "mcp", "add", "marrow", "-s", "user", "--", &mcp_bin, "--root", ".",
-        ])
-        .output()
-    {
-        Ok(o) if o.status.success() => {
+    let mut add = Command::new("claude");
+    add.args([
+        "mcp", "add", "marrow", "-s", "user", "--", &mcp_bin, "--root", ".",
+    ]);
+    match responsive.then(|| command_status_with_timeout(&mut add, timeout)) {
+        Some(Ok(Some(status))) if status.success() => {
             writeln!(
                 out,
                 "  mcp         -> registered at user scope (available in every project)"
             )
             .ok();
         }
-        Ok(_) => {
+        Some(Ok(Some(_))) => {
             writeln!(out, "  mcp         -> already registered at user scope").ok();
         }
-        Err(_) => {
+        Some(Ok(None)) | None => {
+            writeln!(
+                out,
+                "  mcp         -> claude CLI did not respond; skipped registration (setup continued)\n                 claude mcp add marrow -s user -- marrow-mcp --root ."
+            )
+            .ok();
+        }
+        Some(Err(_)) => {
             writeln!(
                 out,
                 "  mcp         -> claude CLI not found; register manually:\n                 claude mcp add marrow -s user -- marrow-mcp --root ."
             )
             .ok();
         }
+    }
+}
+
+/// Run a small integration command without letting a broken third-party CLI hang setup forever.
+/// Output is discarded: registration only needs the exit status, and inherited pipes could fill
+/// while we poll. `Ok(None)` means the child exceeded the deadline and was killed.
+fn command_status_with_timeout(
+    command: &mut Command,
+    timeout: Duration,
+) -> std::io::Result<Option<ExitStatus>> {
+    let mut child = command
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    let started = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(Some(status));
+        }
+        if started.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok(None);
+        }
+        std::thread::sleep(Duration::from_millis(25));
     }
 }
 
@@ -808,5 +876,25 @@ mod tests {
         let settings = fs::read_to_string(base.join("settings.json")).unwrap();
         assert!(settings.contains(&format!("{hook_dir}/marrow-bootstrap.sh")));
         assert!(!settings.contains("$CLAUDE_PROJECT_DIR"));
+    }
+
+    #[test]
+    fn integration_commands_have_a_hard_deadline() {
+        let mut quick = Command::new("sh");
+        quick.args(["-c", "exit 0"]);
+        assert!(
+            command_status_with_timeout(&mut quick, Duration::from_secs(1))
+                .unwrap()
+                .unwrap()
+                .success()
+        );
+
+        let mut stuck = Command::new("sh");
+        stuck.args(["-c", "sleep 2"]);
+        assert!(
+            command_status_with_timeout(&mut stuck, Duration::from_millis(30))
+                .unwrap()
+                .is_none()
+        );
     }
 }

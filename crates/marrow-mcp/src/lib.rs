@@ -337,6 +337,55 @@ mod tests {
     }
 
     #[test]
+    fn write_auto_anchors_a_code_ref_named_in_the_body() {
+        let dir = store_root();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(
+            dir.path().join("src/auth.rs"),
+            "pub fn issue_token(u: &str) -> String { format!(\"jwt:{u}\") }\n",
+        )
+        .unwrap();
+
+        // No explicit `anchor` arg — but the body plainly names the code it is about.
+        let resp = call(
+            dir.path(),
+            "mem_write",
+            json!({"kind":"decision","topic":"auth","area":"auth",
+                   "body":"How tokens are issued — see `src/auth.rs::issue_token`."}),
+        );
+        assert_eq!(resp["result"]["isError"], false);
+
+        // Proof it anchored: change that symbol and staleness must fire.
+        std::fs::write(
+            dir.path().join("src/auth.rs"),
+            "pub fn issue_token(u: &str) -> String { format!(\"opaque:{u}:v2\") }\n",
+        )
+        .unwrap();
+        let stale = call(dir.path(), "mem_list_stale", json!({}));
+        assert!(
+            result_text(&stale).contains("\"count\":1")
+                && result_text(&stale).contains("issue_token"),
+            "auto-anchor should have tied the memory to issue_token: {}",
+            result_text(&stale)
+        );
+    }
+
+    #[test]
+    fn write_does_not_anchor_a_nonresolving_ref() {
+        let dir = store_root();
+        // Body names a file/symbol that does not exist in the repo — must stay unanchored.
+        let resp = call(
+            dir.path(),
+            "mem_write",
+            json!({"kind":"fact","topic":"ghost","body":"see `src/nope.rs::missing` for details"}),
+        );
+        assert_eq!(resp["result"]["isError"], false);
+        let stale = call(dir.path(), "mem_list_stale", json!({}));
+        // No anchor was attached, so there is nothing to be stale.
+        assert!(result_text(&stale).contains("\"count\":0"));
+    }
+
+    #[test]
     fn initialize_advertises_prompts_capability() {
         let dir = store_root();
         let req = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}});

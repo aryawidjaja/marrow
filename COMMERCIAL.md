@@ -25,8 +25,9 @@ Marrow to others over a network*, who must then share their Marrow changes.
 
 ## The commercial license (Marrow Sovereign)
 
-If your organization cannot accept the AGPL's terms, or you want the enterprise edition
-(access control, multi-writer at scale, compliance and audit exports, support and SLA, and a
-license that lifts AGPL obligations entirely), a commercial license is available.
+If your organization cannot accept the AGPL's terms, a commercial license that lifts its
+obligations is available. Managed access control, compliance exports, support, and SLA offerings
+are roadmap items; contact us to discuss requirements rather than assuming they ship in the open
+source backbone today.
 
 Contact: Mutaqin Aryawijaya, mutaqin.aryawijaya@gmail.com

@@ -543,11 +543,19 @@ impl Store {
         Ok(edges)
     }
 
+    /// Configured response-rendering mode (full bodies vs terse budgeted lines).
+    pub fn retrieval_mode(&self) -> crate::config::ResponseMode {
+        self.config.retrieval.response_mode
+    }
+
     /// Hybrid search: keyword (FTS5/BM25) fused with semantic (vector cosine) via weighted
     /// RRF. `hybrid_weight` of 0 (or no embedder) is exactly keyword search.
     pub fn search(&self, text: &str, q: &Query) -> Result<Vec<Memory>, Error> {
         let now = util::now_rfc3339();
-        let keyword: Vec<String> = index::search(&self.conn, text, q, &now)?
+        // Keyword lane: bm25-ordered candidates, then topic-tier reranked so a strong topic
+        // match outranks a merely body-dense one.
+        let candidates = index::search(&self.conn, text, q, &now)?;
+        let keyword: Vec<String> = crate::rank::rerank(candidates, text)
             .into_iter()
             .map(|r| r.id)
             .collect();

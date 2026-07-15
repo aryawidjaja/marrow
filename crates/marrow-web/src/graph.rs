@@ -5,10 +5,10 @@
 //! a small editable overlay. [`hive_graph`] federates every registered project into one brain with
 //! a central `core` neuron, a hub per project, and cross-project tag bridges.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
-use marrow_store::{Hub, Store};
+use marrow_store::{Edge as Link, EdgeCorpus, EdgeRel, Hub, Store, Trust};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -28,19 +28,29 @@ pub struct Node {
     pub model: String,
     pub snippet: String,
     pub degree: usize,
-}
-
-#[derive(Serialize, Debug)]
-pub struct Link {
-    pub source: String,
-    pub target: String,
-    pub rel: String,
+    /// Stable, server-computed content community. The dashboard consumes this directly so every
+    /// client sees the same grouping.
+    pub community: String,
+    /// PageRank-style centrality, normalized to 0..1 within this graph.
+    pub importance: f64,
 }
 
 #[derive(Serialize, Default)]
 pub struct Graph {
     pub nodes: Vec<Node>,
     pub links: Vec<Link>,
+    pub review: Vec<ReviewItem>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct ReviewItem {
+    pub kind: String,
+    pub severity: String,
+    pub title: String,
+    pub why: String,
+    /// A concrete dashboard action that can make the suggestion disappear or confirm it is valid.
+    pub action: String,
+    pub nodes: Vec<String>,
 }
 
 fn snippet(body: &str, max: usize) -> String {
@@ -60,71 +70,6 @@ fn tags_of(raw: &str) -> Vec<String> {
         .collect()
 }
 
-/// A tag shared by more than this many memories in one project is a broad convention, not a
-/// specific relationship — it would draw a giant noise-star, so it doesn't create edges.
-const INTRA_TAG_FANOUT: usize = 7;
-
-/// Extract `[[target]]` wiki-links from text — the explicit references an agent wrote between
-/// memories. `target` is either a memory id or a topic slug.
-fn wiki_refs(text: &str) -> Vec<String> {
-    text.match_indices("[[")
-        .filter_map(|(i, _)| {
-            let rest = &text[i + 2..];
-            rest.find("]]").map(|j| rest[..j].trim().to_string())
-        })
-        .filter(|s| !s.is_empty() && s.len() <= 48)
-        .collect()
-}
-
-/// Explicit `[[id]]`/`[[topic]]` links between memories — the strongest, agent-authored edges.
-fn ref_edges(rows: &[marrow_store::index::IndexRow], id_of: &impl Fn(&str) -> String) -> Vec<Link> {
-    let active = || rows.iter().filter(|r| r.status == "active");
-    let ids: std::collections::HashSet<&str> = active().map(|r| r.id.as_str()).collect();
-    let topic_to_id: HashMap<&str, &str> = active()
-        .filter(|r| !r.topic.is_empty())
-        .map(|r| (r.topic.as_str(), r.id.as_str()))
-        .collect();
-    let mut links = Vec::new();
-    for r in active() {
-        for rf in wiki_refs(&r.body).into_iter().chain(wiki_refs(&r.topic)) {
-            let target = if ids.contains(rf.as_str()) {
-                Some(rf)
-            } else {
-                topic_to_id.get(rf.as_str()).map(|s| s.to_string())
-            };
-            if let Some(t) = target {
-                if t != r.id {
-                    links.push(Link {
-                        source: id_of(&r.id),
-                        target: id_of(&t),
-                        rel: "ref".into(),
-                    });
-                }
-            }
-        }
-    }
-    links
-}
-
-/// Connect every node in a group to the group's first node — a star, so a shared topic or tag
-/// forms a cluster without an O(n²) clique.
-fn star(links: &mut Vec<Link>, members: &[String], rel: &str) {
-    if let Some((hub, rest)) = members.split_first() {
-        for m in rest {
-            links.push(Link {
-                source: hub.clone(),
-                target: m.clone(),
-                rel: rel.into(),
-            });
-        }
-    }
-}
-
-/// How many meaning-neighbours each memory keeps, and how close they must be. bge-m3 cosine puts
-/// genuinely related notes around 0.5–0.75; a top-k cap keeps the graph readable, not a hairball.
-const SEMANTIC_TOP_K: usize = 3;
-const SEMANTIC_MIN_SIM: f32 = 0.55;
-
 fn ordered(a: &str, b: &str) -> (String, String) {
     if a <= b {
         (a.into(), b.into())
@@ -133,50 +78,15 @@ fn ordered(a: &str, b: &str) -> (String, String) {
     }
 }
 
-/// Add "related meaning" edges from embedding cosine, skipping any pair a topic/tag/user link
-/// already connects so the same two neurons aren't joined twice.
-fn add_semantic(store: &Store, links: &mut Vec<Link>, node_id: impl Fn(&str) -> String) {
-    let existing: std::collections::HashSet<(String, String)> = links
-        .iter()
-        .map(|l| ordered(&l.source, &l.target))
-        .collect();
-    for (a, b, _sim) in store
-        .related(SEMANTIC_TOP_K, SEMANTIC_MIN_SIM)
-        .unwrap_or_default()
-    {
-        let (na, nb) = (node_id(&a), node_id(&b));
-        if existing.contains(&ordered(&na, &nb)) {
-            continue;
-        }
-        links.push(Link {
-            source: na,
-            target: nb,
-            rel: "semantic".into(),
-        });
-    }
-}
-
 /// The neuron graph for one store: memories linked by shared topic, shared tag, related meaning
 /// (embeddings), and any links you drew.
 pub fn project_graph(store: &Store, root: &Path) -> Graph {
     let rows = store.list().unwrap_or_default();
-    let mut by_topic: HashMap<String, Vec<String>> = HashMap::new();
-    let mut by_tag: HashMap<String, Vec<String>> = HashMap::new();
     let mut nodes = Vec::new();
-    let mut degree: HashMap<String, usize> = HashMap::new();
 
     for r in &rows {
         if r.status != "active" {
             continue;
-        }
-        if !r.topic.is_empty() {
-            by_topic
-                .entry(r.topic.clone())
-                .or_default()
-                .push(r.id.clone());
-        }
-        for t in tags_of(&r.tags) {
-            by_tag.entry(t).or_default().push(r.id.clone());
         }
         nodes.push(Node {
             id: r.id.clone(),
@@ -193,10 +103,13 @@ pub fn project_graph(store: &Store, root: &Path) -> Graph {
             model: r.model.clone(),
             snippet: snippet(&r.body, 140),
             degree: 0,
+            community: String::new(),
+            importance: 0.0,
         });
     }
 
-    let mut links = ref_edges(&rows, &|id: &str| id.to_string());
+    let vectors = store.vectors().unwrap_or_default().into_iter().collect();
+    let mut links = EdgeCorpus::new(&rows, vectors).graph_edges();
 
     // Give every area a hub neuron its memories hang off, so an area reads as one connected flower
     // instead of a handful of loose dots. The hub is the area's name, and it's the thing you click
@@ -224,38 +137,23 @@ pub fn project_graph(store: &Store, root: &Path) -> Graph {
             model: String::new(),
             snippet: format!("{} memories filed under `{area}`", members.len()),
             degree: 0,
+            community: String::new(),
+            importance: 0.0,
         });
         for m in members {
-            links.push(Link {
-                source: hub_id.clone(),
-                target: m.clone(),
-                rel: "area".into(),
-            });
+            links.push(Link::new(hub_id.clone(), m.clone(), EdgeRel::Area));
         }
     }
     nodes.extend(area_hubs);
 
-    for members in by_topic.values() {
-        star(&mut links, members, "topic");
-    }
-    for members in by_tag.values() {
-        if members.len() <= INTRA_TAG_FANOUT {
-            star(&mut links, members, "tag");
-        }
-    }
     let live: std::collections::HashSet<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
     let overlay = read_overlay(&overlay_path(root));
     for [a, b] in &overlay.links {
         // Skip a saved link whose memory was since deleted, so degree matches the edges drawn.
         if live.contains(a.as_str()) && live.contains(b.as_str()) {
-            links.push(Link {
-                source: a.clone(),
-                target: b.clone(),
-                rel: "user".into(),
-            });
+            links.push(Link::new(a.clone(), b.clone(), EdgeRel::User));
         }
     }
-    add_semantic(store, &mut links, |id| id.to_string());
     // Drop any link the user explicitly removed from the graph.
     if !overlay.hidden.is_empty() {
         links.retain(|l| {
@@ -266,14 +164,7 @@ pub fn project_graph(store: &Store, root: &Path) -> Graph {
         });
     }
 
-    for l in &links {
-        *degree.entry(l.source.clone()).or_default() += 1;
-        *degree.entry(l.target.clone()).or_default() += 1;
-    }
-    for n in &mut nodes {
-        n.degree = degree.get(&n.id).copied().unwrap_or(0);
-    }
-    Graph { nodes, links }
+    finalize_graph(nodes, links)
 }
 
 /// The whole-machine hive: a central `core` neuron, a hub per registered project, each project's
@@ -291,11 +182,12 @@ pub fn hive_graph(hub: &Hub) -> Graph {
         model: String::new(),
         snippet: "shared memory about you — the center of the hive".into(),
         degree: 0,
+        community: String::new(),
+        importance: 0.0,
     }];
     let mut links = Vec::new();
     let mut tag_owners: HashMap<String, Vec<String>> = HashMap::new();
     let mut sem_nodes: Vec<(String, usize, Vec<f32>)> = Vec::new();
-    let mut degree: HashMap<String, usize> = HashMap::new();
 
     let mut hidden_pairs: Vec<(String, String)> = Vec::new();
     let mut projects = hub.projects();
@@ -331,20 +223,16 @@ pub fn hive_graph(hub: &Hub) -> Graph {
                 model: String::new(),
                 snippet: format!("project: {}", p.root.display()),
                 degree: 0,
+                community: String::new(),
+                importance: 0.0,
             });
-            links.push(Link {
-                source: "core".into(),
-                target: hub_id.clone(),
-                rel: "hub".into(),
-            });
+            links.push(Link::new("core", hub_id.clone(), EdgeRel::Hub));
         }
         let Ok(store) = Store::open(&p.root) else {
             continue;
         };
         let vecs: HashMap<String, Vec<f32>> =
             store.vectors().unwrap_or_default().into_iter().collect();
-        let mut local_topic: HashMap<String, Vec<String>> = HashMap::new();
-        let mut local_tag: HashMap<String, Vec<String>> = HashMap::new();
         let mut local_area: HashMap<String, Vec<String>> = HashMap::new();
         let rows = store.list().unwrap_or_default();
         for r in &rows {
@@ -352,18 +240,11 @@ pub fn hive_graph(hub: &Hub) -> Graph {
                 continue;
             }
             let node_id = format!("{hub_id}#{}", r.id);
-            if !r.topic.is_empty() {
-                local_topic
-                    .entry(r.topic.clone())
-                    .or_default()
-                    .push(node_id.clone());
-            }
             for t in tags_of(&r.tags) {
                 tag_owners
                     .entry(t.clone())
                     .or_default()
                     .push(node_id.clone());
-                local_tag.entry(t).or_default().push(node_id.clone());
             }
             if let Some(v) = vecs.get(&r.id) {
                 sem_nodes.push((node_id.clone(), i, v.clone()));
@@ -383,14 +264,12 @@ pub fn hive_graph(hub: &Hub) -> Graph {
                 model: r.model.clone(),
                 snippet: snippet(&r.body, 140),
                 degree: 0,
+                community: String::new(),
+                importance: 0.0,
             });
             if r.area.is_empty() {
                 // Unfiled: hangs straight off the project, so it's never orphaned.
-                links.push(Link {
-                    source: hub_id.clone(),
-                    target: node_id,
-                    rel: "cluster".into(),
-                });
+                links.push(Link::new(hub_id.clone(), node_id, EdgeRel::Cluster));
             } else {
                 local_area
                     .entry(r.area.clone())
@@ -414,18 +293,16 @@ pub fn hive_graph(hub: &Hub) -> Graph {
                 model: String::new(),
                 snippet: format!("{} memories in `{area}` ({})", members.len(), p.name),
                 degree: 0,
+                community: String::new(),
+                importance: 0.0,
             });
-            links.push(Link {
-                source: hub_id.clone(),
-                target: area_hub.clone(),
-                rel: "cluster".into(),
-            });
+            links.push(Link::new(
+                hub_id.clone(),
+                area_hub.clone(),
+                EdgeRel::Cluster,
+            ));
             for m in members {
-                links.push(Link {
-                    source: area_hub.clone(),
-                    target: m.clone(),
-                    rel: "area".into(),
-                });
+                links.push(Link::new(area_hub.clone(), m.clone(), EdgeRel::Area));
             }
         }
         // Give each project's cluster internal structure — explicit refs, shared topic/tag, and
@@ -442,26 +319,22 @@ pub fn hive_graph(hub: &Hub) -> Graph {
         let overlay = read_overlay(&overlay_path(&p.root));
         for [a, b] in &overlay.links {
             if active_ids.contains(a.as_str()) && active_ids.contains(b.as_str()) {
-                links.push(Link {
-                    source: map(a),
-                    target: map(b),
-                    rel: "user".into(),
-                });
+                links.push(Link::new(map(a), map(b), EdgeRel::User));
             }
         }
         for [a, b] in &overlay.hidden {
             hidden_pairs.push((map(a), map(b)));
         }
-        links.extend(ref_edges(&rows, &map));
-        for members in local_topic.values() {
-            star(&mut links, members, "topic");
-        }
-        for members in local_tag.values() {
-            if members.len() <= INTRA_TAG_FANOUT {
-                star(&mut links, members, "tag");
-            }
-        }
-        add_semantic(&store, &mut links, map);
+        links.extend(
+            EdgeCorpus::new(&rows, vecs)
+                .graph_edges()
+                .into_iter()
+                .map(|mut edge| {
+                    edge.source = map(&edge.source);
+                    edge.target = map(&edge.target);
+                    edge
+                }),
+        );
     }
 
     // Cross-project links must be meaningful, not coincidental. A shared tag only bridges when it's
@@ -469,7 +342,12 @@ pub fn hive_graph(hub: &Hub) -> Graph {
     // "gotcha" or "frontend" would otherwise wire together unrelated work across every project.
     for members in tag_owners.values() {
         if (2..=TAG_BRIDGE_FANOUT).contains(&members.len()) && spans_projects(members) {
-            star(&mut links, members, "tag");
+            if let Some((hub, rest)) = members.split_first() {
+                links.extend(
+                    rest.iter()
+                        .map(|target| Link::new(hub, target, EdgeRel::Tag)),
+                );
+            }
         }
     }
     // The real cross-project bridges: memories whose meaning is close (embedding cosine), across
@@ -485,14 +363,7 @@ pub fn hive_graph(hub: &Hub) -> Graph {
         });
     }
 
-    for l in &links {
-        *degree.entry(l.source.clone()).or_default() += 1;
-        *degree.entry(l.target.clone()).or_default() += 1;
-    }
-    for n in &mut nodes {
-        n.degree = degree.get(&n.id).copied().unwrap_or(0);
-    }
-    Graph { nodes, links }
+    finalize_graph(nodes, links)
 }
 
 /// A shared tag only bridges projects if it's this distinctive or rarer (used by at most this many
@@ -538,15 +409,369 @@ fn add_hive_semantic(nodes: &[(String, usize, Vec<f32>)], links: &mut Vec<Link>)
             if nodes[i].1 != nodes[j].1 && nn[j].contains(&i) {
                 let (lo, hi) = ordered(&nodes[i].0, &nodes[j].0);
                 if seen.insert((lo.clone(), hi.clone())) {
-                    links.push(Link {
-                        source: lo,
-                        target: hi,
-                        rel: "semantic".into(),
-                    });
+                    let similarity = cosine(&nodes[i].2, &nodes[j].2);
+                    links.push(Link::semantic(lo, hi, similarity));
                 }
             }
         }
     }
+}
+
+fn finalize_graph(mut nodes: Vec<Node>, mut links: Vec<Link>) -> Graph {
+    let explicit_pairs: HashSet<(String, String)> = links
+        .iter()
+        .filter(|link| link.rel != EdgeRel::Semantic)
+        .map(|link| ordered(&link.source, &link.target))
+        .collect();
+    links.retain(|link| {
+        link.rel != EdgeRel::Semantic
+            || !explicit_pairs.contains(&ordered(&link.source, &link.target))
+    });
+    let index: HashMap<String, usize> = nodes
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (n.id.clone(), i))
+        .collect();
+    let mut adjacency = vec![Vec::<usize>::new(); nodes.len()];
+    let mut content_adjacency = vec![Vec::<usize>::new(); nodes.len()];
+    let mut inferred_degree = vec![0usize; nodes.len()];
+    for link in &links {
+        let (Some(&a), Some(&b)) = (index.get(&link.source), index.get(&link.target)) else {
+            continue;
+        };
+        adjacency[a].push(b);
+        adjacency[b].push(a);
+        if link.trust != Trust::Structural {
+            content_adjacency[a].push(b);
+            content_adjacency[b].push(a);
+        }
+        if link.trust == Trust::Inferred {
+            inferred_degree[a] += 1;
+            inferred_degree[b] += 1;
+        }
+    }
+    for (node, neighbours) in nodes.iter_mut().zip(&adjacency) {
+        node.degree = neighbours.len();
+    }
+
+    assign_communities(&mut nodes, &content_adjacency);
+    assign_importance(&mut nodes, &adjacency);
+    let review = build_review(&nodes, &links, &index, &content_adjacency, &inferred_degree);
+    Graph {
+        nodes,
+        links,
+        review,
+    }
+}
+
+/// Deterministic label propagation over content edges. Community ids are then reindexed by a total
+/// order (largest first, member ids as the tie-break), so two clients never invent different names.
+fn assign_communities(nodes: &mut [Node], adjacency: &[Vec<usize>]) {
+    let mut labels: Vec<String> = nodes.iter().map(|n| n.id.clone()).collect();
+    let mut order: Vec<usize> = (0..nodes.len()).collect();
+    order.sort_by(|&a, &b| nodes[a].id.cmp(&nodes[b].id));
+    for _ in 0..12 {
+        let mut changed = false;
+        for &i in &order {
+            if adjacency[i].is_empty() {
+                continue;
+            }
+            let mut counts: HashMap<String, usize> = HashMap::new();
+            for &j in &adjacency[i] {
+                *counts.entry(labels[j].clone()).or_default() += 1;
+            }
+            let best = counts
+                .into_iter()
+                .max_by(|(la, ca), (lb, cb)| ca.cmp(cb).then_with(|| lb.cmp(la)))
+                .map(|(label, _)| label)
+                .unwrap_or_else(|| labels[i].clone());
+            if best != labels[i] {
+                labels[i] = best;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    let mut groups: HashMap<String, Vec<String>> = HashMap::new();
+    for (node, label) in nodes.iter().zip(&labels) {
+        groups
+            .entry(label.clone())
+            .or_default()
+            .push(node.id.clone());
+    }
+    let mut stable: Vec<(String, Vec<String>)> = groups.into_iter().collect();
+    for (_, members) in &mut stable {
+        members.sort();
+    }
+    stable.sort_by(|(_, a), (_, b)| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+    let remap: HashMap<String, String> = stable
+        .iter()
+        .enumerate()
+        .map(|(i, (old, _))| (old.clone(), format!("c{i}")))
+        .collect();
+    for (node, old) in nodes.iter_mut().zip(labels) {
+        node.community = remap.get(&old).cloned().unwrap_or_default();
+    }
+}
+
+fn assign_importance(nodes: &mut [Node], adjacency: &[Vec<usize>]) {
+    let n = nodes.len();
+    if n == 0 {
+        return;
+    }
+    let damping = 0.85;
+    let mut rank = vec![1.0 / n as f64; n];
+    for _ in 0..24 {
+        let dangling: f64 = rank
+            .iter()
+            .zip(adjacency)
+            .filter(|(_, neighbours)| neighbours.is_empty())
+            .map(|(r, _)| *r)
+            .sum();
+        let mut next = vec![(1.0 - damping + damping * dangling) / n as f64; n];
+        for (i, neighbours) in adjacency.iter().enumerate() {
+            if neighbours.is_empty() {
+                continue;
+            }
+            let share = damping * rank[i] / neighbours.len() as f64;
+            for &j in neighbours {
+                next[j] += share;
+            }
+        }
+        rank = next;
+    }
+    let max = rank
+        .iter()
+        .copied()
+        .fold(0.0_f64, f64::max)
+        .max(f64::EPSILON);
+    for (node, value) in nodes.iter_mut().zip(rank) {
+        node.importance = value / max;
+    }
+}
+
+fn build_review(
+    nodes: &[Node],
+    links: &[Link],
+    index: &HashMap<String, usize>,
+    content_adjacency: &[Vec<usize>],
+    inferred_degree: &[usize],
+) -> Vec<ReviewItem> {
+    let is_memory = |n: &Node| !matches!(n.kind.as_str(), "core" | "project" | "area");
+    let mut review = Vec::new();
+
+    for link in links.iter().filter(|l| l.trust == Trust::Ambiguous).take(5) {
+        review.push(ReviewItem {
+            kind: "ambiguous-edge".into(),
+            severity: "high".into(),
+            title: "Check a weak connection".into(),
+            why: format!(
+                "Marrow found a {} relationship, but its evidence is below the normal confidence threshold.",
+                link.rel
+            ),
+            action: "Open the highlighted connection. Remove it if the two memories should not be retrieved together.".into(),
+            nodes: vec![link.source.clone(), link.target.clone()],
+        });
+    }
+
+    let mut central: Vec<usize> = (0..nodes.len())
+        .filter(|&i| is_memory(&nodes[i]) && inferred_degree[i] >= 2)
+        .collect();
+    central.sort_by(|&a, &b| {
+        nodes[b]
+            .importance
+            .total_cmp(&nodes[a].importance)
+            .then_with(|| nodes[a].id.cmp(&nodes[b].id))
+    });
+    for &i in central.iter().take(3) {
+        review.push(ReviewItem {
+            kind: "inferred-hub".into(),
+            severity: "medium".into(),
+            title: format!("Review inferred links for {}", nodes[i].label),
+            why: format!(
+                "Marrow inferred {} relationships around this central memory; a person did not create those links.",
+                inferred_degree[i]
+            ),
+            action: "Inspect the visible links. Remove false ones, or draw an explicit link for relationships you want agents to trust.".into(),
+            nodes: vec![nodes[i].id.clone()],
+        });
+    }
+
+    for node in nodes
+        .iter()
+        .filter(|n| is_memory(n) && n.degree <= 1)
+        .take(5)
+    {
+        review.push(ReviewItem {
+            kind: "isolated".into(),
+            severity: "low".into(),
+            title: format!("Connect {}", node.label),
+            why: "This memory has one or fewer connections, so related-memory browsing may not rediscover it.".into(),
+            action: "Use Link to connect it to a related memory, or edit its area so it is filed with the right group.".into(),
+            nodes: vec![node.id.clone()],
+        });
+    }
+
+    let mut bridges: Vec<&Link> = links
+        .iter()
+        .filter(|l| l.trust != Trust::Structural)
+        .filter(|l| {
+            let (Some(&a), Some(&b)) = (index.get(&l.source), index.get(&l.target)) else {
+                return false;
+            };
+            nodes[a].community != nodes[b].community
+        })
+        .collect();
+    bridges.sort_by(|a, b| {
+        let score = |l: &&Link| {
+            index
+                .get(&l.source)
+                .zip(index.get(&l.target))
+                .map(|(&x, &y)| nodes[x].importance + nodes[y].importance)
+                .unwrap_or(0.0)
+        };
+        score(b).total_cmp(&score(a))
+    });
+    for link in bridges.into_iter().take(3) {
+        review.push(ReviewItem {
+            kind: "bridge".into(),
+            severity: "medium".into(),
+            title: "Check a bridge between groups".into(),
+            why: format!(
+                "This {} link is one of the few visible routes between two memory groups.",
+                link.rel
+            ),
+            action: "Open the highlighted connection. Keep it if the groups belong together; remove it if the relationship is misleading.".into(),
+            nodes: vec![link.source.clone(), link.target.clone()],
+        });
+    }
+
+    let mut communities: HashMap<&str, Vec<usize>> = HashMap::new();
+    for (i, node) in nodes.iter().enumerate().filter(|(_, n)| is_memory(n)) {
+        communities.entry(&node.community).or_default().push(i);
+    }
+    for members in communities.values().filter(|m| m.len() >= 4) {
+        let member_set: HashSet<usize> = members.iter().copied().collect();
+        let internal: usize = members
+            .iter()
+            .map(|&i| {
+                content_adjacency[i]
+                    .iter()
+                    .filter(|j| member_set.contains(j))
+                    .count()
+            })
+            .sum::<usize>()
+            / 2;
+        let possible = members.len() * (members.len() - 1) / 2;
+        if possible > 0 && (internal as f64 / possible as f64) < 0.05 {
+            let lead = members
+                .iter()
+                .copied()
+                .max_by(|&a, &b| nodes[a].importance.total_cmp(&nodes[b].importance))
+                .unwrap_or(members[0]);
+            review.push(ReviewItem {
+                kind: "low-cohesion".into(),
+                severity: "low".into(),
+                title: format!("Organize the group around {}", nodes[lead].label),
+                why: "This automatically detected group has at least four memories, but fewer than 5% of the possible internal links.".into(),
+                action: "Check the members' areas and tags. Add explicit links only where agents should retrieve the memories together.".into(),
+                nodes: vec![nodes[lead].id.clone()],
+            });
+        }
+    }
+    review.truncate(12);
+    review
+}
+
+/// Explain the shortest retrieval route between two memories. Structural project/area spokes are
+/// deliberately excluded: they organize the drawing but do not prove that two memories are related.
+/// Traversal also avoids expanding through a very high-degree content hub, which would otherwise
+/// turn many answers into an unhelpful two-hop path.
+pub fn path_to_json(graph: &Graph, source: &str, target: &str) -> String {
+    if source == target && graph.nodes.iter().any(|n| n.id == source) {
+        return json!({ "found": true, "nodes": [source], "links": [] }).to_string();
+    }
+    let mut adjacency: HashMap<&str, Vec<(&str, usize)>> = HashMap::new();
+    for (i, link) in graph.links.iter().enumerate() {
+        if link.trust == Trust::Structural {
+            continue;
+        }
+        adjacency
+            .entry(&link.source)
+            .or_default()
+            .push((&link.target, i));
+        adjacency
+            .entry(&link.target)
+            .or_default()
+            .push((&link.source, i));
+    }
+    for neighbours in adjacency.values_mut() {
+        neighbours.sort_by(|a, b| a.0.cmp(b.0));
+    }
+    let mut degrees: Vec<usize> = graph.nodes.iter().map(|n| n.degree).collect();
+    degrees.sort_unstable();
+    let p99 = degrees
+        .get(degrees.len().saturating_sub(1) * 99 / 100)
+        .copied()
+        .unwrap_or(0);
+    let hub_threshold = 50usize.max(p99);
+    let degree: HashMap<&str, usize> = graph
+        .nodes
+        .iter()
+        .map(|n| (n.id.as_str(), n.degree))
+        .collect();
+    let mut queue = VecDeque::from([source]);
+    let mut seen = HashSet::from([source]);
+    let mut parent: HashMap<&str, (&str, usize)> = HashMap::new();
+    while let Some(at) = queue.pop_front() {
+        if at != source && degree.get(at).copied().unwrap_or(0) >= hub_threshold {
+            continue;
+        }
+        for &(next, edge_i) in adjacency.get(at).map(Vec::as_slice).unwrap_or(&[]) {
+            if seen.insert(next) {
+                parent.insert(next, (at, edge_i));
+                if next == target {
+                    queue.clear();
+                    break;
+                }
+                queue.push_back(next);
+            }
+        }
+    }
+    if !seen.contains(target) {
+        return json!({ "found": false, "nodes": [], "links": [] }).to_string();
+    }
+    let mut node_ids = vec![target];
+    let mut edge_ids = Vec::new();
+    let mut cursor = target;
+    while cursor != source {
+        let Some(&(prev, edge_i)) = parent.get(cursor) else {
+            return json!({ "found": false, "nodes": [], "links": [] }).to_string();
+        };
+        edge_ids.push(edge_i);
+        node_ids.push(prev);
+        cursor = prev;
+    }
+    node_ids.reverse();
+    edge_ids.reverse();
+    let route_nodes: Vec<_> = node_ids
+        .iter()
+        .filter_map(|id| graph.nodes.iter().find(|n| n.id == **id))
+        .map(|n| json!({ "id": n.id, "label": n.label, "community": n.community }))
+        .collect();
+    let route_links: Vec<_> = edge_ids
+        .iter()
+        .map(|&i| {
+            let l = &graph.links[i];
+            json!({
+                "source": l.source, "target": l.target, "rel": l.rel,
+                "trust": l.trust, "confidence": l.confidence
+            })
+        })
+        .collect();
+    json!({ "found": true, "nodes": route_nodes, "links": route_links }).to_string()
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -624,7 +849,7 @@ pub fn edit_hidden(root: &Path, source: &str, target: &str, hide: bool) -> std::
 
 /// JSON body for the graph endpoints.
 pub fn to_json(g: &Graph) -> String {
-    json!({ "nodes": g.nodes, "links": g.links }).to_string()
+    json!({ "nodes": g.nodes, "links": g.links, "review": g.review }).to_string()
 }
 
 #[cfg(test)]
@@ -675,7 +900,7 @@ mod tests {
         let mut links = Vec::new();
         add_hive_semantic(&nodes, &mut links);
         assert_eq!(links.len(), 1, "{links:?}");
-        assert_eq!(links[0].rel, "semantic");
+        assert_eq!(links[0].rel, EdgeRel::Semantic);
         let pair = ordered(&links[0].source, &links[0].target);
         assert_eq!(pair, ("p0#a".into(), "p1#b".into()));
     }
@@ -710,7 +935,7 @@ mod tests {
             .unwrap();
         let g = project_graph(&store, dir.path());
         assert!(
-            g.links.iter().any(|l| l.rel == "semantic"),
+            g.links.iter().any(|l| l.rel == EdgeRel::Semantic),
             "expected a related-meaning edge between the two same-meaning memories"
         );
     }
@@ -753,7 +978,7 @@ mod tests {
         let n = edit_link(dir.path(), &ids[0], &ids[2], true).unwrap();
         assert_eq!(n, 1);
         let g2 = project_graph(&store, dir.path());
-        assert!(g2.links.iter().any(|l| l.rel == "user"));
+        assert!(g2.links.iter().any(|l| l.rel == EdgeRel::User));
         assert_eq!(edit_link(dir.path(), &ids[0], &ids[2], false).unwrap(), 0);
     }
 
@@ -776,7 +1001,7 @@ mod tests {
         let g = project_graph(&store, dir.path());
         let (a, b) = (g.nodes[0].id.clone(), g.nodes[1].id.clone());
         assert!(
-            g.links.iter().any(|l| l.rel == "topic"),
+            g.links.iter().any(|l| l.rel == EdgeRel::Topic),
             "expected a topic link"
         );
 
@@ -791,8 +1016,71 @@ mod tests {
             project_graph(&store, dir.path())
                 .links
                 .iter()
-                .any(|l| l.rel == "topic"),
+                .any(|l| l.rel == EdgeRel::Topic),
             "unhidden"
         );
+    }
+
+    #[test]
+    fn graph_intelligence_is_stable_and_paths_explain_their_evidence() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::init(dir.path()).unwrap();
+        for body in ["first", "second", "third"] {
+            store
+                .write(&mut mem(MemoryKind::Fact, "shared", body, &[]))
+                .unwrap();
+        }
+        let g = project_graph(&store, dir.path());
+        assert!(g.nodes.iter().all(|n| !n.community.is_empty()));
+        assert!(g.nodes.iter().all(|n| (0.0..=1.0).contains(&n.importance)));
+        assert!(g.links.iter().all(|l| {
+            l.rel != EdgeRel::Topic || (l.trust == Trust::Inferred && l.confidence == 0.85)
+        }));
+
+        let leaves: Vec<_> = g.nodes.iter().filter(|n| n.degree == 1).collect();
+        assert!(leaves.len() >= 2);
+        let path: serde_json::Value =
+            serde_json::from_str(&path_to_json(&g, &leaves[0].id, &leaves[1].id)).unwrap();
+        assert_eq!(path["found"], true);
+        assert_eq!(path["nodes"].as_array().unwrap().len(), 3);
+        assert!(path["links"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|l| l["trust"] == "inferred"));
+    }
+
+    #[test]
+    fn explained_paths_ignore_structural_area_spokes() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::init(dir.path()).unwrap();
+        let mut a = mem(MemoryKind::Fact, "alpha", "unrelated first fact", &[]);
+        let mut b = mem(MemoryKind::Fact, "beta", "unrelated second fact", &[]);
+        a.frontmatter.area = Some("shared-area".into());
+        b.frontmatter.area = Some("shared-area".into());
+        let a_id = store.write(&mut a).unwrap();
+        let b_id = store.write(&mut b).unwrap();
+        let g = project_graph(&store, dir.path());
+        assert!(g.links.iter().any(|link| link.trust == Trust::Structural));
+        let path: serde_json::Value =
+            serde_json::from_str(&path_to_json(&g, &a_id, &b_id)).unwrap();
+        assert_eq!(path["found"], false);
+    }
+
+    #[test]
+    fn review_queue_surfaces_isolated_memories() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::init(dir.path()).unwrap();
+        store
+            .write(&mut mem(MemoryKind::Fact, "alone", "no neighbours", &[]))
+            .unwrap();
+        let g = project_graph(&store, dir.path());
+        let isolated = g
+            .review
+            .iter()
+            .find(|item| item.kind == "isolated")
+            .expect("isolated suggestion");
+        assert!(isolated.title.starts_with("Connect "));
+        assert!(isolated.action.contains("Use Link"));
     }
 }

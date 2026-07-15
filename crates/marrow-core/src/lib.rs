@@ -22,7 +22,7 @@ pub mod relocation;
 pub mod symbols;
 pub mod types;
 
-pub use anchor::{check_anchor, seed_anchor};
+pub use anchor::{check_anchor, extract_anchor_refs, seed_anchor};
 pub use fingerprint::fingerprint;
 pub use symbols::iter_symbols;
 pub use types::{Anchor, Verdict};

@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand, ValueEnum};
 use marrow_memdocs::{Frontmatter, Memory, MemoryKind, Provenance, Scope, Status};
 use marrow_store::{knowledge_docs, ClaimScope, Query, Store};
+use serde_json::json;
 
 mod setup;
 
@@ -530,13 +531,28 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
             if let Some(remote) = marrow_store::SharedRemote::load(&cli.root) {
                 writeln!(
                     out,
-                    "sharing: shared to space '{}' on {} (agents here use that shared brain; counts below are the local cache). `marrow unshare` to go local.",
+                    "sharing: shared to space '{}' on {}. `marrow unshare` to go local.",
                     remote.space, remote.url
                 )
                 .ok();
-            } else {
-                writeln!(out, "sharing: local (private to this machine).").ok();
+                let status = marrow_mcp::remote::forward_to(
+                    &remote.url,
+                    remote.token.as_deref(),
+                    &remote.space,
+                    "mem_status",
+                    &json!({}),
+                )?;
+                let status: serde_json::Value =
+                    serde_json::from_str(&status).map_err(|e| e.to_string())?;
+                writeln!(out, "total: {}", status["total"].as_u64().unwrap_or(0)).ok();
+                if let Some(counts) = status["by_kind"].as_object() {
+                    for (kind, count) in counts {
+                        writeln!(out, "  {kind}: {count}").ok();
+                    }
+                }
+                return Ok(());
             }
+            writeln!(out, "sharing: local (private to this machine).").ok();
             let store = open(&cli.root)?;
             let rows = store.list().map_err(|e| e.to_string())?;
             writeln!(out, "total: {}", rows.len()).ok();
@@ -834,6 +850,18 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
                     remote.space, remote.url
                 )
                 .ok();
+                let brief = marrow_mcp::tools::dispatch(
+                    &cli.root,
+                    "mem_bootstrap",
+                    &json!({
+                        "goal": goal,
+                        "project": project,
+                        "max_tokens": max_tokens,
+                        "by": by,
+                    }),
+                )?;
+                writeln!(out, "{brief}").ok();
+                return Ok(());
             }
             let store = open(&cli.root)?;
             let brief = store
@@ -1005,8 +1033,17 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
             let remote = marrow_store::SharedRemote {
                 url: gateway.trim_end_matches('/').to_string(),
                 space,
-                token: token.filter(|t| !t.is_empty()),
+                token: token
+                    .or_else(|| std::env::var("MARROW_TOKEN").ok())
+                    .filter(|token| !token.is_empty()),
             };
+            marrow_mcp::remote::forward_to(
+                &remote.url,
+                remote.token.as_deref(),
+                &remote.space,
+                "mem_status",
+                &json!({}),
+            )?;
             remote.save(&cli.root).map_err(|e| e.to_string())?;
             writeln!(
                 out,

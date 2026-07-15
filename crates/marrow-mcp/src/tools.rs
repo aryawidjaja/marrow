@@ -314,6 +314,7 @@ fn filter_schema(with_text: bool) -> Value {
 /// backbone itself calls [`call`] directly, so it never recurses.
 pub fn dispatch(root: &Path, name: &str, args: &Value) -> Result<String, String> {
     if let Some(remote) = marrow_store::SharedRemote::load(root) {
+        validate_remote_call(name, args)?;
         return crate::remote::forward_to(
             &remote.url,
             remote.token.as_deref(),
@@ -323,9 +324,28 @@ pub fn dispatch(root: &Path, name: &str, args: &Value) -> Result<String, String>
         );
     }
     if crate::remote::endpoint().is_some() {
+        validate_remote_call(name, args)?;
         return crate::remote::forward(name, args);
     }
     call(root, name, args).map(|text| with_inbox_notice(root, name, args, text))
+}
+
+fn validate_remote_call(name: &str, args: &Value) -> Result<(), String> {
+    if matches!(name, "mem_hub_recall" | "mem_hub_activity") {
+        return Err(
+            "hive tools use the local project registry and are not available in shared mode".into(),
+        );
+    }
+    if name == "mem_write" && args.get("anchor").is_some() {
+        return Err("code anchors need the local repository and are not available in shared mode; save this memory without an anchor".into());
+    }
+    if name == "mem_list_stale" {
+        return Err(
+            "code freshness checks need the local repository and are not available in shared mode"
+                .into(),
+        );
+    }
+    Ok(())
 }
 
 /// Run a tool by name against the local store. `Ok` text is the result; `Err` text is a tool error.
@@ -382,7 +402,21 @@ fn write(store: &Store, root: &Path, args: &Value) -> Result<String, String> {
                 .write_anchored(root, file, symbol, &mut memory)
                 .map_err(|e| e.to_string())
         }
-        None => store.write(&mut memory).map_err(|e| e.to_string()),
+        None => {
+            // No explicit anchor: if the body plainly names a `file.ext::symbol` that actually
+            // resolves in the repo, anchor to the first one automatically. seed_anchor validates
+            // existence + resolution, so a passing or non-resolving mention is simply skipped and
+            // this can never attach a false anchor.
+            let auto = marrow_core::extract_anchor_refs(&memory.body)
+                .into_iter()
+                .find(|(file, symbol)| marrow_core::seed_anchor(root, file, symbol).is_some());
+            match auto {
+                Some((file, symbol)) => store
+                    .write_anchored(root, &file, &symbol, &mut memory)
+                    .map_err(|e| e.to_string()),
+                None => store.write(&mut memory).map_err(|e| e.to_string()),
+            }
+        }
     }
 }
 
@@ -399,6 +433,21 @@ fn search(store: &Store, args: &Value) -> Result<String, String> {
     let hits = store
         .search(&text, &query_from(args))
         .map_err(|e| e.to_string())?;
+    if store.retrieval_mode() == marrow_store::ResponseMode::Snippet {
+        let items: Vec<(String, String, String, u8)> = hits
+            .iter()
+            .map(|m| {
+                (
+                    m.frontmatter.topic.clone().unwrap_or_default(),
+                    m.body.trim().to_string(),
+                    String::new(),
+                    0,
+                )
+            })
+            .collect();
+        let budget = query_from(args).max_tokens.unwrap_or(1200);
+        return Ok(render_budgeted(&items, budget, ""));
+    }
     Ok(summaries(&hits))
 }
 
@@ -442,6 +491,30 @@ fn recall(store: &Store, args: &Value) -> Result<String, String> {
     // else still comes back. A memory filed in the wrong area must never become unfindable.
     if let Some(area) = opt_arg(args, "area").filter(|a| !a.is_empty()) {
         seeds.sort_by_key(|m| m.frontmatter.area.as_deref() != Some(area.as_str()));
+    }
+    if store.retrieval_mode() == marrow_store::ResponseMode::Snippet {
+        let area_hint = opt_arg(args, "area").unwrap_or_default();
+        let mut items: Vec<(String, String, String, u8)> = seeds
+            .iter()
+            .map(|m| {
+                (
+                    m.frontmatter.topic.clone().unwrap_or_default(),
+                    m.body.trim().to_string(),
+                    String::new(),
+                    0,
+                )
+            })
+            .collect();
+        items.extend(r.neighbors.iter().map(|n| {
+            (
+                n.memory.frontmatter.topic.clone().unwrap_or_default(),
+                n.memory.body.trim().to_string(),
+                n.via.join(","),
+                n.hops,
+            )
+        }));
+        let budget = query_from(args).max_tokens.unwrap_or(1200);
+        return Ok(render_budgeted(&items, budget, &area_hint));
     }
     let results: Vec<Value> = seeds
         .iter()
@@ -692,7 +765,13 @@ fn bootstrap(store: &Store, root: &Path, args: &Value) -> Result<String, String>
             json!("These memories cite code that has since changed. Verify them before relying on them, and mem_supersede any that are now wrong.")
         },
         "active_claims": claims,
-        "relevant": brief.relevant.iter().map(mem_brief).collect::<Vec<_>>(),
+        // In snippet mode the heaviest section — full relevant bodies — is rendered terse
+        // (first line only), matching how recent_decisions is always rendered.
+        "relevant": if store.retrieval_mode() == marrow_store::ResponseMode::Snippet {
+            brief.relevant.iter().map(mem_brief_snippet).collect::<Vec<_>>()
+        } else {
+            brief.relevant.iter().map(mem_brief).collect::<Vec<_>>()
+        },
         "recent_decisions": brief.recent_decisions.iter().map(mem_brief_snippet).collect::<Vec<_>>(),
         "suggest_ingest": brief.suggest_ingest,
         "suggest_consolidate": brief.suggest_consolidate,
@@ -832,15 +911,30 @@ fn me_from(args: &Value) -> Vec<String> {
     }
 }
 
+/// A message body for inbox rendering: full text normally, first line (≤140 chars) in snippet mode.
+fn msg_body(body: &str, snippet: bool) -> String {
+    if snippet {
+        body.lines()
+            .next()
+            .unwrap_or("")
+            .chars()
+            .take(140)
+            .collect()
+    } else {
+        body.to_string()
+    }
+}
+
 fn inbox(root: &Path, args: &Value) -> Result<String, String> {
     let me = me_from(args);
     let store = channel_store(root)?;
+    let snippet = store.retrieval_mode() == marrow_store::ResponseMode::Snippet;
 
     if let Some(thread) = opt_arg(args, "thread") {
         let msgs = store.thread(&thread).map_err(|e| e.to_string())?;
         let items: Vec<Value> = msgs
             .iter()
-            .map(|m| json!({"from": m.from, "role": m.role, "body": m.body, "at": m.ts}))
+            .map(|m| json!({"from": m.from, "role": m.role, "body": msg_body(&m.body, snippet), "at": m.ts}))
             .collect();
         let topic = msgs.iter().find_map(|m| m.topic.clone());
         store.mark_read(&me[0]).map_err(|e| e.to_string())?;
@@ -859,7 +953,7 @@ fn inbox(root: &Path, args: &Value) -> Result<String, String> {
                 "topic": m.topic,
                 "from": m.from,
                 "role": m.role,
-                "body": m.body,
+                "body": msg_body(&m.body, snippet),
                 "at": m.ts,
             })
         })
@@ -1129,5 +1223,99 @@ fn kind_name(kind: MemoryKind) -> &'static str {
         MemoryKind::Fact => "fact",
         MemoryKind::Decision => "decision",
         MemoryKind::Entity => "entity",
+    }
+}
+
+/// Render terse, token-budgeted lines instead of full bodies. `items` = (topic, body, via, hops);
+/// `via` empty means a direct match (no "via"/hops shown). `area_hint` seeds the truncation footer.
+/// Hard-cut at `token_budget * 3` chars (~3 chars/token) on a line boundary.
+fn render_budgeted(
+    items: &[(String, String, String, u8)],
+    token_budget: usize,
+    area_hint: &str,
+) -> String {
+    let char_budget = token_budget.saturating_mul(3);
+    let mut out = String::new();
+    let mut shown = 0usize;
+    for (topic, body, via, hops) in items {
+        let snip: String = body
+            .lines()
+            .next()
+            .unwrap_or("")
+            .chars()
+            .take(140)
+            .collect();
+        let line = if via.is_empty() {
+            format!("{topic} · {snip}\n")
+        } else {
+            format!("{topic} · {snip} · via {via} · {hops} hop(s)\n")
+        };
+        if !out.is_empty() && out.len() + line.len() > char_budget {
+            break;
+        }
+        out.push_str(&line);
+        shown += 1;
+    }
+    if shown < items.len() {
+        let hint = if area_hint.is_empty() {
+            "<area>"
+        } else {
+            area_hint
+        };
+        out.push_str(&format!(
+            "… {} more, narrow with area={hint}\n",
+            items.len() - shown
+        ));
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn shared_mode_rejects_repository_dependent_tools() {
+        let anchored = serde_json::json!({"anchor": {"file": "src/lib.rs", "symbol": "run"}});
+        assert!(super::validate_remote_call("mem_write", &anchored).is_err());
+        assert!(super::validate_remote_call("mem_list_stale", &serde_json::json!({})).is_err());
+        assert!(super::validate_remote_call("mem_hub_recall", &serde_json::json!({})).is_err());
+        assert!(super::validate_remote_call("mem_write", &serde_json::json!({})).is_ok());
+    }
+
+    #[test]
+    fn render_budgeted_caps_and_footers() {
+        let items: Vec<(String, String, String, u8)> = (0..50)
+            .map(|i| {
+                (
+                    format!("topic-{i}"),
+                    format!("body line {i} lorem ipsum dolor sit amet"),
+                    String::new(),
+                    1u8,
+                )
+            })
+            .collect();
+        let out = super::render_budgeted(&items, 100, "release"); // ~100-token budget
+        assert!(
+            out.len() <= 100 * 3 + 120,
+            "exceeded char budget + footer slack: {} chars",
+            out.len()
+        );
+        assert!(
+            out.contains("more, narrow with area=release"),
+            "missing truncation footer: {out}"
+        );
+        assert!(out.starts_with("topic-0"), "first item should render first");
+    }
+
+    #[test]
+    fn render_budgeted_no_footer_when_all_fit() {
+        let items = vec![(
+            "only".to_string(),
+            "a short body".to_string(),
+            "topic".to_string(),
+            2u8,
+        )];
+        let out = super::render_budgeted(&items, 100, "");
+        assert!(!out.contains("more, narrow"), "no footer expected: {out}");
+        assert!(out.contains("only · a short body · via topic · 2 hop(s)"));
     }
 }

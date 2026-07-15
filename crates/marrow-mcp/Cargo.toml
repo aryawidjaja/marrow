@@ -1,6 +1,6 @@
 [package]
 name = "marrow-mcp"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 description = "Model Context Protocol server exposing the Marrow memory store to agents."
 license = "AGPL-3.0-only"
@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 marrow-store = { path = "../marrow-store" }
 marrow-memdocs = { path = "../marrow-memdocs" }
+marrow-core = { path = "../marrow-core" }
 serde_json = "1"
 ureq = { version = "2", features = ["json"] }
 

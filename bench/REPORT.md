@@ -1,7 +1,7 @@
 # Marrow — Evidence
 
-Four measurements: an end-to-end A/B on a real agent (needs the Claude CLI), plus three component
-benchmarks that reproduce from a clean checkout with no network or model download.
+Six measurements: an end-to-end A/B on a real agent, a research spike over a Python corpus, and four
+component benchmarks that reproduce from a clean checkout with no network or model download.
 
 ## Efficiency — does it actually save tokens and time? (end-to-end A/B)
 
@@ -25,10 +25,9 @@ The token and time wins are large and stable. Cost drops less because a cold age
 file-reads are mostly *cached* input (cheap per token) — the prize here is **context budget and
 latency**, not just dollars.
 
-The most telling figure is the variance: **warm is flat at ~37,800 tokens on every run, while cold
-swings from 98k to 170k.** A warm session recalls a fixed, distilled briefing; a cold one re-reads
-the codebase, so its cost grows with the repository. **On a larger codebase the gap widens** — the
-savings scale with the project.
+Warm was flat at approximately 37,800 tokens in these runs, while cold ranged from 98k to 170k. A
+warm session recalled a fixed briefing; a cold one explored the repository. Larger repositories may
+increase that gap, but this experiment did not test repository-size scaling.
 
 Honest scope: this is an *amortized* result — the one-time cost of distilling memory into Marrow is
 not charged per query (that is the point of a shared brain). It is question- and codebase-dependent
@@ -39,20 +38,35 @@ a controlled micro-benchmark.
 Method: `claude -p "<prompt>" --output-format json` against a stripped vs a populated copy of the
 repo, summing `usage` tokens and reading `duration_ms`.
 
-## 1. StaleEval — does it surface stale knowledge?
+## 1. Research StaleEval — is the hybrid worth building?
 
 A code repository is seeded with memories anchored to specific symbols; the code is then
 mutated (reformat, rename, move, change-logic, change-signature, delete) and each anchoring
 strategy is scored on whether it tells a genuine change from a harmless one.
 
 **Result (hybrid structural + relocation):** ~**1.0% false-positive rate** at ~**98.4% recall**.
-A reformat or a renamed local does not trip it; a changed body, a changed signature, or a
-deletion does; a moved symbol is relocated rather than flagged. This is the engine Marrow
-ships (`marrow-core`).
+This result comes from synthetic Python mutations over one pinned corpus. It motivated the hybrid
+design; it is not a measurement of the shipping Rust parser.
 
 Reproduce: `cd spike/staleness && ./fetch_corpus.sh && python3 -m staleness_spike.run`.
 
-## 2. ConsolEval — is the consolidation engine correct?
+## 2. FreshEval — does the shipping Rust engine handle its documented cases?
+
+Seven deterministic cases run directly against `marrow-core`: unchanged code, reformatting, local
+rename, logic change, signature change, deletion, and cross-file relocation.
+
+| Metric | Value |
+|---|---|
+| Correct classifications | 7 / 7 |
+| False positives | 0 |
+| False negatives | 0 |
+| Relocations preserved | 1 / 1 |
+
+This verifies the documented Rust cases, not production precision across real repository histories.
+
+Reproduce: `cargo run -p marrow-bench`.
+
+## 3. ConsolEval — is conservative duplicate detection correct?
 
 Labeled memory sets (exact duplicates, reordered paraphrases, distinct memories, and
 mixed groups, some with differing confidence) are run through consolidation, and the detected
@@ -67,15 +81,13 @@ clusters are compared to the ground truth.
 | False merges (distinct memories wrongly merged) | 0 |
 | Survivor selection correct (highest-confidence kept) | 5 / 5 |
 
-Honest scope: ConsolEval uses a deterministic lexical embedder, so it proves the engine —
-clustering, survivor selection, and the no-false-merge guarantee — not the vocabulary breadth
-of any particular embedding model. Catching paraphrases that share no words needs a real
-embedding model (`embed-fastembed` / `embed-http`), and resolving genuine contradictions needs
-an LLM distiller (`distill-http`, pointed at a local/sovereign model).
+Honest scope: ConsolEval uses six small labeled cases and a deterministic lexical embedder. It
+tests clustering and survivor selection under those inputs, not every embedding model or genuine
+contradiction. The local distiller de-duplicates lines; it does not resolve semantic conflicts.
 
 Reproduce: `cargo run -p marrow-bench`.
 
-## 3. TokenEval — does it keep retrieval cheap?
+## 4. TokenEval — does it keep retrieval cheap?
 
 A broad query over a 40-memory corpus is run with and without a token budget.
 
@@ -84,8 +96,26 @@ Memory recall stays useful while the context window stays focused.
 
 Reproduce: `cargo run -p marrow-bench`.
 
+## 5. CoordEval — do advisory claims distinguish conflicts from safe work?
+
+Four overlapping file scopes and three unrelated scopes are checked through the shipping claim
+store, followed by release.
+
+| Metric | Value |
+|---|---|
+| Conflicts detected | 4 / 4 |
+| Safe scopes allowed | 3 / 3 |
+| False blocks | 0 |
+| Claims released | yes |
+
+This verifies the coordination primitive. Claude hooks remain best-effort and fail open; this is not
+a claim that every real multi-agent collision is prevented.
+
+Reproduce: `cargo run -p marrow-bench`.
+
 ---
 
-The pitch line these support: *Marrow doesn't surface stale facts, it merges duplicates and
-resolves contradictions without losing anything, and it does so within a token budget — and
-every number here reproduces from source.*
+These measurements support narrower claims: Marrow budgets retrieval, conservatively consolidates
+the labeled duplicates, handles its documented Rust freshness cases, and detects overlapping claim
+scopes. The A/B suggests meaningful orientation savings on one repository. Broader user outcomes
+need the longitudinal study in [OUTCOME-STUDY.md](OUTCOME-STUDY.md).

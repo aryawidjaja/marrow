@@ -9,10 +9,12 @@
 //! from a clean checkout with no network or model download.
 
 use std::collections::HashSet;
+use std::fs;
 
+use marrow_core::{check_anchor, seed_anchor};
 use marrow_memdocs::{Frontmatter, Memory, MemoryKind, Provenance, Scope, Status};
 use marrow_store::query::estimate_tokens;
-use marrow_store::{HashEmbedder, Query, Store};
+use marrow_store::{ClaimScope, HashEmbedder, Query, Store};
 
 fn mem(kind: MemoryKind, topic: &str, body: &str, confidence: f64) -> Memory {
     Memory {
@@ -235,6 +237,155 @@ pub fn run_tokeneval() -> TokenEval {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct FreshEval {
+    pub cases: usize,
+    pub correct: usize,
+    pub false_positives: usize,
+    pub false_negatives: usize,
+    pub relocations: usize,
+}
+
+pub fn run_fresheval() -> FreshEval {
+    let original = "pub fn total(value: i32) -> i32 { value + 1 }\n";
+    let cases = [
+        ("unchanged", original, false, false),
+        (
+            "reformatted",
+            "pub fn total(value: i32)->i32 {\n value + 1\n}\n",
+            false,
+            false,
+        ),
+        (
+            "renamed-local",
+            "pub fn total(input: i32) -> i32 { input + 1 }\n",
+            false,
+            false,
+        ),
+        (
+            "changed-logic",
+            "pub fn total(value: i32) -> i32 { value + 2 }\n",
+            true,
+            false,
+        ),
+        (
+            "changed-signature",
+            "pub fn total(value: i64) -> i64 { value + 1 }\n",
+            true,
+            false,
+        ),
+        ("deleted", "pub fn other() {}\n", true, false),
+    ];
+    let mut result = FreshEval {
+        cases: cases.len() + 1,
+        correct: 0,
+        false_positives: 0,
+        false_negatives: 0,
+        relocations: 0,
+    };
+    for (_, source, expected_stale, _) in cases {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("lib.rs"), original).unwrap();
+        let anchor = seed_anchor(dir.path(), "lib.rs", "total").unwrap();
+        fs::write(dir.path().join("lib.rs"), source).unwrap();
+        let verdict = check_anchor(dir.path(), &anchor);
+        record_fresh_result(&mut result, verdict.stale, expected_stale);
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("lib.rs"), original).unwrap();
+    let anchor = seed_anchor(dir.path(), "lib.rs", "total").unwrap();
+    fs::write(dir.path().join("lib.rs"), "pub fn other() {}\n").unwrap();
+    fs::write(dir.path().join("math.rs"), original).unwrap();
+    let moved = check_anchor(dir.path(), &anchor);
+    record_fresh_result(&mut result, moved.stale, false);
+    result.relocations = usize::from(moved.relocated_to.is_some());
+    result
+}
+
+fn record_fresh_result(result: &mut FreshEval, actual: bool, expected: bool) {
+    if actual == expected {
+        result.correct += 1;
+    } else if actual {
+        result.false_positives += 1;
+    } else {
+        result.false_negatives += 1;
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CoordEval {
+    pub conflicts: usize,
+    pub detected: usize,
+    pub safe_scopes: usize,
+    pub false_blocks: usize,
+    pub released: bool,
+}
+
+pub fn run_coordeval() -> CoordEval {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::init(dir.path()).unwrap();
+    let conflicts = [
+        "src/auth.rs",
+        "src/api.rs",
+        "src/cache.rs",
+        "src/billing.rs",
+    ];
+    for (index, file) in conflicts.iter().enumerate() {
+        store
+            .claim(
+                &format!("owner-{index}"),
+                "bench",
+                ClaimScope {
+                    files: vec![(*file).into()],
+                    project_id: "bench".into(),
+                    ..ClaimScope::default()
+                },
+                "benchmark",
+                300,
+            )
+            .unwrap();
+    }
+    let detected = conflicts
+        .iter()
+        .filter(|file| {
+            !store
+                .claims_overlapping(&ClaimScope {
+                    files: vec![(**file).into()],
+                    project_id: "bench".into(),
+                    ..ClaimScope::default()
+                })
+                .unwrap()
+                .is_empty()
+        })
+        .count();
+    let safe = ["src/search.rs", "docs/guide.md", "tests/smoke.rs"];
+    let false_blocks = safe
+        .iter()
+        .filter(|file| {
+            !store
+                .claims_overlapping(&ClaimScope {
+                    files: vec![(**file).into()],
+                    project_id: "bench".into(),
+                    ..ClaimScope::default()
+                })
+                .unwrap()
+                .is_empty()
+        })
+        .count();
+    let claims = store.active_claims().unwrap();
+    for claim in &claims {
+        store.release(&claim.id, "bench").unwrap();
+    }
+    CoordEval {
+        conflicts: conflicts.len(),
+        detected,
+        safe_scopes: safe.len(),
+        false_blocks,
+        released: store.active_claims().unwrap().is_empty(),
+    }
+}
+
 fn pairs(groups: &[Vec<usize>]) -> HashSet<(usize, usize)> {
     let mut out = HashSet::new();
     for g in groups {
@@ -276,5 +427,22 @@ mod tests {
             r.reduction_pct > 50.0,
             "a small budget should cut a large corpus substantially"
         );
+    }
+
+    #[test]
+    fn fresheval_classifies_the_shipping_rust_cases() {
+        let result = run_fresheval();
+        assert_eq!(result.correct, result.cases);
+        assert_eq!(result.false_positives, 0);
+        assert_eq!(result.false_negatives, 0);
+        assert_eq!(result.relocations, 1);
+    }
+
+    #[test]
+    fn coordeval_detects_conflicts_without_blocking_safe_work() {
+        let result = run_coordeval();
+        assert_eq!(result.detected, result.conflicts);
+        assert_eq!(result.false_blocks, 0);
+        assert!(result.released);
     }
 }

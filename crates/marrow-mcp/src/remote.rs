@@ -3,6 +3,7 @@
 //! same `{tool, args, project}` envelope the backbone speaks (see marrow-server).
 
 use serde_json::{json, Value};
+use std::time::Duration;
 
 /// The backbone URL, if this agent is wired to one.
 pub fn endpoint() -> Option<String> {
@@ -31,7 +32,12 @@ pub fn forward_to(
     args: &Value,
 ) -> Result<String, String> {
     let base = url.trim_end_matches('/');
-    let mut req = ureq::post(&format!("{base}/v1/rpc"));
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(5))
+        .timeout_read(Duration::from_secs(15))
+        .timeout_write(Duration::from_secs(15))
+        .build();
+    let mut req = agent.post(&format!("{base}/v1/rpc"));
     if let Some(token) = token {
         if !token.is_empty() {
             req = req.set("Authorization", &format!("Bearer {token}"));

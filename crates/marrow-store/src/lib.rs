@@ -11,6 +11,7 @@ pub mod config;
 pub mod consolidate;
 pub mod convert;
 pub mod coordinate;
+pub mod edge;
 pub mod embed;
 #[cfg(feature = "embed-fastembed")]
 pub mod embed_fastembed;
@@ -21,6 +22,7 @@ pub mod index;
 pub mod integrity;
 pub mod provenance;
 pub mod query;
+pub mod rank;
 pub mod sharing;
 pub mod staleness;
 pub mod store;
@@ -28,7 +30,7 @@ pub mod util;
 
 pub use associative::{ConnectedRecall, Neighbor};
 pub use channel::Message;
-pub use config::Config;
+pub use config::{Config, ResponseMode};
 pub use consolidate::{
     Cluster, ClusterAction, ConsolidationOutcome, ConsolidationReport, Distiller,
     HeuristicDistiller, Verdict,
@@ -41,6 +43,7 @@ pub use hub::{Hub, HubEvent, HubHit, Project};
 pub fn semantic_supported() -> bool {
     cfg!(feature = "embed-fastembed") || cfg!(feature = "embed-http")
 }
+pub use edge::{Edge, EdgeCorpus, EdgeRel, Trust};
 pub use embed::{EmbedError, Embedder, HashEmbedder};
 pub use provenance::{MemoryRef, ProvenanceTrail};
 pub use query::Query;

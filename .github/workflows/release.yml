@@ -6,9 +6,33 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - run: ./e2e/smoke.sh
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check release versions
+        run: python -c 'import os,tomllib; files=("crates/marrow-cli/Cargo.toml","python/marrow-anthropic/pyproject.toml"); versions={tomllib.load(open(f,"rb"))["package" if f.endswith("Cargo.toml") else "project"]["version"] for f in files}; tag=os.environ["GITHUB_REF_NAME"].removeprefix("v"); assert versions == {tag}, f"tag {tag} does not match package versions {versions}"'
+      - run: python -m pip install -e "python/marrow-anthropic[test]" build
+      - run: python -m pytest python/marrow-anthropic
+      - run: python -m build python/marrow-anthropic
+
   build:
+    needs: quality
     strategy:
       matrix:
         include:
@@ -26,24 +50,36 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       - name: Build binaries
-        run: cargo build --release --target ${{ matrix.target }} --bin marrow --bin marrow-mcp --bin marrow-serve
+        run: cargo build --release --target ${{ matrix.target }} --bin marrow --bin marrow-mcp --bin marrow-serve --bin marrow-server
       - name: Package
         shell: bash
         run: |
           dist="marrow-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir "$dist"
-          cp target/${{ matrix.target }}/release/marrow target/${{ matrix.target }}/release/marrow-mcp target/${{ matrix.target }}/release/marrow-serve "$dist"/
-          cp README.md llms.txt LICENSE LICENSE-APACHE COMMERCIAL.md "$dist"/
+          cp target/${{ matrix.target }}/release/marrow target/${{ matrix.target }}/release/marrow-mcp target/${{ matrix.target }}/release/marrow-serve target/${{ matrix.target }}/release/marrow-server "$dist"/
+          cp README.md llms.txt LICENSE LICENSE-APACHE COMMERCIAL.md SECURITY.md "$dist"/
           tar czf "$dist.tar.gz" "$dist"
+          if command -v sha256sum >/dev/null; then
+            sha256sum "$dist.tar.gz" > "$dist.tar.gz.sha256"
+          else
+            shasum -a 256 "$dist.tar.gz" > "$dist.tar.gz.sha256"
+          fi
+      - name: Attest release archive
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "*.tar.gz"
       - uses: softprops/action-gh-release@v2
         with:
-          files: "*.tar.gz"
+          files: |
+            *.tar.gz
+            *.tar.gz.sha256
           generate_release_notes: true
 
   # Auto-bump the Homebrew tap formula to the new tag (no manual SHA editing).
   # Requires a repo secret HOMEBREW_TAP_TOKEN: a fine-grained PAT with Contents: Read+Write
   # on aryawidjaja/homebrew-marrow.
   homebrew:
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - name: Compute source tarball sha256
@@ -71,3 +107,21 @@ jobs:
           git add Formula/marrow.rb Formula/marrow-semantic.rb
           git diff --cached --quiet || git commit -m "marrow ${ver}"
           git push
+
+  python-package:
+    needs: quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install build
+      - run: python -m build python/marrow-anthropic
+      - name: Attest Python packages
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "python/marrow-anthropic/dist/*"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: python/marrow-anthropic/dist/*

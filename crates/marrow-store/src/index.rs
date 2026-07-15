@@ -325,27 +325,24 @@ pub fn search(
     if match_expr.is_empty() {
         return Ok(Vec::new());
     }
-    let (mut where_sql, mut binds) = filters(q, now);
-    // Prepend the FTS MATCH constraint.
-    if where_sql.is_empty() {
-        where_sql = "WHERE m.id IN (SELECT id FROM memories_fts WHERE memories_fts MATCH ?)".into();
-        binds.insert(0, match_expr);
-    } else {
-        where_sql = where_sql.replacen(
-            "WHERE ",
-            "WHERE m.id IN (SELECT id FROM memories_fts WHERE memories_fts MATCH ?) AND ",
-            1,
-        );
-        binds.insert(0, match_expr);
-    }
+    let (where_sql, mut binds) = filters(q, now);
+    // Candidate set = FTS MATCH, ranked by bm25 (lower = better). We join `m` to a derived
+    // table `f` that exposes only `id` and `score`, so the filter predicates' bare column
+    // names — including `topic`/`tags`, which ALSO exist on the FTS table — resolve
+    // unambiguously to `m`. The MATCH bind is first in SQL text, so it goes at index 0.
+    binds.insert(0, match_expr);
     let limit = q.limit.map(|n| format!("LIMIT {n}")).unwrap_or_default();
     let cols: String = COLS
         .split(',')
         .map(|c| format!("m.{c}"))
         .collect::<Vec<_>>()
         .join(",");
-    let sql =
-        format!("SELECT {cols} FROM memories m {where_sql} ORDER BY m.updated_at DESC {limit}");
+    let sql = format!(
+        "SELECT {cols} FROM memories m \
+         JOIN (SELECT id, bm25(memories_fts) AS score FROM memories_fts \
+               WHERE memories_fts MATCH ?) f ON f.id = m.id \
+         {where_sql} ORDER BY f.score {limit}"
+    );
     let mut stmt = conn.prepare(&sql)?;
     let params = rusqlite::params_from_iter(binds.iter());
     let rows = stmt.query_map(params, row_from)?;
@@ -372,5 +369,59 @@ mod tests {
         // No searchable words -> empty (caller returns no rows instead of erroring).
         assert_eq!(fts5_query("…"), "");
         assert_eq!(fts5_query("   "), "");
+    }
+
+    use super::{init_schema, search, upsert, IndexRow};
+    use crate::query::Query;
+    use rusqlite::Connection;
+
+    fn r(id: &str, topic: &str, body: &str, updated: &str) -> IndexRow {
+        IndexRow {
+            id: id.into(),
+            kind: "fact".into(),
+            status: "active".into(),
+            topic: topic.into(),
+            area: String::new(),
+            project_id: String::new(),
+            written_by: String::new(),
+            model: String::new(),
+            confidence: 1.0,
+            created_at: updated.into(),
+            updated_at: updated.into(),
+            expires_at: String::new(),
+            tags: String::new(),
+            path: String::new(),
+            body: body.into(),
+        }
+    }
+
+    #[test]
+    fn search_ranks_by_bm25_not_recency() {
+        let conn = Connection::open_in_memory().unwrap();
+        init_schema(&conn).unwrap();
+        // "old" is densely about deployment; "new" merely mentions it once and is newer.
+        upsert(
+            &conn,
+            &r(
+                "old",
+                "deployment rollout",
+                "deploy deploy deployment rollout steps",
+                "2020-01-01T00:00:00Z",
+            ),
+        )
+        .unwrap();
+        upsert(
+            &conn,
+            &r(
+                "new",
+                "misc notes",
+                "a note that mentions deploy once",
+                "2030-01-01T00:00:00Z",
+            ),
+        )
+        .unwrap();
+        let q = Query::default();
+        let got = search(&conn, "deploy", &q, "2031-01-01T00:00:00Z").unwrap();
+        assert_eq!(got.first().map(|r| r.id.as_str()), Some("old"));
     }
 }

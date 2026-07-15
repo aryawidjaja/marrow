@@ -11,8 +11,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use marrow_memdocs::{Memory, RefKind};
 
-use crate::embed::cosine;
-use crate::index::IndexRow;
+use crate::edge::{Edge, EdgeCorpus, EdgeRel};
 use crate::query::Query;
 use crate::store::{Error, Store};
 
@@ -31,16 +30,6 @@ pub struct ConnectedRecall {
     pub neighbors: Vec<Neighbor>,
 }
 
-// How much each kind of connection contributes to a neighbour's activation. Explicit agent-authored
-// links count most; a shared generic-ish tag least. Meaning is weighted by its actual cosine.
-const W_LINK: f32 = 3.0;
-const W_TOPIC: f32 = 2.0;
-const W_TAG: f32 = 1.0;
-const SEM_MIN: f32 = 0.55;
-const SEM_TOPK: usize = 5;
-/// A tag shared by more than this many memories is a convention, not a link — skip it.
-const TAG_FANOUT: usize = 12;
-
 /// How far activation travels. Each hop out is worth [`HOP_DECAY`] of the last, so a distant memory
 /// has to be strongly connected to beat a weakly connected near one. A few rings is the useful
 /// range: past that everything is connected to everything and the ranking stops meaning anything.
@@ -54,6 +43,10 @@ const FRONTIER: usize = 6;
 const SEEDS_SPREAD: usize = 10;
 /// A memory has to light up at least this much to be worth spreading from.
 const SPREAD_MIN: f32 = 0.35;
+/// A node this connected (or above the corpus's 99th-degree percentile) is a hub: activation may
+/// REACH it, but spreading it further would drag its whole star in, so hops never transit through
+/// it. Seeds are exempt — a hub the agent directly matched is still explored.
+const HUB_FLOOR: usize = 50;
 
 /// How much being useful in the past helps a memory surface again. A memory recalled many times
 /// ends up worth at most this much more than one never recalled — enough to break ties in favour of
@@ -67,101 +60,6 @@ fn use_boost(n: u32) -> f32 {
         return 1.0;
     }
     1.0 + USE_BOOST * (1.0 + n as f32).ln() / (1.0 + 50.0f32).ln()
-}
-
-fn wiki_refs(text: &str) -> Vec<String> {
-    text.match_indices("[[")
-        .filter_map(|(i, _)| {
-            text[i + 2..]
-                .find("]]")
-                .map(|j| text[i + 2..i + 2 + j].trim().to_string())
-        })
-        .filter(|s| !s.is_empty() && s.len() <= 48)
-        .collect()
-}
-
-/// The active corpus, indexed once so spreading a hop costs no further queries.
-struct Corpus<'a> {
-    topic_of: HashMap<&'a str, Vec<&'a str>>,
-    tag_of: HashMap<&'a str, Vec<&'a str>>,
-    topic_to_id: HashMap<&'a str, &'a str>,
-    by_id: HashMap<&'a str, &'a IndexRow>,
-    vecs: HashMap<String, Vec<f32>>,
-}
-
-impl<'a> Corpus<'a> {
-    fn build(rows: &'a [IndexRow], vecs: HashMap<String, Vec<f32>>) -> Corpus<'a> {
-        let mut c = Corpus {
-            topic_of: HashMap::new(),
-            tag_of: HashMap::new(),
-            topic_to_id: HashMap::new(),
-            by_id: HashMap::new(),
-            vecs,
-        };
-        for r in rows.iter().filter(|r| r.status == "active") {
-            c.by_id.insert(&r.id, r);
-            if !r.topic.is_empty() {
-                c.topic_of.entry(&r.topic).or_default().push(&r.id);
-                c.topic_to_id.entry(&r.topic).or_insert(&r.id);
-            }
-            for t in r.tags.split(',').map(str::trim).filter(|s| !s.is_empty()) {
-                c.tag_of.entry(t).or_default().push(&r.id);
-            }
-        }
-        c
-    }
-
-    /// Everything one link away from `id`, with the weight of each connection and its name.
-    fn edges_from(
-        &self,
-        id: &str,
-        topic: &str,
-        tags: &[&str],
-        body: &str,
-    ) -> Vec<(&str, f32, String)> {
-        let mut out: Vec<(&str, f32, String)> = Vec::new();
-
-        let mut refs = wiki_refs(body);
-        refs.extend(wiki_refs(topic));
-        for rf in refs {
-            let target = self
-                .by_id
-                .get_key_value(rf.as_str())
-                .map(|(k, _)| *k)
-                .or_else(|| self.topic_to_id.get(rf.as_str()).copied());
-            if let Some(t) = target {
-                out.push((t, W_LINK, "link".into()));
-            }
-        }
-        if !topic.is_empty() {
-            for t in self.topic_of.get(topic).into_iter().flatten() {
-                out.push((t, W_TOPIC, "topic".into()));
-            }
-        }
-        for tag in tags {
-            if let Some(ids) = self.tag_of.get(tag) {
-                if ids.len() <= TAG_FANOUT {
-                    for t in ids {
-                        out.push((t, W_TAG, format!("tag:{tag}")));
-                    }
-                }
-            }
-        }
-        if let Some(sv) = self.vecs.get(id) {
-            let mut sims: Vec<(&str, f32)> = self
-                .vecs
-                .iter()
-                .filter(|(other, v)| other.as_str() != id && v.len() == sv.len())
-                .map(|(other, v)| (other.as_str(), cosine(sv, v)))
-                .filter(|(_, s)| *s >= SEM_MIN)
-                .collect();
-            sims.sort_by(|a, b| b.1.total_cmp(&a.1));
-            for (t, s) in sims.into_iter().take(SEM_TOPK) {
-                out.push((t, s, "meaning".into()));
-            }
-        }
-        out
-    }
 }
 
 /// What a memory has accumulated so far during the spread.
@@ -193,28 +91,33 @@ impl Store {
         }
 
         let rows = self.list()?;
-        let corpus = Corpus::build(
+        let corpus = EdgeCorpus::new(
             &rows,
             self.vectors().unwrap_or_default().into_iter().collect(),
         );
         let used = self.recall_counts().unwrap_or_default();
+
+        // Hubs are not transited through during hops (below). Threshold = max(floor, p99 degree),
+        // so small stores never trip the cap and large ones cap only their genuine super-hubs.
+        let hub_threshold = {
+            let mut degs: Vec<usize> = corpus.ids().map(|id| corpus.degree(id)).collect();
+            degs.sort_unstable();
+            let p99 = degs
+                .get((degs.len().saturating_mul(99) / 100).min(degs.len().saturating_sub(1)))
+                .copied()
+                .unwrap_or(0);
+            HUB_FLOOR.max(p99)
+        };
 
         let mut act: HashMap<String, Activation> = HashMap::new();
         // Seeds spread first. Their frontmatter refs are authoritative, so they go in alongside the
         // links parsed from the body.
         for seed in seeds.iter().take(SEEDS_SPREAD) {
             let fm = &seed.frontmatter;
-            let topic = fm.topic.as_deref().unwrap_or("");
-            let tags: Vec<&str> = fm.tags.iter().map(String::as_str).collect();
-            let mut edges = corpus.edges_from(&fm.id, topic, &tags, &seed.body);
+            let mut edges = corpus.edges_from(&fm.id);
             for r in fm.refs.iter().filter(|r| r.kind == RefKind::MemoryId) {
-                let target = corpus
-                    .by_id
-                    .get_key_value(r.value.as_str())
-                    .map(|(k, _)| *k)
-                    .or_else(|| corpus.topic_to_id.get(r.value.as_str()).copied());
-                if let Some(t) = target {
-                    edges.push((t, W_LINK, "link".into()));
+                if let Some(target) = corpus.resolve_ref(&r.value) {
+                    edges.push(Edge::new(&fm.id, target, EdgeRel::Ref));
                 }
             }
             spread(&mut act, &edges, 1.0, 1, &used);
@@ -239,16 +142,15 @@ impl Store {
             let decay = HOP_DECAY.powi(hop as i32 - 1);
             for (id, _) in &next {
                 spread_from.insert(id.clone());
-                let Some(row) = corpus.by_id.get(id.as_str()) else {
+                // Don't transit through a hub: it can be a neighbour, but spreading its whole
+                // topic/tag star would flood recall. (Seeds spread earlier, ungated.)
+                if corpus.degree(id) >= hub_threshold {
+                    continue;
+                }
+                let Some(_row) = corpus.row(id) else {
                     continue;
                 };
-                let tags: Vec<&str> = row
-                    .tags
-                    .split(',')
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                let edges = corpus.edges_from(id, &row.topic, &tags, &row.body);
+                let edges = corpus.edges_from(id);
                 spread(&mut act, &edges, decay, hop, &used);
             }
         }
@@ -280,16 +182,18 @@ impl Store {
 /// path found, so a memory reachable both near and far is reported at its nearest.
 fn spread(
     act: &mut HashMap<String, Activation>,
-    edges: &[(&str, f32, String)],
+    edges: &[Edge],
     decay: f32,
     hop: u8,
     used: &HashMap<String, u32>,
 ) {
-    for (target, weight, via) in edges {
-        let gain = weight * decay * use_boost(used.get(*target).copied().unwrap_or(0));
-        let e = act.entry((*target).to_string()).or_default();
+    for edge in edges {
+        let gain = edge.activation_weight()
+            * decay
+            * use_boost(used.get(&edge.target).copied().unwrap_or(0));
+        let e = act.entry(edge.target.clone()).or_default();
         e.score += gain;
-        e.via.insert(via.clone());
+        e.via.insert(edge.recall_label().to_string());
         e.hops = if e.hops == 0 { hop } else { e.hops.min(hop) };
     }
 }

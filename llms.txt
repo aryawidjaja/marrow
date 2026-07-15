@@ -1,6 +1,6 @@
 # Marrow
 
-> Marrow is persistent, shared memory for AI agents — so they stop forgetting and can work together. It keeps every memory as a plain markdown file but adds what a database gives you (validation, query, hybrid search, provenance) plus three things file-based memory lacks: staleness detection (a memory is flagged the moment the code it describes changes), consolidation (duplicates merged, contradictions resolved automatically), and a coordination plane so many agent sessions share one brain instead of colliding. It runs as a single offline binary on the user's own machine, speaks the Model Context Protocol, and writes a tamper-evident audit ledger.
+> Marrow is persistent, shared memory for AI agents. It keeps every memory as a plain markdown file and adds validation, query, hybrid search, provenance, Rust code-anchor checks, conservative duplicate consolidation, and best-effort agent coordination. It runs locally by default, speaks the Model Context Protocol, and writes a tamper-evident audit ledger. Cross-device sharing is an optional self-hosted beta.
 
 This file is written so an AI agent can install and use Marrow on the user's behalf. Follow the steps literally.
 
@@ -64,14 +64,16 @@ empty but docs exist.
    Optional but worth it: `confidence` when you are NOT sure (an uncertain memory is useful, a
    confidently wrong one is not), and `expires_at` for something only true for now, which Marrow
    retires on its own.
-4. **Anchor what is about code.** If the memory describes how a specific function or type behaves, pass
+4. **Anchor what is about code.** In a local project, if the memory describes how a specific function or type behaves, pass
    `anchor: {file, symbol}` to `mem_write`. Marrow fingerprints that symbol and warns the next session
-   the moment the code changes, instead of confidently telling it something stale.
+   the moment the code changes, instead of confidently telling it something stale. Shared projects
+   keep memory on the backbone, which cannot see the local source tree, so code anchors are unavailable there.
 5. **Supersede, do not duplicate.** When a decision changes, `mem_supersede` the old one. The lineage is
    kept, so you can always see what you used to think and why it changed.
 
-You do NOT manage work-claims yourself. Claiming files, releasing them, and recording progress are done
-FOR you by the Claude Code hooks. Do not call claim/release tools; they are not in your tool list.
+You do not manage work-claims yourself in Claude Code. Its hooks claim files, release them, and record
+progress when `jq` and the local store are available. The hooks fail open, so treat claims as collision
+protection rather than a distributed lock.
 
 ## Tools (MCP) and CLI equivalents
 
@@ -82,11 +84,11 @@ Onboarding: `mem_ingest`/`marrow ingest` (seed memory from existing docs). A `sa
 
 ## Optional: hands-free auto-capture (Claude Code)
 
-Copy `integrations/claude-code/hooks/*.sh` to `.claude/hooks/`, `chmod +x` them, and merge `integrations/claude-code/settings.example.json` into `.claude/settings.json`. Then sessions bootstrap warm, file edits stream as progress, and sessions close out automatically — no tokens spent.
+Install `jq`, copy `integrations/claude-code/hooks/*.sh` to `.claude/hooks/`, `chmod +x` them, and merge `integrations/claude-code/settings.example.json` into `.claude/settings.json`. The hooks then bootstrap context, publish edit activity, release claims at the end of a turn, and periodically ask the agent to preserve durable decisions.
 
 ## Notes
 
 - Search is keyword (FTS5) by default. Semantic (meaning-based) search is opt-in and needs an embedding model: install with `--features embed-fastembed` (local) or `--features embed-http`, then `marrow embed fastembed` (or `marrow embed http --url <endpoint>`). `marrow status` shows the active mode.
-- Everything runs locally; nothing leaves the machine. Markdown under `.marrow/memory/` is the source of truth; the SQLite index is rebuildable with `marrow doctor`.
+- Everything is local unless the project has explicitly been shared to a backbone. Markdown under `.marrow/memory/` is the local source of truth; the SQLite index is rebuildable with `marrow doctor`.
 - Watch it in a browser: `marrow-serve --root . --port 8088`.
 - Full integration guide: `integrations/README.md`. Project overview: `README.md`.

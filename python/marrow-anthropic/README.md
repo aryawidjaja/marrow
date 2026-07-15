@@ -7,10 +7,14 @@ return strings the model expects and strict path-traversal protection.
 
 ## Install
 
+From a Marrow checkout:
+
 ```bash
-pip install marrow-anthropic          # core store, no dependencies
-pip install "marrow-anthropic[sdk]"   # plus the Anthropic SDK backend
+pip install ./python/marrow-anthropic
+pip install "./python/marrow-anthropic[sdk]"
 ```
+
+Tagged releases also include a wheel and source archive on the GitHub release page.
 
 ## Use it as a memory-tool backend
 

@@ -7,7 +7,7 @@ app = "marrow-backbone"
 primary_region = "sjc"
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = "deploy/Dockerfile"
 
 [env]
   MARROW_DATA = "/data"

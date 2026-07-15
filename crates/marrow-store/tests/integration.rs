@@ -681,6 +681,60 @@ fn search_survives_missing_tokens_and_punctuation() {
 }
 
 #[test]
+fn search_puts_topic_exact_match_first() {
+    // Relevance, not recency: a memory whose TOPIC is exactly the query must lead, even
+    // when another memory merely mentions the term in its body and was written later.
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::init(dir.path()).unwrap();
+
+    // Body deliberately repeats the term so raw bm25 favors THIS row over the topic-exact one.
+    let mut body_only = mem(
+        MemoryKind::Fact,
+        "misc",
+        "jwt-expiry jwt-expiry jwt-expiry jwt-expiry jwt-expiry notes",
+    );
+    store.write(&mut body_only).unwrap();
+
+    let mut topic_exact = mem(MemoryKind::Fact, "jwt-expiry", "short");
+    store.write(&mut topic_exact).unwrap();
+
+    let hits = store
+        .search("jwt-expiry", &Query::for_project("demo"))
+        .unwrap();
+    assert_eq!(
+        hits.first().unwrap().frontmatter.topic.as_deref(),
+        Some("jwt-expiry"),
+        "topic-exact match should rank above a mere body mention"
+    );
+}
+
+#[test]
+fn hub_topic_does_not_flood_recall() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::init(dir.path()).unwrap();
+    // A large topic-star: 60 facts all under topic "status" (a hub). Facts are not
+    // unique-per-topic, so all 60 stay active.
+    for i in 0..60 {
+        let mut m = mem(MemoryKind::Fact, "status", &format!("status update {i}"));
+        store.write(&mut m).unwrap();
+    }
+    // A seed on a different topic that links INTO the hub via a [[status]] wiki-ref.
+    let mut seed = mem(MemoryKind::Fact, "widget", "the widget, see [[status]]");
+    store.write(&mut seed).unwrap();
+
+    let r = store
+        .recall_connected("widget", &Query::for_project("demo"), "tester", 50)
+        .unwrap();
+    // Without the hub cap, spreading THROUGH the 60-member "status" topic returns dozens
+    // of unrelated neighbours. With it, the hub is reached but not expanded.
+    assert!(
+        r.neighbors.len() < 15,
+        "hub flooded recall with {} neighbours",
+        r.neighbors.len()
+    );
+}
+
+#[test]
 fn open_discovers_store_in_an_ancestor_dir() {
     let dir = tempfile::tempdir().unwrap();
     let root = Store::init(dir.path()).unwrap();

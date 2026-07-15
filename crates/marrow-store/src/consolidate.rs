@@ -66,7 +66,8 @@ impl Distiller for HeuristicDistiller {
     }
 }
 
-/// Build the configured distiller, falling back to the heuristic when no LLM is available.
+/// Build the conservative local distiller. It merges duplicate notes but deliberately leaves any
+/// contradiction it cannot understand for human review.
 pub fn build_distiller(_config: &Config) -> Box<dyn Distiller> {
     Box::new(HeuristicDistiller)
 }
