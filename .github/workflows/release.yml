@@ -58,6 +58,7 @@ jobs:
           mkdir "$dist"
           cp target/${{ matrix.target }}/release/marrow target/${{ matrix.target }}/release/marrow-mcp target/${{ matrix.target }}/release/marrow-serve target/${{ matrix.target }}/release/marrow-server "$dist"/
           cp README.md llms.txt LICENSE LICENSE-APACHE COMMERCIAL.md SECURITY.md "$dist"/
+          cp -R assets "$dist"/
           tar czf "$dist.tar.gz" "$dist"
           if command -v sha256sum >/dev/null; then
             sha256sum "$dist.tar.gz" > "$dist.tar.gz.sha256"

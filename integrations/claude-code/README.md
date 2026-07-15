@@ -1,8 +1,8 @@
 # Claude Code auto-capture hooks
 
-These hooks make Marrow hands-free in Claude Code: every session starts warm, file edits stream
-into the shared brain as progress, and sessions close themselves out — without spending model
-tokens.
+These hooks automate Marrow's Claude Code lifecycle: sessions receive a warm-start briefing, file
+edits publish progress, automatic claims are managed around edits, and durable-context capture is
+nudged when a session has grown enough.
 
 ## Setup (one command)
 
@@ -35,17 +35,16 @@ Every hook fails open — if anything goes wrong it exits 0 and never blocks you
 | Hook | Event | Effect |
 |------|-------|--------|
 | `marrow-bootstrap.sh` | `SessionStart` | Injects a warm-start briefing (active claims + relevant memories) so the session doesn't cold-start. Fires once per session. |
-| `marrow-guard.sh` | `PreToolUse` (Edit/Write) | **Before** an edit: blocks it if another session has claimed that file (tells the agent to coordinate), otherwise auto-claims the file for this session. Collision-avoidance with no prompting. |
+| `marrow-guard.sh` | `PreToolUse` (Edit/Write) | **Before** an edit: blocks a detected automatic claim held by another local session, otherwise auto-claims the file for this session. Manual claims remain advisory. |
 | `marrow-progress.sh` | `PostToolUse` (Edit/Write) | Records each file edit as a `progress` event other sessions can see live. |
 | `marrow-watch.sh` | `UserPromptSubmit` | Injects a short delta when another local session has changed claims or files. |
 | `marrow-release.sh` | `Stop` | Releases this turn's automatic claims so another session can continue. |
 | `marrow-distill.sh` | `Stop` | After enough transcript growth, asks the current agent to preserve durable decisions it missed. |
 
-This is what makes the shared brain truly automatic and *unobtrusive* — **the user authors nothing
-and says nothing.** The hooks handle warm-start, collision-avoidance, and activity. The only
-judgment a hook can't make — *which* decisions are worth keeping — is nudged by a tiny block the
-installer drops into `CLAUDE.md` for you (it asks the agent to `mem_write` durable decisions
-in-flow). The agent can also call the MCP tools (`mem_write`, `mem_claim`, …) directly any time.
+The hooks handle warm-start, best-effort local collision detection, and activity without requiring a
+separate user prompt. The judgment they cannot make — *which* decisions are worth keeping — stays
+with the agent. The installer adds concise guidance asking it to `mem_write` durable decisions in
+flow, and the Stop hook can nudge a final pass. The agent can also call the MCP tools directly.
 
 Claude Code fires `Stop` after every turn, so release is intentionally cheap and distillation is
 throttled by transcript growth. Set `MARROW_AUTODISTILL=0` to disable the latter.

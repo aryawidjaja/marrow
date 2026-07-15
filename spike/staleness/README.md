@@ -18,16 +18,16 @@ renaming a local, moving a function).
 ./fetch_corpus.sh                  # vendor the sample repo at a pinned commit into corpus/
 python3 -m pip install -e ".[dev]"
 python3 -m pytest                  # unit tests
-python3 -m staleness_spike.run --count 150 --seed 1234
+python3 -m staleness_spike.run
 ```
 
 Outputs `results/scoreboard.md` and `results/raw.jsonl`.
 
 ## Scoring
 
-`stale` is the positive class. The bar is false-positive-strict: a strategy is
-considered trustworthy only if its false-positive rate (valid code wrongly flagged
-stale) is under 5% while still catching over 80% of genuine staleness.
+`stale` is the positive class. The experiment compares false positives, missed stale memories, and
+the different refactor classes each strategy handles. These are engineering diagnostics, not public
+product claims.
 
 ## Reproducibility
 

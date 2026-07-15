@@ -7,8 +7,9 @@ hands-free.
 1. **MCP (everyone starts here).** Marrow ships an MCP server, so any MCP-capable agent —
    Claude Code, Cursor, Codex, or your own — gets all of Marrow's tools by adding one block of
    config. No code.
-2. **Auto-capture hooks (optional).** Wire Marrow into your agent's lifecycle so memory is
-   recorded and recalled automatically, with no tokens spent asking the model to do it.
+2. **Lifecycle hooks (optional).** Wire Marrow into the agent lifecycle so warm starts, activity,
+   file claims, and release do not depend on the agent remembering a prompt. Saving durable context
+   still uses the agent's judgment.
 
 ---
 
@@ -80,17 +81,19 @@ You share a Marrow memory with other agent sessions. Follow this loop:
 4. When a decision changes, mem_supersede the old one instead of writing a contradiction.
 ```
 
-Claiming files so two sessions never collide is handled by the hooks, not by the agent: it happens
-for you. That loop is the whole point: **one brain, many hands.**
+Automatic file claims are handled by the Claude Code hooks rather than by the agent. They help local
+sessions notice overlapping edits, but they are best-effort and deliberately fail open. That loop is
+the whole point: **one brain, many hands.**
 
 ---
 
-## 4. Auto-capture (optional, zero-token)
+## 4. Lifecycle automation (optional)
 
 So you don't rely on the model remembering the loop, wire Marrow into the agent lifecycle. For
 Claude Code, copy the hooks in [`claude-code/`](claude-code/) — they bootstrap context on session
-start, stream file edits as progress, and close the session out, all without spending model
-tokens. See [`claude-code/README.md`](claude-code/README.md).
+start, stream file edits as progress, manage automatic claims, and close the session out. The final
+distillation nudge still asks the agent to decide what is worth preserving. See
+[`claude-code/README.md`](claude-code/README.md).
 
 ---
 
@@ -101,9 +104,9 @@ catalogue: `mem_bootstrap` (start warm) · `mem_recall` (the matches *and* what 
 `mem_search` · `mem_areas` · `mem_write` · `mem_read` · `mem_supersede` · `mem_ingest`.
 
 Join a hive and it also gets `mem_hub_recall`, `mem_hub_activity`, and the agent channel
-(`mem_ask` · `mem_inbox` · `mem_reply`).
+(`mem_ask` · `mem_rooms` · `mem_inbox` · `mem_reply`).
 
-Claiming files so two sessions don't collide happens in the hooks, not in the agent: it is handled
-for you rather than being something the agent has to remember to do.
+Automatic file claims happen in the Claude Code hooks. Other clients can still inspect and publish
+claims, but those claims remain advisory unless their integration enforces them.
 
 Everything has a `marrow <command>` CLI equivalent, so scripts and hooks can do the same.

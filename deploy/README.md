@@ -50,8 +50,8 @@ as long as it matches on both machines. Then start a fresh agent session.
 
 You can do the same from the dashboard: `marrow-serve`, open **Manage Projects**, hit **share**.
 
-Test it: on machine A tell an agent in that project "remember: we deploy on Fly in sjc". On machine B,
-ask a fresh agent in the same project "what did we decide about deploy?" It answers from the gateway.
+Test it with neutral sample data: write a decision through an MCP agent on machine A, then recall that
+decision through an MCP agent in the same shared project on machine B.
 
 ## Does this delete my local memories?
 
@@ -91,8 +91,11 @@ The backbone keeps each project under its data dir, so point the dashboard at it
 
 ```sh
 # on the backbone host (Fly: `fly ssh console`, or `fly ssh sftp` the folder down)
-marrow-serve --root <data-dir>/shared-brain --port 8088   # open http://localhost:8088
+marrow-serve --root <data-dir>/team-app --port 8088   # open http://localhost:8088
 ```
+
+This requires direct access to the backbone's data directory and a `marrow-serve` binary on that
+host. The local dashboard does not proxy the remote store.
 
 ## API
 

@@ -39,8 +39,9 @@ a sentence: it is the key the brain groups and de-duplicates by, and the detail 
 Recall follows those links outward from whatever matched, so a link is how an old memory stays\n\
 findable long after anyone stops searching for its words. Link generously.\n\n\
 5. Anchor what is about code. If a memory describes how a specific function or type behaves, pass\n\
-`anchor: {file, symbol}` to `mem_write`. Marrow fingerprints that symbol and flags the memory the\n\
-moment the code changes, so the brain warns you instead of confidently telling you something stale.\n\n\
+`anchor: {file, symbol}` to `mem_write`. Marrow fingerprints that symbol and can flag the memory\n\
+when the referenced code is checked after a change, so the brain warns you instead of confidently\n\
+telling you something stale.\n\n\
 6. Talk to the other agents. If `mem_ask` is in your tools you share a channel with every live\n\
 session on this machine, whatever tool it runs in. `mem_rooms` lists the conversations, `mem_inbox`\n\
 is what was said to you, `mem_reply` answers. Open a room with `mem_ask` (always give it a `topic`)\n\
@@ -52,8 +53,8 @@ fn claude_guidance() -> String {
     format!(
         "<!-- marrow:begin (managed by `marrow setup`) -->\n\
 ## Marrow shared memory\n\n\
-This project has a Marrow shared brain over MCP. Hooks load context at session start, prevent file\n\
-collisions, and record activity automatically. Five things are on you:\n\n\
+This project has a Marrow shared brain over MCP. Hooks load context at session start, help detect\n\
+overlapping local edits, and record activity automatically. Five things are on you:\n\n\
 {CORE_RULES}\n\
 Hive etiquette: you share this brain with other live sessions. Heed the notes about what they are\n\
 doing, and do not edit a file another session has claimed. The hooks claim and release files for you;\n\
@@ -315,7 +316,7 @@ pub fn run(root: &Path, global: bool, out: &mut impl Write) -> Result<(), String
              AGENTS.md tells it to call mem_bootstrap itself at the start of a task.\n\n  \
              To let Claude Code and Codex TALK to each other, register this project in the hive:\n    \
              marrow hub register --name <project>\n  \
-             That turns on the shared channel (mem_ask / mem_inbox / mem_reply), and both agents\n  \
+             That turns on the shared channel (mem_ask / mem_rooms / mem_inbox / mem_reply), and both agents\n  \
              land in the same inbox whichever tool they run in."
         )
         .ok();

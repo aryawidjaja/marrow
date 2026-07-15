@@ -65,15 +65,15 @@ empty but docs exist.
    confidently wrong one is not), and `expires_at` for something only true for now, which Marrow
    retires on its own.
 4. **Anchor what is about code.** In a local project, if the memory describes how a specific function or type behaves, pass
-   `anchor: {file, symbol}` to `mem_write`. Marrow fingerprints that symbol and warns the next session
-   the moment the code changes, instead of confidently telling it something stale. Shared projects
+   `anchor: {file, symbol}` to `mem_write`. Marrow fingerprints that symbol and can warn a later session
+   when the referenced code is checked after a change, instead of confidently telling it something stale. Shared projects
    keep memory on the backbone, which cannot see the local source tree, so code anchors are unavailable there.
 5. **Supersede, do not duplicate.** When a decision changes, `mem_supersede` the old one. The lineage is
    kept, so you can always see what you used to think and why it changed.
 
 You do not manage work-claims yourself in Claude Code. Its hooks claim files, release them, and record
 progress when `jq` and the local store are available. The hooks fail open, so treat claims as collision
-protection rather than a distributed lock.
+signals rather than a distributed lock or a guarantee that edits cannot conflict.
 
 ## Tools (MCP) and CLI equivalents
 

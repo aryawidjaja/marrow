@@ -4,8 +4,8 @@ Marrow is open source and dual-licensed.
 
 ## The open-source license
 
-- **The Marrow engine and tools** (everything under `crates/`, the store, CLI, MCP server,
-  dashboard, and benchmarks) are licensed under the **GNU AGPL-3.0-only** (see [LICENSE](LICENSE)).
+- **The Marrow engine and tools** (everything under `crates/`, including the store, CLI, MCP server,
+  and dashboard) are licensed under the **GNU AGPL-3.0-only** (see [LICENSE](LICENSE)).
 - **The Anthropic memory-tool backend** (`python/marrow-anthropic`), which you embed in your own
   application, is licensed under **Apache-2.0** (see [LICENSE-APACHE](LICENSE-APACHE)) so it never
   imposes copyleft on your code.

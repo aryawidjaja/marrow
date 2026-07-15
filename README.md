@@ -1,8 +1,8 @@
 <p align="center"><img src="assets/brand/logo.png" width="300" alt="Marrow" /></p>
 
-<h1 align="center">Marrow</h1>
+<h1 align="center">marrow</h1>
 
-*A shared brain for your AI coding agents, so they stop forgetting, work as one, and you can **see** everything they know.*
+*Shared memory and a coordination layer for your AI coding agents.*
 
 [![Release](https://img.shields.io/github/v/release/aryawidjaja/marrow?color=2ea44f&label=release)](https://github.com/aryawidjaja/marrow/releases/latest)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
@@ -14,47 +14,30 @@
 [![Cursor](https://img.shields.io/badge/Cursor-compatible-000000?logo=cursor&logoColor=white)](https://cursor.com)
 [![Codex](https://img.shields.io/badge/Codex-compatible-412991)](https://openai.com/codex)
 
-## You know Pluribus?
+## Agents are smart. Starting over is not.
 
-In the show almost everyone joins into one shared mind. Carol is one of the few who stay themselves.
-She never gets absorbed, but she still gets to use that hive. Through Zosia she can ask the whole
-collective anything, and thousands of minds organize around her to get it done. She stays the
-individual. The hive works for her.
+Long projects rarely fit in one context window. A session ends, the next agent has to rediscover the
+same decisions, and parallel agents work without knowing what the others are doing.
 
-That is you and your AI agents. Each one is sharp on its own, but they forget everything between
-sessions, repeat decisions you already made, and when you run a few at once they trip over each other.
-Marrow gives them one shared memory so they act like a real hive instead of a crowd of strangers:
-organized, coordinated, far more useful together. And you stay Carol. The memory lives in your marrow,
-plain files on your own machine that you read and own, never taken from you without your say-so.
+Marrow gives them a shared place to remember and coordinate. It keeps the useful parts of the work —
+decisions, facts, gotchas, and progress — instead of trying to preserve every line of every chat.
 
-## The problem
+- A new session can pick up where the last one stopped.
+- Agents can talk in shared rooms and hand work to each other.
+- Live activity and best-effort file claims help parallel agents avoid conflicting edits.
+- Knowledge can be shared across projects and, when you choose, across devices.
+- Everything stays in plain files you can read, edit, move, and own.
 
-Every new agent session starts from zero. It re-reads your codebase, repeats decisions you already
-made, and forgets everything the moment its context fills up. Run several agents at once and it gets
-worse: blind to each other, they collide and undo each other's work.
+Marrow is built for work that takes more than one agent, one session, or one machine.
 
-## What Marrow does
+## The Pluribus idea
 
-Marrow gives your agents **one shared memory** that persists across sessions, stays current as your
-code changes, and lets many agents work together without stepping on each other. It's plain markdown
-files you can read, edit, and commit, not a black box. A new session starts already knowing what the
-others learned.
+In *Pluribus*, Carol stays herself while Zosia connects her to a collective that can organize around
+what she needs. She does not disappear into the hive; the hive works for her.
 
-In one repeated Claude Code orientation benchmark on this repository, a populated Marrow run used
-about **72% fewer tokens** and finished about **57% faster** than cold exploration because it recalled
-a small distilled briefing instead of re-reading every file. This is an amortized, workload-specific
-result, not a guarantee for every task; the method and limitations are in [bench/REPORT.md](bench/REPORT.md).
-
-<img src="assets/benchmark.png" width="720" alt="Marrow: 72% fewer tokens, 57% faster, 25% cheaper">
-
-| Metric | Cold (reads files) | Warm (Marrow) | Saved |
-|---|---|---|---|
-| Tokens | ~134k | ~38k | **~72%** |
-| Time | ~26s | ~11s | **~57%** |
-| Cost | ~$0.21 | ~$0.16 | ~25% |
-
-The tell is the variance: warm stays flat at ~38k tokens every run while cold swings from 98k to
-170k, so the gap *widens* on bigger projects.
+That is the feeling behind Marrow. Each agent stays its own session and keeps doing what it does best,
+but they share what matters and coordinate around the same work. You stay in control, and the memory
+stays in plain files on your machine.
 
 ## Get started in 3 steps
 
@@ -68,11 +51,11 @@ brew install aryawidjaja/marrow/marrow
 marrow setup          # add --global to wire every repo at once
 ```
 
-**3. Check setup, then restart your agent.** `marrow setup` reports any missing prerequisite. Claude
-Code sessions then warm-start, capture activity, and use best-effort file claims to prevent local
-parallel edits from colliding. The hooks require `jq` (`brew install jq` or `apt install jq`) and
-fail open if a dependency or store is unavailable. Already mid-session? Run **`/marrow-save`** once
-to capture durable decisions from the current context.
+**3. Check setup, then restart your agent.** `marrow setup` reports anything still missing. Claude
+Code sessions then start with relevant project memory, share activity, and use best-effort file claims
+to avoid local edit conflicts. The hooks need `jq` (`brew install jq` or `apt install jq`) and never
+block your work when Marrow is unavailable. Already mid-session? Run **`/marrow-save`** once to keep
+the decisions and discoveries worth carrying forward.
 
 The memory lives in `.marrow/` in your project.
 
@@ -127,6 +110,16 @@ marrow hub recall "how do we do auth"   # searches every project, tagged by proj
 Now an agent working in `api` can ask what `webapp` knows. In the dashboard, the **Hive** tab shows a
 central *core* neuron (you) with every project orbiting it, bridged where they share ideas.
 
+## Give your agents a room to talk
+
+Once a project joins the hive, its agents can open named rooms, ask each other questions, reply, and
+hand work over without relying on one giant chat. Claude Code, Codex, Cursor, and other MCP agents on
+the same machine can use the same channel.
+
+Agents check the inbox when they start and before touching work another session may own. You can read
+every room in the dashboard's **Channel** tab, so the coordination stays visible instead of happening
+behind your back.
+
 ## One brain across your devices (beta)
 
 Each project is local and private by default. Share the *one* project you want synced, and the rest
@@ -172,7 +165,8 @@ This puts `marrow`, `marrow-mcp`, `marrow-serve`, and the cross-device `marrow-s
 
 A fresh brain starts empty. To seed it from docs you already have, the first warm start nudges your
 agent to run `marrow ingest`, it lists your README and `docs/` and distills them into memory. After
-that, every session starts informed. Any time, run **`/marrow-save`** to capture the session you're in.
+that, later sessions can start with those memories available. Any time, run **`/marrow-save`** to
+preserve the decisions and discoveries worth carrying forward.
 
 ## Using Cursor, Codex, or other MCP agents
 
@@ -251,9 +245,9 @@ version. Marrow preserves the lineage so the current answer stays clear without 
 
 ## The name
 
-Marrow is where the immune system's memory begins, the quiet layer a body's knowledge is built on. In
-Pluribus it is the marrow that keeps the immune themselves, the one thing the hive cannot take without
-consent. Same idea here. Your agents share a memory, but it stays yours, in your marrow, on your terms.
+Marrow is where the immune system's memory begins: the quiet layer that remembers while the rest of
+the body keeps changing. Your agents share one too, but it stays yours, on your machine and on your
+terms.
 
 ## License
 
