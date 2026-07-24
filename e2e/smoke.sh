@@ -69,11 +69,6 @@ echo "==> CLI: validation rejects a bad write"
 bad="$(m add --kind decision 'a decision with no topic' 2>&1 || true)"
 check "decision without topic is rejected" "$bad" "topic"
 
-echo "==> CLI: supersede keeps one active decision per topic"
-new_id="$(m supersede "$auth_id" --kind decision --topic auth 'Auth now issues opaque tokens.' | tr -d '[:space:]')"
-check "superseding query shows only the new decision" "$(m query --kind decision --topic auth)" "$new_id"
-check "old decision is no longer active" "$(m query --kind decision --topic auth)" "1 result(s)"
-
 echo "==> Staleness: the headline feature"
 check "fresh anchors are not stale" "$(m list-stale --repo "$proj")" "0 stale anchor(s)"
 # Change what issue_token actually does.
@@ -86,6 +81,12 @@ stale="$(m list-stale --repo "$proj")"
 check "changed code flags exactly one stale anchor" "$stale" "1 stale anchor(s)"
 check "the stale anchor names the changed symbol" "$stale" "issue_token"
 absent "the unrelated rate-limit anchor stays valid" "$stale" "allow"
+
+echo "==> CLI: supersede keeps one active decision per topic"
+new_id="$(m supersede "$auth_id" --kind decision --topic auth 'Auth now issues opaque tokens.' | tr -d '[:space:]')"
+check "superseding query shows only the new decision" "$(m query --kind decision --topic auth)" "$new_id"
+check "old decision is no longer active" "$(m query --kind decision --topic auth)" "1 result(s)"
+check "superseded anchors stop producing stale noise" "$(m list-stale --repo "$proj")" "0 stale anchor(s)"
 
 echo "==> CLI: doctor rebuilds the index from files"
 rm -f "$proj/.marrow/.index/sqlite.db"
@@ -103,7 +104,97 @@ session="$(printf '%s\n' \
 check "MCP handshake reports the protocol version" "$session" '"protocolVersion":"2025-06-18"'
 check "MCP advertises the lean core catalog" "$session" '"name":"mem_bootstrap"'
 check "MCP search returns the stored memory" "$session" "stored as markdown"
-check "MCP reports the stale anchor" "$session" "issue_token"
+check "MCP also ignores superseded stale anchors" "$session" '{\"count\":0'
+
+echo "==> Agent channel: canonical rooms, safe inbox, group replies"
+channel_proj="$work/channel-project"
+channel_home="$work/channel-home"
+mkdir -p "$channel_proj" "$channel_home"
+"$marrow" --root "$channel_proj" init > /dev/null
+channel_smoke="$(python3 - "$marrow_mcp" "$channel_proj" "$channel_home" <<'EOF'
+import json
+import os
+import subprocess
+import sys
+
+mcp, root, isolated_home = sys.argv[1:]
+env = dict(os.environ, HOME=isolated_home)
+
+def request(name, arguments, allow_error=False):
+    wire = "\n".join([
+        json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}),
+        json.dumps({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {"name": name, "arguments": arguments},
+        }),
+        "",
+    ])
+    result = subprocess.run(
+        [mcp, "--root", root],
+        input=wire,
+        text=True,
+        capture_output=True,
+        env=env,
+        check=True,
+    )
+    responses = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+    response = next(item for item in responses if item.get("id") == 2)["result"]
+    if response.get("isError"):
+        if allow_error:
+            return response
+        raise AssertionError(response)
+    return json.loads(response["content"][0]["text"])
+
+opened = request("mem_ask", {
+    "by": "alice", "to": "bob", "topic": "release-review", "body": "first question",
+})
+thread = opened["thread"]
+reused = request("mem_ask", {
+    "by": "alice", "to": "bob", "topic": "release-review", "body": "second question",
+})
+assert reused["thread"] == thread and reused["reused_room"] is True
+
+separate = request("mem_ask", {
+    "by": "alice", "to": "bob", "topic": "release-review",
+    "body": "explicitly separate", "new_thread": True,
+})
+assert separate["thread"] != thread
+
+request("mem_ask", {
+    "by": "carol", "to": "alice", "thread": thread, "body": "joining the review",
+})
+
+peek_one = request("mem_inbox", {"me": "bob"})
+peek_two = request("mem_inbox", {"me": "bob"})
+assert [m["id"] for m in peek_one["messages"]] == [m["id"] for m in peek_two["messages"]]
+assert peek_one["acknowledged"] is False
+
+acked = request("mem_inbox", {"me": "bob", "ack": True})
+assert acked["count"] == peek_one["count"] and acked["acknowledged"] is True
+assert request("mem_inbox", {"me": "bob"})["count"] == 0
+
+request("mem_reply", {"by": "bob", "thread": thread, "body": "reply to the whole room"})
+carol = request("mem_inbox", {"me": "carol"})
+assert any(message["body"] == "reply to the whole room" for message in carol["messages"])
+
+history = request("mem_inbox", {"me": "carol", "thread": thread})
+assert history["count"] == 4
+assert [message["body"] for message in history["messages"]] == [
+    "first question", "second question", "joining the review", "reply to the whole room",
+]
+
+missing = request(
+    "mem_reply",
+    {"by": "alice", "thread": "01DOESNOTEXIST", "body": "must not disappear"},
+    allow_error=True,
+)
+assert missing["isError"] is True
+print("canonical room + safe peek/ack + group delivery + history + rejection all passed")
+EOF
+)"
+check "channel behavior survives a real isolated MCP session" "$channel_smoke" "all passed"
 
 echo "==> Audit ledger: tamper-evident history"
 m log --kind observe "noticed the auth change in review" > /dev/null

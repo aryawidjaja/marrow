@@ -169,7 +169,8 @@ impl Hub {
             status: Some(marrow_memdocs::Status::Active),
             exclude_expired: true,
             limit: Some(per_project),
-            hybrid_weight: Some(1.0),
+            // Preserve exact keyword/topic evidence while still using semantic meaning.
+            hybrid_weight: None,
             ..Query::default()
         };
         let mut lanes: Vec<_> = self

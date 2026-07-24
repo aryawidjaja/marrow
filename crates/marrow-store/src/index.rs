@@ -27,6 +27,11 @@ pub struct IndexRow {
     pub tags: String,
     pub path: String,
     pub body: String,
+    /// The full serialized memory document (frontmatter + body). This is the source of truth for
+    /// read/hydration: reconstructing a [`Memory`] means parsing this, not re-reading the exported
+    /// markdown file. The file on disk is a byte-identical write-through export. Empty only for rows
+    /// written by a version that predated this column; hydration falls back to disk for those.
+    pub doc: String,
 }
 
 /// Create the schema if absent.
@@ -47,7 +52,8 @@ pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
             expires_at TEXT NOT NULL DEFAULT '',
             tags TEXT NOT NULL DEFAULT '',
             path TEXT NOT NULL DEFAULT '',
-            body TEXT NOT NULL DEFAULT ''
+            body TEXT NOT NULL DEFAULT '',
+            doc TEXT NOT NULL DEFAULT ''
         );
         CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
             id UNINDEXED, topic, body, tags,
@@ -61,7 +67,13 @@ pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
         CREATE TABLE IF NOT EXISTS recalls (
             id TEXT PRIMARY KEY,
             n INTEGER NOT NULL DEFAULT 0
-        );",
+        );
+        CREATE INDEX IF NOT EXISTS idx_memories_status_updated
+            ON memories(status, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_memories_project_status_kind_topic
+            ON memories(project_id, status, kind, topic);
+        CREATE INDEX IF NOT EXISTS idx_memories_status_area
+            ON memories(status, area);",
     )?;
     // Older stores predate these columns; add them in place rather than forcing a full reindex.
     let _ = conn.execute(
@@ -74,6 +86,11 @@ pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
     );
     let _ = conn.execute(
         "ALTER TABLE memories ADD COLUMN model TEXT NOT NULL DEFAULT ''",
+        [],
+    );
+    // Backfills the `doc` column on older stores (see `IndexRow::doc`).
+    let _ = conn.execute(
+        "ALTER TABLE memories ADD COLUMN doc TEXT NOT NULL DEFAULT ''",
         [],
     );
     Ok(())
@@ -151,8 +168,8 @@ pub fn upsert(conn: &Connection, row: &IndexRow) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT OR REPLACE INTO memories
          (id, kind, status, topic, project_id,
-          confidence, created_at, updated_at, expires_at, tags, path, body, area, written_by, model)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+          confidence, created_at, updated_at, expires_at, tags, path, body, area, written_by, model, doc)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
         params![
             row.id,
             row.kind,
@@ -168,7 +185,8 @@ pub fn upsert(conn: &Connection, row: &IndexRow) -> rusqlite::Result<()> {
             row.body,
             row.area,
             row.written_by,
-            row.model
+            row.model,
+            row.doc
         ],
     )?;
     conn.execute("DELETE FROM memories_fts WHERE id = ?1", params![row.id])?;
@@ -256,7 +274,7 @@ fn filters(q: &Query, now: &str) -> (String, Vec<String>) {
     (where_sql, binds)
 }
 
-const COLS: &str = "id,kind,status,topic,project_id,confidence,created_at,updated_at,expires_at,tags,path,body,area,written_by,model";
+const COLS: &str = "id,kind,status,topic,project_id,confidence,created_at,updated_at,expires_at,tags,path,body,area,written_by,model,doc";
 
 fn row_from(r: &rusqlite::Row) -> rusqlite::Result<IndexRow> {
     Ok(IndexRow {
@@ -275,6 +293,7 @@ fn row_from(r: &rusqlite::Row) -> rusqlite::Result<IndexRow> {
         area: r.get(12)?,
         written_by: r.get(13).unwrap_or_default(),
         model: r.get(14).unwrap_or_default(),
+        doc: r.get(15).unwrap_or_default(),
     })
 }
 
@@ -392,6 +411,7 @@ mod tests {
             tags: String::new(),
             path: String::new(),
             body: body.into(),
+            doc: String::new(),
         }
     }
 

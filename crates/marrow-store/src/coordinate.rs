@@ -363,11 +363,14 @@ impl Store {
         // Pull memories relevant to the goal. A new session should never start cold, so if the
         // goal doesn't match anything (e.g. a vague natural-language goal with no embedder
         // configured), fall back to the most recent project memories under the same budget.
-        let budgeted = |text: Option<&str>| Query {
+        let budgeted = |_text: Option<&str>| Query {
             project_id: Some(project_id.to_string()),
             exclude_expired: true,
             max_tokens: Some(max_tokens),
-            hybrid_weight: text.map(|_| 1.0),
+            // Use the configured hybrid weight. Warm start needs both exact topic/keyword evidence
+            // and semantic paraphrases; forcing weight=1 discarded the keyword score whenever a
+            // semantic backend was present.
+            hybrid_weight: None,
             ..Query::default()
         };
         let mut relevant = self.recall(goal, &budgeted(Some(goal)), actor)?;

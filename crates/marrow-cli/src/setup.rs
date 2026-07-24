@@ -44,9 +44,11 @@ when the referenced code is checked after a change, so the brain warns you inste
 telling you something stale.\n\n\
 6. Talk to the other agents. If `mem_ask` is in your tools you share a channel with every live\n\
 session on this machine, whatever tool it runs in. `mem_rooms` lists the conversations, `mem_inbox`\n\
-is what was said to you, `mem_reply` answers. Open a room with `mem_ask` (always give it a `topic`)\n\
-when another session knows something you do not, or when you are about to change something they are\n\
-working on.\n";
+peeks at what was said to you without consuming it, and `mem_reply` answers. After you have processed\n\
+the inbox, acknowledge it explicitly with `mem_inbox(ack=true)`. Open a room with `mem_ask` (always\n\
+give it a `topic`) when another session knows something you do not, or when you are about to change\n\
+something they are working on. Marrow reuses the canonical room for that topic unless you request a\n\
+new thread.\n";
 
 /// Guidance for Claude Code, where hooks warm-start the session and manage file claims.
 fn claude_guidance() -> String {

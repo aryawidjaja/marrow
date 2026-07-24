@@ -371,6 +371,36 @@ mod tests {
     }
 
     #[test]
+    fn write_auto_anchors_every_resolving_code_ref() {
+        let dir = store_root();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(
+            dir.path().join("src/auth.rs"),
+            "pub fn issue() -> &'static str { \"jwt\" }\npub fn verify() -> bool { true }\n",
+        )
+        .unwrap();
+
+        let resp = call(
+            dir.path(),
+            "mem_write",
+            json!({"kind":"decision","topic":"auth-flow",
+                   "body":"Uses `src/auth.rs::issue` and `src/auth.rs::verify`."}),
+        );
+        assert_eq!(resp["result"]["isError"], false);
+        std::fs::write(
+            dir.path().join("src/auth.rs"),
+            "pub fn issue() -> &'static str { \"opaque\" }\npub fn verify() -> bool { false }\n",
+        )
+        .unwrap();
+        let stale = result_text(&call(dir.path(), "mem_list_stale", json!({})));
+        assert!(stale.contains("\"count\":2"), "{stale}");
+        assert!(
+            stale.contains("issue") && stale.contains("verify"),
+            "{stale}"
+        );
+    }
+
+    #[test]
     fn write_does_not_anchor_a_nonresolving_ref() {
         let dir = store_root();
         // Body names a file/symbol that does not exist in the repo — must stay unanchored.

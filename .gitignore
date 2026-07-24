@@ -11,6 +11,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 *.egg-info/
+/python/marrow-anthropic/dist/
 .venv/
 venv/
 

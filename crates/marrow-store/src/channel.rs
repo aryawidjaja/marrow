@@ -10,8 +10,26 @@ use ulid::Ulid;
 
 use crate::store::{Error, Store};
 
+const ROOM_TARGET_PREFIX: &str = "room:";
+
+fn same_identity(a: &str, b: &str) -> bool {
+    a.eq_ignore_ascii_case(b)
+}
+
+fn room_target(thread: &str) -> String {
+    format!("{ROOM_TARGET_PREFIX}{thread}")
+}
+
+fn targets_room(target: &str, thread: &str) -> bool {
+    target
+        .strip_prefix(ROOM_TARGET_PREFIX)
+        .is_some_and(|id| id == thread)
+}
+
 /// One message in a thread.
 pub struct Message {
+    /// The immutable ledger event id. Use this when referring to one exact message.
+    pub id: String,
     pub thread: String,
     pub from: String,
     pub to: String,
@@ -69,9 +87,15 @@ impl Store {
         body: &str,
         topic: Option<&str>,
     ) -> Result<String, Error> {
-        let thread = thread
-            .map(str::to_string)
-            .unwrap_or_else(|| Ulid::new().to_string());
+        let thread = match thread {
+            Some(thread) => {
+                if self.thread(thread)?.is_empty() {
+                    return Err(Error::NotFound(format!("room {thread}")));
+                }
+                thread.to_string()
+            }
+            None => Ulid::new().to_string(),
+        };
         let subject = topic.map(str::trim).filter(|t| !t.is_empty());
         let summary = match subject {
             Some(t) => format!("{role} → {to} [{t}]: {}", short(body, 50)),
@@ -89,14 +113,26 @@ impl Store {
     /// first. Every message, not one-per-thread: showing only the newest would silently drop
     /// whatever was said before it. Call [`Store::mark_read`] to catch up.
     pub fn unread(&self, me: &[String], limit: usize) -> Result<Vec<Message>, Error> {
-        let watermark = self.read_watermark(me)?;
-        let is_me = |s: &str| me.iter().any(|m| m == s);
+        let (watermark_seq, watermark_ts) = self.read_watermark(me)?;
+        let is_me = |s: &str| me.iter().any(|m| same_identity(m, s));
         let topics = self.thread_topics()?;
-        let mut out: Vec<Message> = self
-            .messages()?
+        let messages = self.messages()?;
+        let members = room_members(&messages);
+        let mut out: Vec<Message> = messages
             .into_iter()
-            .filter(|m| (m.to == "all" || is_me(&m.to)) && !is_me(&m.from))
-            .filter(|m| watermark.as_deref().is_none_or(|w| m.ts.as_str() > w))
+            .filter(|m| {
+                let room_member = targets_room(&m.to, &m.thread)
+                    && members
+                        .get(&m.thread)
+                        .is_some_and(|room| room.iter().any(|member| is_me(member)));
+                (m.to == "all" || is_me(&m.to) || room_member) && !is_me(&m.from)
+            })
+            .filter(|m| {
+                watermark_seq.map_or_else(
+                    || watermark_ts.as_deref().is_none_or(|w| m.ts.as_str() > w),
+                    |seq| m.id.parse::<u64>().is_ok_and(|id| id > seq),
+                )
+            })
             .map(|mut m| {
                 m.topic = topics.get(&m.thread).cloned();
                 m
@@ -104,7 +140,11 @@ impl Store {
             .collect();
         out.reverse(); // messages() is newest-first; a conversation should read oldest-first
         if out.len() > limit {
-            out.drain(..out.len() - limit); // keep the most recent `limit`
+            // Return the oldest unread chunk. If acknowledgement later advances through the last
+            // returned sequence, everything omitted is still newer and remains unread. Keeping the
+            // newest chunk here would let one ack silently swallow older messages the caller never
+            // received.
+            out.truncate(limit);
         }
         Ok(out)
     }
@@ -114,13 +154,19 @@ impl Store {
     pub fn inbox(&self, me: &[String], limit: usize) -> Result<Vec<Message>, Error> {
         let mut seen = std::collections::HashSet::new();
         let mut out = Vec::new();
-        let is_me = |s: &str| me.iter().any(|m| m == s);
+        let is_me = |s: &str| me.iter().any(|m| same_identity(m, s));
         let topics = self.thread_topics()?;
-        for mut e in self.messages()? {
+        let messages = self.messages()?;
+        let members = room_members(&messages);
+        for mut e in messages {
             if !seen.insert(e.thread.clone()) {
                 continue; // only the latest message per thread
             }
-            if (e.to == "all" || is_me(&e.to)) && !is_me(&e.from) {
+            let room_member = targets_room(&e.to, &e.thread)
+                && members
+                    .get(&e.thread)
+                    .is_some_and(|room| room.iter().any(|member| is_me(member)));
+            if (e.to == "all" || is_me(&e.to) || room_member) && !is_me(&e.from) {
                 e.topic = topics.get(&e.thread).cloned();
                 out.push(e);
                 if out.len() >= limit {
@@ -135,32 +181,53 @@ impl Store {
     /// history like everything else rather than a flag someone can quietly flip.
     pub fn mark_read(&self, me: &str) -> Result<(), Error> {
         let now = crate::util::now_rfc3339();
+        self.mark_read_until(me, &now)
+    }
+
+    /// Mark messages through an exact timestamp as read. This avoids swallowing a message that
+    /// arrives between fetching the inbox and recording its acknowledgement.
+    pub fn mark_read_until(&self, me: &str, until: &str) -> Result<(), Error> {
         self.log_data(
             "channel_read",
             me,
             &format!("{me} caught up on the channel"),
-            json!({ "agent": me, "until": now }),
+            json!({ "agent": me, "until": until }),
+        )
+    }
+
+    /// Acknowledge one exact ledger position. New readers use the sequence cursor; `until` remains
+    /// in the event so older Marrow binaries can still understand the acknowledgement.
+    pub fn mark_read_through(&self, me: &str, seq: u64, until: &str) -> Result<(), Error> {
+        self.log_data(
+            "channel_read",
+            me,
+            &format!("{me} caught up on the channel through message {seq}"),
+            json!({ "agent": me, "until": until, "until_seq": seq }),
         )
     }
 
     /// The newest point any of `me`'s names has caught up to.
-    fn read_watermark(&self, me: &[String]) -> Result<Option<String>, Error> {
-        let mut best: Option<String> = None;
+    fn read_watermark(&self, me: &[String]) -> Result<(Option<u64>, Option<String>), Error> {
+        let mut best_seq: Option<u64> = None;
+        let mut best_ts: Option<String> = None;
         for e in self.history()? {
             if e.kind != "channel_read" {
                 continue;
             }
             let agent = e.data["agent"].as_str().unwrap_or_default();
-            if !me.iter().any(|m| m == agent) {
+            if !me.iter().any(|m| same_identity(m, agent)) {
                 continue;
             }
             if let Some(until) = e.data["until"].as_str() {
-                if best.as_deref().is_none_or(|b| until > b) {
-                    best = Some(until.to_string());
+                if best_ts.as_deref().is_none_or(|b| until > b) {
+                    best_ts = Some(until.to_string());
                 }
             }
+            if let Some(seq) = e.data["until_seq"].as_u64() {
+                best_seq = Some(best_seq.map_or(seq, |best| best.max(seq)));
+            }
         }
-        Ok(best)
+        Ok((best_seq, best_ts))
     }
 
     /// Each thread's subject, taken from the message that opened it.
@@ -187,12 +254,21 @@ impl Store {
         self.rooms_seen_by(None, limit)
     }
 
+    /// Find the most recently active room with this subject.
+    pub fn room_by_topic(&self, topic: &str) -> Result<Option<Room>, Error> {
+        let topic = topic.trim();
+        Ok(self
+            .all_rooms(usize::MAX)?
+            .into_iter()
+            .find(|room| room.topic.eq_ignore_ascii_case(topic)))
+    }
+
     /// `me = None` observes everything; `Some(names)` shows only the rooms those names can see.
     fn rooms_seen_by(&self, me: Option<&[String]>, limit: usize) -> Result<Vec<Room>, Error> {
         let empty: [String; 0] = [];
         let me_names: &[String] = me.unwrap_or(&empty);
-        let watermark = self.read_watermark(me_names)?;
-        let is_me = |s: &str| me_names.iter().any(|m| m == s);
+        let (watermark_seq, watermark_ts) = self.read_watermark(me_names)?;
+        let is_me = |s: &str| me_names.iter().any(|m| same_identity(m, s));
         let topics = self.thread_topics()?;
 
         let mut order: Vec<String> = Vec::new();
@@ -211,24 +287,24 @@ impl Store {
                 continue;
             };
             // An agent sees the rooms it is in; an observer sees them all.
+            let participants = participants_for_room(&msgs);
             let mine = me.is_none()
-                || msgs
-                    .iter()
-                    .any(|m| m.to == "all" || is_me(&m.to) || is_me(&m.from));
+                || msgs.iter().any(|m| m.to == "all")
+                || participants.iter().any(|member| is_me(member));
             if !mine {
                 continue;
             }
             let unread = msgs
                 .iter()
                 .filter(|m| !is_me(&m.from))
-                .filter(|m| watermark.as_deref().is_none_or(|w| m.ts.as_str() > w))
+                .filter(|m| {
+                    watermark_seq.map_or_else(
+                        || watermark_ts.as_deref().is_none_or(|w| m.ts.as_str() > w),
+                        |seq| m.id.parse::<u64>().is_ok_and(|id| id > seq),
+                    )
+                })
                 .count();
-            let mut participants: Vec<String> = msgs
-                .iter()
-                .map(|m| m.from.clone())
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .collect();
+            let mut participants: Vec<String> = participants.into_iter().collect();
             participants.sort();
             let last = &msgs[0]; // newest-first
             rooms.push(Room {
@@ -292,6 +368,18 @@ impl Store {
         Ok(msgs)
     }
 
+    /// Post a reply to every member of an existing room.
+    pub fn reply_to_room(&self, from: &str, thread: &str, body: &str) -> Result<String, Error> {
+        self.post_to_room(
+            from,
+            &room_target(thread),
+            Some(thread),
+            "reply",
+            body,
+            None,
+        )
+    }
+
     /// All messages, newest first.
     fn messages(&self) -> Result<Vec<Message>, Error> {
         let mut all = self.history()?;
@@ -300,6 +388,7 @@ impl Store {
             .into_iter()
             .filter(|e| e.kind == "message")
             .map(|e| Message {
+                id: e.seq.to_string(),
                 thread: e
                     .data
                     .get("thread")
@@ -334,6 +423,32 @@ impl Store {
             })
             .collect())
     }
+}
+
+fn participants_for_room<'a>(messages: impl IntoIterator<Item = &'a Message>) -> BTreeSet<String> {
+    let mut participants = BTreeSet::new();
+    for message in messages {
+        participants.insert(message.from.clone());
+        if message.to != "all" && !message.to.starts_with(ROOM_TARGET_PREFIX) {
+            participants.insert(message.to.clone());
+        }
+    }
+    participants
+}
+
+fn room_members(messages: &[Message]) -> std::collections::HashMap<String, BTreeSet<String>> {
+    let mut by_thread: std::collections::HashMap<String, Vec<&Message>> =
+        std::collections::HashMap::new();
+    for message in messages {
+        by_thread
+            .entry(message.thread.clone())
+            .or_default()
+            .push(message);
+    }
+    by_thread
+        .into_iter()
+        .map(|(thread, messages)| (thread, participants_for_room(messages)))
+        .collect()
 }
 
 #[cfg(test)]
@@ -447,6 +562,59 @@ mod room_tests {
     }
 
     #[test]
+    fn room_replies_reach_every_member_not_only_the_opener() {
+        let (_d, store) = store();
+        let room = store
+            .post_to_room(
+                "alice",
+                "bob",
+                None,
+                "ask",
+                "can you both review this?",
+                Some("review"),
+            )
+            .unwrap();
+        // Carol joins the direct room by posting into it.
+        store
+            .post_message("carol", "alice", Some(&room), "reply", "joining")
+            .unwrap();
+        store
+            .reply_to_room("bob", &room, "reply for the whole room")
+            .unwrap();
+
+        let alice = store.unread(&["alice".into()], 10).unwrap();
+        let carol = store.unread(&["carol".into()], 10).unwrap();
+        assert!(
+            alice.iter().any(|m| m.body == "reply for the whole room"),
+            "the opener must receive a room reply"
+        );
+        assert!(
+            carol.iter().any(|m| m.body == "reply for the whole room"),
+            "a later participant must receive the same room reply"
+        );
+    }
+
+    #[test]
+    fn identities_are_case_insensitive_and_unknown_rooms_are_rejected() {
+        let (_d, store) = store();
+        store
+            .post_to_room(
+                "claude",
+                "Codex",
+                None,
+                "ask",
+                "case should not split identity",
+                Some("identity"),
+            )
+            .unwrap();
+        assert_eq!(store.unread_count(&["codex".into()]).unwrap(), 1);
+        assert!(matches!(
+            store.reply_to_room("codex", "01DOESNOTEXIST", "lost"),
+            Err(Error::NotFound(_))
+        ));
+    }
+
+    #[test]
     fn unread_shows_every_missed_message_not_just_the_latest() {
         let (_d, store) = store();
         let room = store
@@ -494,6 +662,66 @@ mod room_tests {
         let unread = store.unread(&["codex".into()], 10).unwrap();
         assert_eq!(unread.len(), 1, "only what arrived since");
         assert_eq!(unread[0].body, "after");
+    }
+
+    #[test]
+    fn exact_sequence_acknowledgement_preserves_later_messages() {
+        let (_d, store) = store();
+        let room = store
+            .post_to_room("claude", "codex", None, "ask", "first", Some("auth"))
+            .unwrap();
+        let first = store.unread(&["codex".into()], 10).unwrap().remove(0);
+        let first_seq = first.id.parse::<u64>().unwrap();
+
+        store
+            .post_message("claude", "codex", Some(&room), "ask", "arrived later")
+            .unwrap();
+        store
+            .mark_read_through("codex", first_seq, &first.ts)
+            .unwrap();
+
+        let unread = store.unread(&["codex".into()], 10).unwrap();
+        assert_eq!(unread.len(), 1);
+        assert_eq!(unread[0].body, "arrived later");
+        assert!(
+            unread[0].id.parse::<u64>().unwrap() > first_seq,
+            "message ids are stable ledger positions"
+        );
+    }
+
+    #[test]
+    fn paged_acknowledgement_never_swallows_an_unreturned_message() {
+        let (_d, store) = store();
+        let room = store
+            .post_to_room("claude", "codex", None, "ask", "one", Some("paging"))
+            .unwrap();
+        for body in ["two", "three", "four"] {
+            store
+                .post_message("claude", "codex", Some(&room), "ask", body)
+                .unwrap();
+        }
+
+        let first_page = store.unread(&["codex".into()], 2).unwrap();
+        assert_eq!(
+            first_page
+                .iter()
+                .map(|message| message.body.as_str())
+                .collect::<Vec<_>>(),
+            vec!["one", "two"]
+        );
+        let last = first_page.last().unwrap();
+        store
+            .mark_read_through("codex", last.id.parse().unwrap(), &last.ts)
+            .unwrap();
+
+        let second_page = store.unread(&["codex".into()], 2).unwrap();
+        assert_eq!(
+            second_page
+                .iter()
+                .map(|message| message.body.as_str())
+                .collect::<Vec<_>>(),
+            vec!["three", "four"]
+        );
     }
 
     #[test]

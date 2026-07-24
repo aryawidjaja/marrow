@@ -225,17 +225,20 @@ fn consolidate_reports_and_applies() {
     let root = dir.path();
     let repo = root.to_str().unwrap();
     ok(root, &["init"]);
-    ok(
+    let first = ok(
         root,
         &["add", "--kind", "fact", "--topic", "a", "the disk is full"],
     );
-    ok(
+    let second = ok(
         root,
         &["add", "--kind", "fact", "--topic", "b", "the disk is full"],
     );
 
     let report = ok(root, &["consolidate", "--repo", repo]);
     assert!(report.contains("related memories: 1"));
+    assert!(report.contains("review cluster:"));
+    assert!(report.contains(first.trim()));
+    assert!(report.contains(second.trim()));
 
     let applied = ok(root, &["consolidate", "--repo", repo, "--apply"]);
     assert!(applied.contains("1 merged"));
@@ -349,8 +352,11 @@ fn embed_sets_backend_and_status_reflects_it() {
     // Config persisted.
     let cfg = std::fs::read_to_string(root.join(".marrow/.marrow.toml")).unwrap();
     assert!(cfg.contains("provider = \"fastembed\""));
-    // Without the feature compiled in, status still shows semantic provider configured.
-    assert!(ok(root, &["status"]).contains("search: semantic"));
+    // Configuration is not capability: a binary without the feature must not claim semantic
+    // search is active.
+    let status = ok(root, &["status"]);
+    assert!(status.contains("search: keyword"));
+    assert!(status.contains("configured but unavailable"));
 }
 
 #[test]

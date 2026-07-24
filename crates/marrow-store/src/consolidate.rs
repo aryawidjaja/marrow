@@ -293,8 +293,21 @@ impl Store {
         for i in 0..n {
             for j in (i + 1)..n {
                 let s = sim(i, j);
-                let duplicate = s >= NEAR_IDENTICAL
-                    || (s >= floor && standout[i] == Some(j) && standout[j] == Some(i));
+                let topic_i = memories[i].frontmatter.topic.as_deref();
+                let topic_j = memories[j].frontmatter.topic.as_deref();
+                let same_topic = topic_i
+                    .zip(topic_j)
+                    .is_some_and(|(a, b)| a.eq_ignore_ascii_case(b));
+                let exact_body = normalize(&memories[i].body) == normalize(&memories[j].body);
+                // Topic is the identity of what is remembered. Semantic similarity is useful for
+                // finding restatements *within* that identity, but it must never collapse two
+                // distinct topics. Exact normalized bodies are the sole cross-topic exception:
+                // those are literal duplicate captures under accidental aliases, not merely related
+                // ideas.
+                let duplicate = exact_body
+                    || (same_topic
+                        && (s >= NEAR_IDENTICAL
+                            || (s >= floor && standout[i] == Some(j) && standout[j] == Some(i))));
                 if duplicate {
                     let (a, b) = (find(&mut parent, i), find(&mut parent, j));
                     if a != b {
@@ -417,6 +430,16 @@ mod tests {
         }
     }
 
+    struct IdenticalEmbedder;
+    impl crate::embed::Embedder for IdenticalEmbedder {
+        fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, crate::embed::EmbedError> {
+            Ok(vec![vec![1.0, 1.0]; texts.len()])
+        }
+        fn dim(&self) -> usize {
+            2
+        }
+    }
+
     /// `topic` is the identity of the thing being remembered, so memories on DIFFERENT topics must
     /// never be merged — not even when the embedder rates every one of them alike, which it will on a
     /// corpus with a high baseline similarity.
@@ -469,6 +492,29 @@ mod tests {
                 .iter()
                 .map(|m| m.frontmatter.topic.clone())
                 .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn even_identical_vectors_do_not_merge_different_topics() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::init(dir.path()).unwrap();
+        store.embedder = Some(Box::new(IdenticalEmbedder));
+        write_fact(
+            &store,
+            "design-finished",
+            "The retrieval design is now locked.",
+        );
+        write_fact(
+            &store,
+            "implementation-finished",
+            "The retrieval implementation is now verified.",
+        );
+
+        let report = store.consolidate(dir.path()).unwrap();
+        assert!(
+            report.clusters.is_empty(),
+            "semantic similarity alone cannot erase a distinct topic"
         );
     }
 

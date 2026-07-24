@@ -562,8 +562,14 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
                     writeln!(out, "  {kind}: {n}").ok();
                 }
             }
-            match store.embedding_provider() {
-                "fastembed" | "http" => writeln!(out, "search: semantic").ok(),
+            match (store.embedding_provider(), store.semantic_active()) {
+                ("fastembed" | "http", true) => writeln!(out, "search: semantic").ok(),
+                ("fastembed" | "http", false) => writeln!(
+                    out,
+                    "search: keyword — '{}' is configured but unavailable in this binary; reinstall with the matching embedding feature.",
+                    store.embedding_provider()
+                )
+                .ok(),
                 _ => writeln!(
                     out,
                     "search: keyword — enable smarter semantic recall with `marrow embed fastembed` (see README)."
@@ -674,6 +680,15 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
                     r.clusters.len(),
                 )
                 .ok();
+                for cluster in r.clusters {
+                    writeln!(
+                        out,
+                        "  review cluster: keep {} <- {}",
+                        cluster.keep,
+                        cluster.others.join(", ")
+                    )
+                    .ok();
+                }
             }
             Ok(())
         }
@@ -1226,8 +1241,8 @@ fn ingest_report(docs: &[(String, u64)]) -> String {
 }
 
 /// Messages other agents have sent this session and it hasn't seen. Does NOT mark them read: the
-/// agent hasn't engaged until it calls `mem_inbox` itself, and a message shown once in a turn it
-/// ignored would otherwise never surface again.
+/// agent hasn't engaged until it explicitly acknowledges with `mem_inbox(ack=true)`, and a message
+/// shown once in a turn it ignored must surface again.
 fn unread_report(session: &str) -> Option<String> {
     let channel = if marrow_store::Hub::active() {
         marrow_store::Hub::open().and_then(|h| h.core()).ok()?
@@ -1250,7 +1265,7 @@ fn unread_report(session: &str) -> Option<String> {
         out.push_str(&format!("  [{subject}] {}: {body}\n", m.from));
     }
     out.push_str(
-        "  Reply with mem_reply(thread) — call mem_inbox to read them in full and mark them read.\n",
+        "  Reply with mem_reply(thread). mem_inbox peeks safely; after processing, call it with ack=true.\n",
     );
     for m in &msgs {
         out.push_str(&format!(

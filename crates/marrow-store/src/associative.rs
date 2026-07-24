@@ -12,6 +12,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use marrow_memdocs::{Memory, RefKind};
 
 use crate::edge::{Edge, EdgeCorpus, EdgeRel};
+use crate::index::IndexRow;
 use crate::query::Query;
 use crate::store::{Error, Store};
 
@@ -33,7 +34,7 @@ pub struct ConnectedRecall {
 /// How far activation travels. Each hop out is worth [`HOP_DECAY`] of the last, so a distant memory
 /// has to be strongly connected to beat a weakly connected near one. A few rings is the useful
 /// range: past that everything is connected to everything and the ranking stops meaning anything.
-const MAX_HOPS: u8 = 3;
+pub(crate) const MAX_HOPS: u8 = 3;
 const HOP_DECAY: f32 = 0.4;
 /// Only the strongest memories found at a hop go on to spread further, so a single hub-like note
 /// cannot drag the whole store into the result.
@@ -90,11 +91,39 @@ impl Store {
             });
         }
 
-        let rows = self.list()?;
-        let corpus = EdgeCorpus::new(
-            &rows,
-            self.vectors().unwrap_or_default().into_iter().collect(),
-        );
+        // Recall no longer loads the whole project. It walks the bounded candidate set — the query's
+        // keyword and vector lanes plus the edge-neighbourhood reachable from them — and spreads over
+        // that. The neighbourhood carries the same edges the full scan would for every node the
+        // spread can actually reach, so the result matches a whole-store build without the whole-store
+        // cost. See [`Store::bounded_corpus`].
+        let corpus = self.bounded_corpus(&seeds, text, crate::store::RECALL_CANDIDATES)?;
+        let neighbors = self.spread_recall(
+            &seeds,
+            &seed_ids,
+            &corpus.rows,
+            corpus.vectors,
+            corpus.hub_tags,
+            max_neighbors,
+        )?;
+        Ok(ConnectedRecall { seeds, neighbors })
+    }
+
+    /// Spread activation from `seeds` across the graph induced by `rows`+`vectors` and return the
+    /// lit-up neighbourhood, best first, capped at `max_neighbors`. This is the recall's ranking
+    /// core: the caller decides *which* rows the graph is built from (the bounded candidate set in
+    /// production, the whole store in the parity oracle) — the scoring here is identical either way.
+    /// `hub_tags` are global hub tags to suppress; empty for the full-store oracle.
+    fn spread_recall(
+        &self,
+        seeds: &[Memory],
+        seed_ids: &HashSet<String>,
+        rows: &[IndexRow],
+        vectors: HashMap<String, Vec<f32>>,
+        hub_tags: HashSet<String>,
+        max_neighbors: usize,
+    ) -> Result<Vec<Neighbor>, Error> {
+        let mut corpus = EdgeCorpus::new(rows, vectors);
+        corpus.suppress_hub_tags(hub_tags);
         let used = self.recall_counts().unwrap_or_default();
 
         // Hubs are not transited through during hops (below). Threshold = max(floor, p99 degree),
@@ -155,7 +184,7 @@ impl Store {
             }
         }
 
-        for id in &seed_ids {
+        for id in seed_ids {
             act.remove(id);
         }
         let mut ranked: Vec<(String, Activation)> = act.into_iter().collect();
@@ -173,7 +202,78 @@ impl Store {
                 })
             })
             .collect();
+        Ok(neighbors)
+    }
+
+    /// Parity oracle: the same spread over a corpus built from the *entire* store. Kept as the
+    /// ground truth the bounded path is tested against — it deliberately does the whole-store
+    /// `list()`+`vectors()` load the production path no longer does.
+    #[cfg(test)]
+    pub(crate) fn recall_connected_full(
+        &self,
+        text: &str,
+        q: &Query,
+        actor: &str,
+        max_neighbors: usize,
+    ) -> Result<ConnectedRecall, Error> {
+        let seeds = self.search(text, q)?;
+        let seed_ids: HashSet<String> = seeds.iter().map(|m| m.frontmatter.id.clone()).collect();
+        self.log_retrieval(actor, text, &seed_ids.iter().cloned().collect::<Vec<_>>())?;
+        if seeds.is_empty() || max_neighbors == 0 {
+            return Ok(ConnectedRecall {
+                seeds,
+                neighbors: vec![],
+            });
+        }
+        let rows = self.list()?;
+        let vectors = self.vectors().unwrap_or_default().into_iter().collect();
+        // Full corpus: local tag membership IS global membership, so no hub tags to suppress.
+        let neighbors = self.spread_recall(
+            &seeds,
+            &seed_ids,
+            &rows,
+            vectors,
+            HashSet::new(),
+            max_neighbors,
+        )?;
         Ok(ConnectedRecall { seeds, neighbors })
+    }
+
+    /// Bounded recall with an explicit candidate budget, returning the build stats alongside the
+    /// result. Drives the parity and bounds tests; production calls [`Store::recall_connected`],
+    /// which fixes the budget at [`crate::store::RECALL_CANDIDATES`].
+    #[cfg(test)]
+    pub(crate) fn recall_connected_bounded(
+        &self,
+        text: &str,
+        q: &Query,
+        actor: &str,
+        max_neighbors: usize,
+        candidates: usize,
+    ) -> Result<(ConnectedRecall, crate::store::BoundedStats), Error> {
+        let seeds = self.search(text, q)?;
+        let seed_ids: HashSet<String> = seeds.iter().map(|m| m.frontmatter.id.clone()).collect();
+        self.log_retrieval(actor, text, &seed_ids.iter().cloned().collect::<Vec<_>>())?;
+        if seeds.is_empty() || max_neighbors == 0 {
+            return Ok((
+                ConnectedRecall {
+                    seeds,
+                    neighbors: vec![],
+                },
+                crate::store::BoundedStats::default(),
+            ));
+        }
+        let corpus = self.bounded_corpus(&seeds, text, candidates)?;
+        let stats = corpus.stats.clone();
+        let neighbors = self.spread_recall(
+            &seeds,
+            &seed_ids,
+            &corpus.rows,
+            corpus.vectors,
+            corpus.hub_tags,
+            max_neighbors,
+        )?;
+        Ok((ConnectedRecall { seeds, neighbors }, stats))
     }
 }
 
@@ -518,5 +618,280 @@ mod scale {
             took < std::time::Duration::from_secs(2),
             "recall over 1000 fully-connected memories took {took:?}; something has gone quadratic"
         );
+    }
+}
+
+#[cfg(test)]
+mod bounded {
+    use super::tests::fact;
+    use crate::query::Query;
+    use crate::store::Store;
+
+    use super::ConnectedRecall;
+
+    /// A well-separated corpus of `n` memories built so the top-k is unambiguous and tie-free:
+    ///
+    /// * A single "deploy" cluster — one head that keyword-matches `"deploy process"` and links a
+    ///   ring of 16 leaves. Each leaf sits alone (its own topic, its own words, no links out), so its
+    ///   only activation is the one ref from the head. The leaves are given *distinct* recall counts,
+    ///   so their use-boosts — and therefore their final activations — are all different. That makes
+    ///   the top-8 a strict, deterministic ordering with no ties for a random `HashMap` iteration to
+    ///   scramble differently between two runs.
+    /// * The rest is inert filler: unique topics, unique words, no links, no "deploy"/"process" — it
+    ///   shares no edge with the cluster, so it can never light up. It exists only to make the store
+    ///   big enough that a full scan and a bounded walk visibly diverge in cost.
+    fn seed_corpus(n: usize) -> (Store, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::init(dir.path()).unwrap();
+
+        let mut leaves = Vec::new();
+        for i in 0..16 {
+            let id = store
+                .write(&mut fact(
+                    &format!("leaf-{i}"),
+                    &format!("solitary note about limestone quarry variant {i}"),
+                ))
+                .unwrap();
+            // Distinct recall counts -> distinct use-boosts -> distinct, strictly ordered activations.
+            for _ in 0..=i {
+                store
+                    .log_retrieval("history", "quarry", std::slice::from_ref(&id))
+                    .unwrap();
+            }
+            leaves.push(id);
+        }
+
+        let links: String = leaves.iter().map(|id| format!(" [[{id}]]")).collect();
+        store
+            .write(&mut fact(
+                "deploy-head",
+                &format!("The deploy process rollout runbook.{links}"),
+            ))
+            .unwrap();
+
+        for i in 0..n.saturating_sub(17) {
+            store
+                .write(&mut fact(
+                    &format!("filler-{i}"),
+                    &format!("miscellaneous gardening note number {i} concerning tulips"),
+                ))
+                .unwrap();
+        }
+        (store, dir)
+    }
+
+    fn ids_of(r: &ConnectedRecall) -> Vec<String> {
+        r.neighbors
+            .iter()
+            .map(|n| n.memory.frontmatter.id.clone())
+            .collect()
+    }
+
+    /// Neighbour topics, in rank order. Ids differ between stores (fresh ULIDs), but the cluster's
+    /// shape — and therefore which leaf topics win, and in what order — does not.
+    fn topics_of(r: &ConnectedRecall) -> Vec<String> {
+        r.neighbors
+            .iter()
+            .map(|n| n.memory.frontmatter.topic.clone().unwrap_or_default())
+            .collect()
+    }
+
+    /// The core property: recall over the bounded candidate set returns the SAME top-k as recall over
+    /// a full-store scan, for a corpus where the top-k is unambiguous.
+    #[test]
+    fn bounded_recall_matches_full_scan_topk() {
+        let (store, _dir) = seed_corpus(2000);
+        let q = Query {
+            limit: Some(4),
+            ..Default::default()
+        };
+        let full = store
+            .recall_connected_full("deploy process", &q, "tester", 8)
+            .unwrap();
+        let (bounded, _) = store
+            .recall_connected_bounded("deploy process", &q, "tester", 8, 128)
+            .unwrap();
+
+        assert_eq!(ids_of(&full).len(), 8, "the oracle must fill the top-8");
+        assert_eq!(
+            ids_of(&full),
+            ids_of(&bounded),
+            "bounded recall must return the identical top-8 the full scan does"
+        );
+    }
+
+    /// The bounded path must do `O(candidates + neighbourhood)` work, independent of store size —
+    /// never a whole-store scan. Grow the store 10x around the *same* cluster and the corpus the
+    /// recall assembles, and the number of retrieval-primitive calls it issues, must not budge.
+    #[test]
+    fn bounded_recall_work_is_independent_of_store_size() {
+        let q = Query {
+            limit: Some(4),
+            ..Default::default()
+        };
+
+        let (small, _small_dir) = seed_corpus(200);
+        let (r_small, s_small) = small
+            .recall_connected_bounded("deploy process", &q, "tester", 8, 128)
+            .unwrap();
+        let (large, _large_dir) = seed_corpus(2000);
+        let (r_large, s_large) = large
+            .recall_connected_bounded("deploy process", &q, "tester", 8, 128)
+            .unwrap();
+
+        // Same answer at both sizes: the extra 1800 filler memories are never consulted.
+        assert_eq!(topics_of(&r_small), topics_of(&r_large));
+        assert_eq!(topics_of(&r_large).len(), 8);
+
+        // The corpus the bounded recall builds is the cluster (head + 16 leaves = 17), NOT the store.
+        assert_eq!(s_small.corpus_nodes, 17);
+        assert_eq!(
+            s_small.corpus_nodes, s_large.corpus_nodes,
+            "corpus size must not grow with the store"
+        );
+        assert!(
+            s_large.corpus_nodes < 200,
+            "corpus of {} on a 2000-row store proves it is bounded, not a full scan",
+            s_large.corpus_nodes
+        );
+
+        // The work is fixed by the spread's fan-out, not by n: same expansions, same memoised
+        // topic/tag queries, and — the perf guarantee — at most ONE whole-vector load per recall.
+        assert_eq!(s_small.neighbor_expansions, s_large.neighbor_expansions);
+        assert_eq!(s_small.topic_queries, s_large.topic_queries);
+        assert_eq!(s_small.tag_queries, s_large.tag_queries);
+        assert_eq!(
+            s_small.keyword_candidate_calls,
+            s_large.keyword_candidate_calls
+        );
+        assert_eq!(s_large.full_vector_loads, 1, "one vector load per recall");
+        assert_eq!(s_small.full_vector_loads, s_large.full_vector_loads);
+    }
+
+    /// A well-separated corpus WITH real (hash) embeddings, built so the top-k is reached ONLY through
+    /// semantic edges: a head that keyword-matches the query and a handful of leaves that share the
+    /// head's vocabulary (high cosine) but nothing else — no shared topic, no links. If the bounded
+    /// walk failed to reconstruct the head's semantic neighbours, those leaves would vanish.
+    fn seed_corpus_embedded(n: usize) -> (Store, tempfile::TempDir) {
+        use crate::embed::HashEmbedder;
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::init(dir.path()).unwrap();
+        store.set_embedder(Box::new(HashEmbedder::new(256)));
+
+        // Shared vocabulary drives the cosine; the head adds the query words on top.
+        for i in 0..4 {
+            let id = store
+                .write(&mut fact(
+                    &format!("sem-{i}"),
+                    &format!("alpha beta gamma delta epsilon distinct{i}"),
+                ))
+                .unwrap();
+            for _ in 0..=i {
+                store
+                    .log_retrieval("history", "vocab", std::slice::from_ref(&id))
+                    .unwrap();
+            }
+        }
+        store
+            .write(&mut fact(
+                "vector-head",
+                "deploy process alpha beta gamma delta epsilon",
+            ))
+            .unwrap();
+        for i in 0..n.saturating_sub(5) {
+            store
+                .write(&mut fact(
+                    &format!("filler-{i}"),
+                    &format!("miscellaneous gardening note number {i} concerning tulips"),
+                ))
+                .unwrap();
+        }
+        (store, dir)
+    }
+
+    #[test]
+    fn bounded_recall_matches_full_scan_topk_with_vectors() {
+        let (store, _dir) = seed_corpus_embedded(1500);
+        // Keyword-only seeds so the head is the single, deterministic starting point; the recall's own
+        // vector lane and semantic-edge reconstruction still run under the embedder.
+        let q = Query {
+            limit: Some(1),
+            hybrid_weight: Some(0.0),
+            ..Default::default()
+        };
+        let full = store
+            .recall_connected_full("deploy process", &q, "tester", 8)
+            .unwrap();
+        let (bounded, stats) = store
+            .recall_connected_bounded("deploy process", &q, "tester", 8, 128)
+            .unwrap();
+
+        assert!(
+            full.neighbors.iter().all(|n| n
+                .memory
+                .frontmatter
+                .topic
+                .as_deref()
+                .unwrap_or("")
+                .starts_with("sem-")),
+            "the neighbourhood must be reached via semantic edges: {:?}",
+            topics_of(&full)
+        );
+        assert_eq!(
+            topics_of(&full).len(),
+            4,
+            "all four semantic leaves light up"
+        );
+        assert_eq!(
+            ids_of(&full),
+            ids_of(&bounded),
+            "bounded recall must reconstruct the semantic edges the full scan finds"
+        );
+        assert_eq!(stats.full_vector_loads, 1, "one vector load per recall");
+    }
+
+    /// Finding 3 regression guard: a global hub tag (>fan-out members) must be suppressed by the
+    /// bounded corpus exactly as the full scan suppresses it. A hub-tag member pulled in via a ref
+    /// must NOT gain a spurious tag edge just because only a few of the tag's members are present.
+    #[test]
+    fn hub_tag_edges_are_suppressed_in_bounded_recall() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::init(dir.path()).unwrap();
+        // 15 members share the hub tag "auth" (> RECALL_TAG_FANOUT = 12), each otherwise isolated.
+        let mut members = Vec::new();
+        for i in 0..15 {
+            let mut m = fact(&format!("auth-note-{i}"), &format!("auth detail {i}"));
+            m.frontmatter.tags = vec!["auth".into()];
+            members.push(store.write(&mut m).unwrap());
+        }
+        // A seed that keyword-matches, carries the hub tag, and links exactly one member by ref.
+        let mut seed = fact("gateway", &format!("widget gateway see [[{}]]", members[0]));
+        seed.frontmatter.tags = vec!["auth".into()];
+        store.write(&mut seed).unwrap();
+
+        let q = Query {
+            limit: Some(1),
+            ..Default::default()
+        };
+        let full = store.recall_connected_full("widget", &q, "t", 8).unwrap();
+        let (bounded, _) = store
+            .recall_connected_bounded("widget", &q, "t", 8, 128)
+            .unwrap();
+
+        let act = |r: &ConnectedRecall, id: &str| {
+            r.neighbors
+                .iter()
+                .find(|n| n.memory.frontmatter.id == id)
+                .map(|n| n.activation)
+        };
+        // The one linked member lights up via its ref (weight 3.0) in both. Without hub-tag
+        // suppression the bounded corpus would add a spurious tag edge (weight 1.0) and read 4.0.
+        let full_a0 = act(&full, &members[0]).expect("linked member lights up in the full scan");
+        let bounded_a0 = act(&bounded, &members[0]).expect("linked member lights up when bounded");
+        assert!(
+            (full_a0 - bounded_a0).abs() < 1e-6,
+            "hub-tag member activation diverged: full {full_a0} vs bounded {bounded_a0}"
+        );
+        assert_eq!(ids_of(&full), ids_of(&bounded));
     }
 }

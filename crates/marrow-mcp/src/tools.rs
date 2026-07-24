@@ -93,7 +93,7 @@ pub(crate) fn all_definitions() -> Vec<Value> {
             "properties": {
                 "kind": {"type": "string", "enum": ["fact","decision","entity"]},
                 "body": {"type": "string"},
-                "topic": {"type": "string", "description": "Short label for what this is about (max 48 chars), e.g. `jwt-expiry`. NOT a sentence — the detail goes in the body. Memories on the same topic supersede each other."},
+                "topic": {"type": "string", "maxLength": 48, "description": "Short label for what this is about, e.g. `jwt-expiry`. NOT a sentence — the detail goes in the body. Memories on the same topic supersede each other."},
                 "area": {"type": "string", "description": "The feature area this belongs to, e.g. `auth`, `billing`, `infra`. Call mem_areas and reuse one of the project's existing areas; only invent a new one if nothing fits. Leave it out if genuinely nothing fits — an unfiled memory is still fully searchable, and a wrong area is worse than none."},
                 "anchor": {
                     "type": "object",
@@ -133,14 +133,15 @@ pub(crate) fn all_definitions() -> Vec<Value> {
         tool("mem_supersede", "Replace an existing memory with a new one, recording the lineage.", json!({
             "type": "object",
             "properties": {
-                "old_id": {"type": "string"},
+                "id": {"type": "string", "description": "memory id being replaced (preferred; `old_id` remains accepted for compatibility)"},
+                "old_id": {"type": "string", "description": "deprecated alias for `id`"},
                 "kind": {"type": "string", "enum": ["fact","decision","entity"]},
                 "body": {"type": "string"},
-                "topic": {"type": "string", "description": "Short label (max 48 chars), not a sentence."},
+                "topic": {"type": "string", "maxLength": 48, "description": "Short label, not a sentence."},
                 "area": {"type": "string", "description": "Feature area this belongs to (auth, billing, infra). Call mem_areas and reuse an existing one."},
                 "by": {"type": "string"}
             },
-            "required": ["old_id","kind","body"]
+            "required": ["kind","body"]
         })),
         tool("mem_list_stale", "List code anchors whose referenced code has changed.", json!({
             "type": "object",
@@ -230,31 +231,34 @@ pub(crate) fn all_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {"limit": {"type": "integer", "description": "max events (default 20)"}}
         })),
-        tool("mem_ask", "Open a ROOM with the other agents, or speak into one. Every live session on this machine shares this channel, whatever tool it runs in — a Claude Code session and a Codex session reach each other here. ALWAYS pass a `topic`: it is the room's subject, and it is what stops separate conversations blurring into one thread nobody can follow. To speak in a room that already exists, pass its `thread` (from mem_rooms) instead of a topic.", json!({
+        tool("mem_ask", "Open a ROOM with the other agents, or speak into one. Every live session on this machine shares this channel, whatever tool it runs in. ALWAYS pass a short `topic` when opening a room. If that topic already exists, Marrow reuses its canonical room unless `new_thread` is true. To speak in an exact room, pass its `thread` (from mem_rooms).", json!({
             "type": "object",
             "properties": {
                 "to": {"type": "string", "description": "who this is for: an agent name (`claude`, `codex`), a session id, a project, or \"all\" to open it to everyone"},
                 "topic": {"type": "string", "description": "SHORT subject for the room, e.g. `auth-refactor`. Required when opening a new room. Anyone can join a room by replying to it."},
                 "thread": {"type": "string", "description": "speak into an EXISTING room (its id, from mem_rooms) instead of opening a new one"},
+                "new_thread": {"type": "boolean", "description": "open a separate room even when the same topic already exists (default false)"},
                 "body": {"type": "string"},
                 "by": {"type": "string", "description": "your name/session, so others know who is talking"}
             },
             "required": ["to","body"]
         })),
-        tool("mem_rooms", "The conversations you can see: each room's subject, who is in it, how many messages you have not read, and its id. Call this to find the RIGHT room before you speak, instead of starting yet another thread about something already being discussed.", json!({
+        tool("mem_rooms", "List rooms most-recently-active first, with subject, participants, message count, unread count, last message, and thread id. By default this lists the shared channel broadly so direct and newly-created rooms do not disappear. Pass `mine_only: true` to filter to rooms addressed to you.", json!({
             "type": "object",
             "properties": {
                 "me": {"type": "string", "description": "your name/session"},
-                "limit": {"type": "integer"}
+                "limit": {"type": "integer", "description": "maximum rooms (default 50)"},
+                "mine_only": {"type": "boolean", "description": "only rooms involving or addressed to this agent (default false)"}
             }
         })),
-        tool("mem_inbox", "Everything said to you since you last checked — every unread message, oldest first, grouped by room. Reading it marks it read, so the next call shows only what is new. Check it when you start, when you are stuck, and before you change something another agent may be working on.", json!({
+        tool("mem_inbox", "Peek at unread messages, oldest first, without consuming them. Every message includes its immutable ledger `id` and `thread`. Pass a `thread` to read that room's full persistent history. Pass `ack: true` only after you have successfully processed the unread messages.", json!({
             "type": "object",
             "properties": {
                 "me": {"type": "string", "description": "your name/session"},
                 "session": {"type": "string"},
                 "by": {"type": "string"},
                 "thread": {"type": "string", "description": "read one room in full instead of just what is unread"},
+                "ack": {"type": "boolean", "description": "mark currently unread messages read after returning them (default false; ignored for thread history)"},
                 "project": {"type": "string"}
             }
         })),
@@ -407,15 +411,10 @@ fn write(store: &Store, root: &Path, args: &Value) -> Result<String, String> {
             // resolves in the repo, anchor to the first one automatically. seed_anchor validates
             // existence + resolution, so a passing or non-resolving mention is simply skipped and
             // this can never attach a false anchor.
-            let auto = marrow_core::extract_anchor_refs(&memory.body)
-                .into_iter()
-                .find(|(file, symbol)| marrow_core::seed_anchor(root, file, symbol).is_some());
-            match auto {
-                Some((file, symbol)) => store
-                    .write_anchored(root, &file, &symbol, &mut memory)
-                    .map_err(|e| e.to_string()),
-                None => store.write(&mut memory).map_err(|e| e.to_string()),
-            }
+            let refs = marrow_core::extract_anchor_refs(&memory.body);
+            store
+                .write_auto_anchored(root, &refs, &mut memory)
+                .map_err(|e| e.to_string())
         }
     }
 }
@@ -434,10 +433,11 @@ fn search(store: &Store, args: &Value) -> Result<String, String> {
         .search(&text, &query_from(args))
         .map_err(|e| e.to_string())?;
     if store.retrieval_mode() == marrow_store::ResponseMode::Snippet {
-        let items: Vec<(String, String, String, u8)> = hits
+        let items: Vec<(String, String, String, String, u8)> = hits
             .iter()
             .map(|m| {
                 (
+                    m.frontmatter.id.clone(),
                     m.frontmatter.topic.clone().unwrap_or_default(),
                     m.body.trim().to_string(),
                     String::new(),
@@ -494,10 +494,11 @@ fn recall(store: &Store, args: &Value) -> Result<String, String> {
     }
     if store.retrieval_mode() == marrow_store::ResponseMode::Snippet {
         let area_hint = opt_arg(args, "area").unwrap_or_default();
-        let mut items: Vec<(String, String, String, u8)> = seeds
+        let mut items: Vec<(String, String, String, String, u8)> = seeds
             .iter()
             .map(|m| {
                 (
+                    m.frontmatter.id.clone(),
                     m.frontmatter.topic.clone().unwrap_or_default(),
                     m.body.trim().to_string(),
                     String::new(),
@@ -507,6 +508,7 @@ fn recall(store: &Store, args: &Value) -> Result<String, String> {
             .collect();
         items.extend(r.neighbors.iter().map(|n| {
             (
+                n.memory.frontmatter.id.clone(),
                 n.memory.frontmatter.topic.clone().unwrap_or_default(),
                 n.memory.body.trim().to_string(),
                 n.via.join(","),
@@ -569,7 +571,9 @@ fn provenance(store: &Store, args: &Value) -> Result<String, String> {
 }
 
 fn supersede(store: &Store, args: &Value) -> Result<String, String> {
-    let old_id = str_arg(args, "old_id")?;
+    let old_id = opt_arg(args, "id")
+        .or_else(|| opt_arg(args, "old_id"))
+        .ok_or_else(|| "missing required argument: id".to_string())?;
     let mut memory = memory_from(args)?;
     store
         .supersede(&old_id, &mut memory)
@@ -641,11 +645,17 @@ fn consolidate(store: &Store, root: &Path, args: &Value) -> Result<String, Strin
     } else {
         let r = store.consolidate(&repo).map_err(|e| e.to_string())?;
         let related: usize = r.clusters.iter().map(|c| c.others.len()).sum();
+        let cluster_details: Vec<Value> = r
+            .clusters
+            .iter()
+            .map(|cluster| json!({"keep": cluster.keep, "others": cluster.others}))
+            .collect();
         Ok(json!({
             "stale": r.stale.len(),
             "expired": r.expired.len(),
             "related_memories": related,
             "clusters": r.clusters.len(),
+            "cluster_details": cluster_details,
         })
         .to_string())
     }
@@ -759,6 +769,17 @@ fn bootstrap(store: &Store, root: &Path, args: &Value) -> Result<String, String>
         .collect();
     Ok(json!({
         "goal": brief.goal,
+        "search": if store.semantic_active() {
+            json!({"mode": "semantic", "provider": store.embedding_provider()})
+        } else if matches!(store.embedding_provider(), "fastembed" | "http") {
+            json!({
+                "mode": "keyword",
+                "configured_provider": store.embedding_provider(),
+                "warning": "semantic search is configured but unavailable in this binary"
+            })
+        } else {
+            json!({"mode": "keyword"})
+        },
         "areas": areas,
         "stale": stale,
         "stale_note": if stale.is_empty() { Value::Null } else {
@@ -809,12 +830,18 @@ fn hub_recall(args: &Value) -> Result<String, String> {
         .recall(&text, limit, limit)
         .iter()
         .map(|h| {
+            let body: String = h.memory.body.trim().chars().take(220).collect();
+            let body = if h.memory.body.trim().chars().count() > 220 {
+                format!("{}…", body.trim_end())
+            } else {
+                body
+            };
             json!({
                 "project": h.project,
                 "id": h.memory.frontmatter.id,
                 "kind": kind_name(h.memory.frontmatter.kind),
                 "topic": h.memory.frontmatter.topic,
-                "body": h.memory.body.trim(),
+                "body": body,
             })
         })
         .collect();
@@ -837,12 +864,31 @@ fn ask(root: &Path, args: &Value) -> Result<String, String> {
     let to = str_arg(args, "to")?;
     let body = str_arg(args, "body")?;
     let by = author(args);
-    let thread = opt_arg(args, "thread");
+    let mut thread = opt_arg(args, "thread");
     let topic = opt_arg(args, "topic");
-    let t = channel_store(root)?
+    let store = channel_store(root)?;
+    let new_thread = args
+        .get("new_thread")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let mut reused = false;
+    if thread.is_none() && !new_thread {
+        if let Some(subject) = topic.as_deref() {
+            if let Some(existing) = store.room_by_topic(subject).map_err(|e| e.to_string())? {
+                thread = Some(existing.thread);
+                reused = true;
+            }
+        }
+    }
+    let t = store
         .post_to_room(&by, &to, thread.as_deref(), "ask", &body, topic.as_deref())
         .map_err(|e| e.to_string())?;
-    let mut out = json!({"posted": true, "thread": t});
+    let mut out = json!({
+        "posted": true,
+        "thread": t,
+        "reused_room": reused,
+        "delivery": "recorded in the shared append-only channel; no live/read receipt is available"
+    });
     if thread.is_none() && topic.is_none() {
         out["note"] = json!(
             "opened a room with no topic — pass `topic` next time so the other agents can tell \
@@ -858,10 +904,18 @@ fn rooms(root: &Path, args: &Value) -> Result<String, String> {
         .get("limit")
         .and_then(Value::as_u64)
         .map(|n| n as usize)
-        .unwrap_or(12);
-    let rooms = channel_store(root)?
-        .rooms(&me, limit)
-        .map_err(|e| e.to_string())?;
+        .unwrap_or(50);
+    let store = channel_store(root)?;
+    let rooms = if args
+        .get("mine_only")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        store.rooms(&me, limit)
+    } else {
+        store.all_rooms(limit)
+    }
+    .map_err(|e| e.to_string())?;
     let items: Vec<Value> = rooms
         .iter()
         .map(|r| {
@@ -884,18 +938,15 @@ fn reply(root: &Path, args: &Value) -> Result<String, String> {
     let body = str_arg(args, "body")?;
     let by = author(args);
     let store = channel_store(root)?;
-    // A reply goes back to whoever started the thread (unless a recipient is named).
-    let to = opt_arg(args, "to").or_else(|| {
-        store
-            .thread(&thread)
-            .ok()
-            .and_then(|ms| ms.into_iter().map(|m| m.from).find(|f| f != &by))
-    });
-    let to = to.unwrap_or_else(|| "all".into());
     let t = store
-        .post_message(&by, &to, Some(&thread), "reply", &body)
+        .reply_to_room(&by, &thread, &body)
         .map_err(|e| e.to_string())?;
-    Ok(json!({"posted": true, "thread": t}).to_string())
+    Ok(json!({
+        "posted": true,
+        "thread": t,
+        "delivery": "recorded for every room member; no live/read receipt is available"
+    })
+    .to_string())
 }
 
 /// Every name this agent answers to.
@@ -905,7 +956,7 @@ fn me_from(args: &Value) -> Vec<String> {
         .filter_map(|k| opt_arg(args, k))
         .collect();
     if me.is_empty() {
-        vec!["mcp".into()]
+        vec![author(args)]
     } else {
         me
     }
@@ -934,22 +985,23 @@ fn inbox(root: &Path, args: &Value) -> Result<String, String> {
         let msgs = store.thread(&thread).map_err(|e| e.to_string())?;
         let items: Vec<Value> = msgs
             .iter()
-            .map(|m| json!({"from": m.from, "role": m.role, "body": msg_body(&m.body, snippet), "at": m.ts}))
+            .map(|m| json!({"id": m.id, "from": m.from, "to": m.to, "role": m.role, "body": msg_body(&m.body, snippet), "at": m.ts}))
             .collect();
         let topic = msgs.iter().find_map(|m| m.topic.clone());
-        store.mark_read(&me[0]).map_err(|e| e.to_string())?;
         return Ok(
             json!({"thread": thread, "topic": topic, "messages": items, "count": items.len()})
                 .to_string(),
         );
     }
 
+    let total_unread = store.unread_count(&me).map_err(|e| e.to_string())?;
     let msgs = store.unread(&me, 30).map_err(|e| e.to_string())?;
     let items: Vec<Value> = msgs
         .iter()
         .map(|m| {
             json!({
                 "thread": m.thread,
+                "id": m.id,
                 "topic": m.topic,
                 "from": m.from,
                 "role": m.role,
@@ -958,12 +1010,31 @@ fn inbox(root: &Path, args: &Value) -> Result<String, String> {
             })
         })
         .collect();
-    store.mark_read(&me[0]).map_err(|e| e.to_string())?;
+    let acknowledged = args.get("ack").and_then(Value::as_bool).unwrap_or(false);
+    if acknowledged && !items.is_empty() {
+        let last = msgs
+            .iter()
+            .max_by_key(|m| m.id.parse::<u64>().unwrap_or_default())
+            .expect("non-empty inbox has a last message");
+        let seq = last
+            .id
+            .parse::<u64>()
+            .map_err(|_| format!("message {} does not have a valid ledger sequence", last.id))?;
+        for identity in std::collections::BTreeSet::from_iter(me.iter()) {
+            store
+                .mark_read_through(identity, seq, &last.ts)
+                .map_err(|e| e.to_string())?;
+        }
+    }
     Ok(json!({
         "messages": items,
         "count": items.len(),
+        "total_unread": total_unread,
+        "has_more": total_unread > items.len(),
+        "remaining_after_ack": if acknowledged { total_unread.saturating_sub(items.len()) } else { total_unread },
+        "acknowledged": acknowledged && !items.is_empty(),
         "hint": if items.is_empty() { Value::Null } else {
-            json!("reply into a room with mem_reply(thread), or list every room with mem_rooms")
+            json!("process these messages, then call mem_inbox with ack=true; use thread=<id> to re-read full history anytime")
         },
     })
     .to_string())
@@ -996,7 +1067,7 @@ fn with_inbox_notice(root: &Path, name: &str, args: &Value, text: String) -> Str
     obj.insert(
         "inbox".into(),
         json!(format!(
-            "{n} unread message(s) from other agents — call mem_inbox to read them"
+            "{n} unread message(s) from other agents — call mem_inbox to peek; acknowledge only after processing with mem_inbox(ack=true)"
         )),
     );
     v.to_string()
@@ -1226,18 +1297,19 @@ fn kind_name(kind: MemoryKind) -> &'static str {
     }
 }
 
-/// Render terse, token-budgeted lines instead of full bodies. `items` = (topic, body, via, hops);
+/// Render terse, token-budgeted lines instead of full bodies.
+/// `items` = (id, topic, body, via, hops);
 /// `via` empty means a direct match (no "via"/hops shown). `area_hint` seeds the truncation footer.
 /// Hard-cut at `token_budget * 3` chars (~3 chars/token) on a line boundary.
 fn render_budgeted(
-    items: &[(String, String, String, u8)],
+    items: &[(String, String, String, String, u8)],
     token_budget: usize,
     area_hint: &str,
 ) -> String {
     let char_budget = token_budget.saturating_mul(3);
     let mut out = String::new();
     let mut shown = 0usize;
-    for (topic, body, via, hops) in items {
+    for (id, topic, body, via, hops) in items {
         let snip: String = body
             .lines()
             .next()
@@ -1246,9 +1318,9 @@ fn render_budgeted(
             .take(140)
             .collect();
         let line = if via.is_empty() {
-            format!("{topic} · {snip}\n")
+            format!("{id} · {topic} · {snip}\n")
         } else {
-            format!("{topic} · {snip} · via {via} · {hops} hop(s)\n")
+            format!("{id} · {topic} · {snip} · via {via} · {hops} hop(s)\n")
         };
         if !out.is_empty() && out.len() + line.len() > char_budget {
             break;
@@ -1283,9 +1355,10 @@ mod tests {
 
     #[test]
     fn render_budgeted_caps_and_footers() {
-        let items: Vec<(String, String, String, u8)> = (0..50)
+        let items: Vec<(String, String, String, String, u8)> = (0..50)
             .map(|i| {
                 (
+                    format!("01ID{i}"),
                     format!("topic-{i}"),
                     format!("body line {i} lorem ipsum dolor sit amet"),
                     String::new(),
@@ -1303,12 +1376,16 @@ mod tests {
             out.contains("more, narrow with area=release"),
             "missing truncation footer: {out}"
         );
-        assert!(out.starts_with("topic-0"), "first item should render first");
+        assert!(
+            out.starts_with("01ID0 · topic-0"),
+            "first item should render first"
+        );
     }
 
     #[test]
     fn render_budgeted_no_footer_when_all_fit() {
         let items = vec![(
+            "01ONLY".to_string(),
             "only".to_string(),
             "a short body".to_string(),
             "topic".to_string(),
@@ -1316,6 +1393,6 @@ mod tests {
         )];
         let out = super::render_budgeted(&items, 100, "");
         assert!(!out.contains("more, narrow"), "no footer expected: {out}");
-        assert!(out.contains("only · a short body · via topic · 2 hop(s)"));
+        assert!(out.contains("01ONLY · only · a short body · via topic · 2 hop(s)"));
     }
 }

@@ -8,10 +8,10 @@ use serde::{Deserialize, Serialize};
 use crate::embed::cosine;
 use crate::index::IndexRow;
 
-const SEMANTIC_MIN_SIM: f32 = 0.55;
-const RECALL_SEMANTIC_TOP_K: usize = 5;
+pub(crate) const SEMANTIC_MIN_SIM: f32 = 0.55;
+pub(crate) const RECALL_SEMANTIC_TOP_K: usize = 5;
 const GRAPH_SEMANTIC_TOP_K: usize = 3;
-const RECALL_TAG_FANOUT: usize = 12;
+pub(crate) const RECALL_TAG_FANOUT: usize = 12;
 const GRAPH_TAG_FANOUT: usize = 7;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -125,6 +125,10 @@ pub struct EdgeCorpus<'a> {
     tag_of: HashMap<&'a str, Vec<&'a str>>,
     topic_to_id: HashMap<&'a str, &'a str>,
     vectors: HashMap<String, Vec<f32>>,
+    /// Tags to treat as hubs regardless of local membership. Set when a corpus is a BOUNDED subset of
+    /// the store: a globally-huge tag can present with few members locally, so the local `<= fan-out`
+    /// gate would wrongly emit its edges. The full-store corpus leaves this empty (local == global).
+    hub_tags: HashSet<String>,
 }
 
 impl<'a> EdgeCorpus<'a> {
@@ -137,6 +141,7 @@ impl<'a> EdgeCorpus<'a> {
             tag_of: HashMap::new(),
             topic_to_id: HashMap::new(),
             vectors,
+            hub_tags: HashSet::new(),
         };
         for row in &corpus.rows {
             corpus.by_id.insert(&row.id, row);
@@ -149,6 +154,12 @@ impl<'a> EdgeCorpus<'a> {
             }
         }
         corpus
+    }
+
+    /// Mark `tags` as global hubs so their edges are suppressed everywhere in this corpus — used when
+    /// the corpus is a bounded subset and local membership can understate a tag's true size.
+    pub(crate) fn suppress_hub_tags(&mut self, tags: HashSet<String>) {
+        self.hub_tags = tags;
     }
 
     /// Recall projection: every directly related memory, with semantic confidence kept as cosine.
@@ -165,6 +176,9 @@ impl<'a> EdgeCorpus<'a> {
             );
         }
         for tag in tags_of(&row.tags) {
+            if self.hub_tags.contains(tag) {
+                continue;
+            }
             if let Some(ids) = self.tag_of.get(tag) {
                 if ids.len() <= RECALL_TAG_FANOUT {
                     edges.extend(
@@ -220,6 +234,7 @@ impl<'a> EdgeCorpus<'a> {
             self.topic_of.get(row.topic.as_str()).map_or(0, Vec::len)
         };
         let tags = tags_of(&row.tags)
+            .filter(|tag| !self.hub_tags.contains(*tag))
             .filter_map(|tag| self.tag_of.get(tag))
             .filter(|ids| ids.len() <= RECALL_TAG_FANOUT)
             .map(Vec::len)
@@ -276,11 +291,13 @@ impl<'a> EdgeCorpus<'a> {
     }
 }
 
-fn tags_of(raw: &str) -> impl Iterator<Item = &str> {
+/// Split a stored comma-wrapped tag string into its individual tags.
+pub(crate) fn tags_of(raw: &str) -> impl Iterator<Item = &str> {
     raw.split(',').map(str::trim).filter(|tag| !tag.is_empty())
 }
 
-fn wiki_refs(text: &str) -> Vec<String> {
+/// Extract the `[[…]]` reference values from a body/topic, mirroring [`EdgeCorpus`]'s ref parsing.
+pub(crate) fn wiki_refs(text: &str) -> Vec<String> {
     text.match_indices("[[")
         .filter_map(|(start, _)| {
             let rest = &text[start + 2..];
@@ -353,6 +370,7 @@ mod tests {
             tags: tags.into(),
             path: String::new(),
             body: body.into(),
+            doc: String::new(),
         }
     }
 

@@ -111,6 +111,36 @@ fn unique_active_decision_per_topic_is_enforced() {
 }
 
 #[test]
+fn exact_retries_are_idempotent_without_forbidding_fact_clusters() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::init(dir.path()).unwrap();
+    let mut first = mem(
+        MemoryKind::Fact,
+        "cache-policy",
+        "Cache writes invalidate entries.",
+    );
+    let first_id = store.write(&mut first).unwrap();
+
+    let mut retry = mem(
+        MemoryKind::Fact,
+        "cache-policy",
+        "Cache writes invalidate entries.",
+    );
+    assert_eq!(store.write(&mut retry).unwrap(), first_id);
+    assert_eq!(store.list().unwrap().len(), 1, "retry must not grow memory");
+
+    let mut changed = mem(
+        MemoryKind::Fact,
+        "cache-policy",
+        "Cache writes retain entries.",
+    );
+    assert!(
+        store.write(&mut changed).is_ok(),
+        "distinct facts may deliberately share a subject topic"
+    );
+}
+
+#[test]
 fn supersede_marks_old_and_links_new() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::init(dir.path()).unwrap();
@@ -234,7 +264,7 @@ fn list_stale_flags_changed_code_anchor() {
         fingerprint: core.fingerprint,
         norm: core.norm,
     });
-    store.write(&mut m).unwrap();
+    let old_id = store.write(&mut m).unwrap();
 
     assert!(
         store.list_stale(dir.path()).unwrap().is_empty(),
@@ -250,6 +280,17 @@ fn list_stale_flags_changed_code_anchor() {
     let stale = store.list_stale(dir.path()).unwrap();
     assert_eq!(stale.len(), 1);
     assert_eq!(stale[0].symbol, "Calc::add");
+
+    let mut replacement = mem(
+        MemoryKind::Decision,
+        "calc",
+        "Calc::add behavior must be re-evaluated after the implementation changed.",
+    );
+    store.supersede(&old_id, &mut replacement).unwrap();
+    assert!(
+        store.list_stale(dir.path()).unwrap().is_empty(),
+        "superseded history must not keep producing stale warnings"
+    );
 }
 
 #[test]
@@ -571,7 +612,11 @@ fn conflict_resolution_records_an_audit_event() {
     // Two exact-duplicate bodies so they cluster without an embedder.
     let mut a = mem(MemoryKind::Fact, "cache", "cache cleared on write");
     store.write(&mut a).unwrap();
-    let mut b = mem(MemoryKind::Fact, "cache", "cache cleared on write");
+    let mut b = mem(
+        MemoryKind::Fact,
+        "cache-restatement",
+        "cache cleared on write",
+    );
     store.write(&mut b).unwrap();
 
     let outcome = store.consolidate_apply(dir.path()).unwrap();
@@ -712,13 +757,12 @@ fn search_puts_topic_exact_match_first() {
 fn hub_topic_does_not_flood_recall() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::init(dir.path()).unwrap();
-    // A large topic-star: 60 facts all under topic "status" (a hub). Facts are not
-    // unique-per-topic, so all 60 stay active.
+    // A large topic-star: 60 observations share one generic subject (a hub).
     for i in 0..60 {
         let mut m = mem(MemoryKind::Fact, "status", &format!("status update {i}"));
         store.write(&mut m).unwrap();
     }
-    // A seed on a different topic that links INTO the hub via a [[status]] wiki-ref.
+    // A seed links into that topic hub.
     let mut seed = mem(MemoryKind::Fact, "widget", "the widget, see [[status]]");
     store.write(&mut seed).unwrap();
 

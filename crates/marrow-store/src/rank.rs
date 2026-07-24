@@ -143,6 +143,7 @@ mod tests {
             tags: tags.into(),
             path: String::new(),
             body: String::new(),
+            doc: String::new(),
         }
     }
 

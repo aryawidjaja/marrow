@@ -6,6 +6,8 @@
 //! staleness-checked against live code via marrow-core's S3∧S4 hybrid.
 
 pub mod associative;
+pub mod backend;
+pub mod backend_local;
 pub mod channel;
 pub mod config;
 pub mod consolidate;
@@ -29,6 +31,8 @@ pub mod store;
 pub mod util;
 
 pub use associative::{ConnectedRecall, Neighbor};
+pub use backend::{BackendError, Ctx, MemoryBackend};
+pub use backend_local::LocalBackend;
 pub use channel::Message;
 pub use config::{Config, ResponseMode};
 pub use consolidate::{

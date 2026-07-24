@@ -6,10 +6,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use marrow_episodic::{EpisodicLog, Event, NewEvent};
-use marrow_memdocs::{to_markdown, validate, CodeAnchor, Memory, Ref, RefKind, Violation};
+use marrow_memdocs::{to_markdown, validate, CodeAnchor, Memory, Ref, RefKind, Status, Violation};
 use rusqlite::Connection;
 use ulid::Ulid;
 
+use crate::associative::MAX_HOPS;
 use crate::config::Config;
 use crate::convert::{kind_str, status_str};
 use crate::embed::{cosine, rrf, Embedder, HashEmbedder};
@@ -260,6 +261,13 @@ impl Store {
         &self.config.embedding.provider
     }
 
+    /// Whether semantic retrieval is actually usable in this process. A config can request
+    /// `fastembed`/`http` while the binary was built without that feature; reporting only the
+    /// configured name would falsely claim semantic search is active.
+    pub fn semantic_active(&self) -> bool {
+        self.embedder.is_some()
+    }
+
     fn memory_dir(&self) -> PathBuf {
         self.root.join(".marrow/memory")
     }
@@ -302,7 +310,10 @@ impl Store {
         }
 
         validate(memory).map_err(Error::Invalid)?;
-        self.enforce_unique_active_decision(memory)?;
+        if let Some(existing_id) = self.enforce_unique_active_topic(memory)? {
+            memory.frontmatter.id = existing_id.clone();
+            return Ok(existing_id);
+        }
 
         if self.config.sign {
             let key = self.key.as_ref().ok_or(Error::Unsigned)?;
@@ -341,10 +352,48 @@ impl Store {
     ) -> Result<String, Error> {
         let core = marrow_core::seed_anchor(repo_root, file, symbol)
             .ok_or_else(|| Error::NotFound(format!("symbol {symbol} in {file}")))?;
-        memory.frontmatter.refs.push(Ref {
-            kind: RefKind::Symbol,
-            value: format!("{file}::{symbol}"),
-        });
+        Self::attach_anchor(memory, core);
+        self.write(memory)
+    }
+
+    /// Anchor every resolvable `file::symbol` reference named by a memory, then write it. Invalid
+    /// passing mentions are ignored; exact code references that resolve become independent stale
+    /// detectors instead of silently anchoring only the first symbol.
+    pub fn write_auto_anchored(
+        &self,
+        repo_root: &Path,
+        refs: &[(String, String)],
+        memory: &mut Memory,
+    ) -> Result<String, Error> {
+        for (file, symbol) in refs {
+            if let Some(core) = marrow_core::seed_anchor(repo_root, file, symbol) {
+                Self::attach_anchor(memory, core);
+            }
+        }
+        self.write(memory)
+    }
+
+    fn attach_anchor(memory: &mut Memory, core: marrow_core::Anchor) {
+        let joined = format!("{}::{}", core.file_path, core.symbol);
+        if !memory
+            .frontmatter
+            .refs
+            .iter()
+            .any(|reference| reference.kind == RefKind::Symbol && reference.value == joined)
+        {
+            memory.frontmatter.refs.push(Ref {
+                kind: RefKind::Symbol,
+                value: joined,
+            });
+        }
+        if memory
+            .frontmatter
+            .code_anchors
+            .iter()
+            .any(|anchor| anchor.file_path == core.file_path && anchor.symbol == core.symbol)
+        {
+            return;
+        }
         memory.frontmatter.code_anchors.push(CodeAnchor {
             file_path: core.file_path,
             symbol: core.symbol,
@@ -352,7 +401,6 @@ impl Store {
             fingerprint: core.fingerprint,
             norm: core.norm,
         });
-        self.write(memory)
     }
 
     /// Edit a memory in place, keeping its id and lineage: update topic, body, and/or tags, then
@@ -418,18 +466,22 @@ impl Store {
         Ok(())
     }
 
-    /// At most one active decision may exist per (topic, project).
-    fn enforce_unique_active_decision(&self, memory: &Memory) -> Result<(), Error> {
-        use marrow_memdocs::{MemoryKind, Status};
+    /// Active decisions are versioned nodes: at most one per (topic, project). Facts/entities may
+    /// share a topic as a deliberate cluster, but an exact repeated write of any kind is
+    /// idempotent rather than growing the store.
+    ///
+    /// Returns the existing id for an exact retry.
+    fn enforce_unique_active_topic(&self, memory: &Memory) -> Result<Option<String>, Error> {
+        use marrow_memdocs::Status;
         let fm = &memory.frontmatter;
-        if fm.kind != MemoryKind::Decision || fm.status != Status::Active {
-            return Ok(());
+        if fm.status != Status::Active {
+            return Ok(None);
         }
         let Some(topic) = &fm.topic else {
-            return Ok(());
+            return Ok(None);
         };
         let q = Query {
-            kind: Some(MemoryKind::Decision),
+            kind: Some(fm.kind),
             status: Some(Status::Active),
             topic: Some(topic.clone()),
             project_id: Some(fm.scope.project_id.clone()),
@@ -437,24 +489,44 @@ impl Store {
         };
         let clash = index::query(&self.conn, &q, &util::now_rfc3339())?
             .into_iter()
-            .any(|r| r.id != fm.id);
-        if clash {
-            return Err(Error::Conflict(format!(
-                "an active decision already exists for topic '{topic}' in project '{}'",
-                fm.scope.project_id
-            )));
-        }
-        Ok(())
-    }
-
-    /// Read a memory by id, if present.
-    pub fn read(&self, id: &str) -> Result<Option<Memory>, Error> {
-        let Some(rel) = index::path_of(&self.conn, id)? else {
+            .find(|row| row.id != fm.id);
+        let Some(existing) = clash else {
             return Ok(None);
         };
-        let text = fs::read_to_string(self.memory_dir().join(rel))?;
-        let memory = marrow_memdocs::parse(&text).map_err(|e| Error::Parse(e.to_string()))?;
-        Ok(Some(memory))
+        let same_kind = existing.kind == kind_str(fm.kind);
+        let normalize = |body: &str| body.split_whitespace().collect::<Vec<_>>().join(" ");
+        if same_kind && normalize(&existing.body) == normalize(&memory.body) {
+            return Ok(Some(existing.id));
+        }
+        if fm.kind != marrow_memdocs::MemoryKind::Decision {
+            return Ok(None);
+        }
+        Err(Error::Conflict(format!(
+            "active decision {} already owns topic '{topic}' in project '{}'; use mem_supersede(id=\"{}\", ...) to update it, or choose a more precise topic",
+            existing.id, fm.scope.project_id, existing.id
+        )))
+    }
+
+    /// Read a memory by id, if present. Served entirely from the index row: the row carries the full
+    /// serialized document, so the exported markdown file is never read. The row is the source of
+    /// truth for reads, so an out-of-band edit to a markdown file on disk is invisible to `read`
+    /// until a `reindex` rebuilds the rows from disk.
+    pub fn read(&self, id: &str) -> Result<Option<Memory>, Error> {
+        let Some(row) = index::query_one(&self.conn, id)? else {
+            return Ok(None);
+        };
+        Ok(Some(self.hydrate(&row)?))
+    }
+
+    /// Reconstruct a [`Memory`] from an index row by parsing its `doc` column, with no disk access.
+    /// Rows with an empty `doc` fall back to the exported markdown file (see `IndexRow::doc`).
+    fn hydrate(&self, row: &IndexRow) -> Result<Memory, Error> {
+        let text = if row.doc.is_empty() {
+            fs::read_to_string(self.memory_dir().join(&row.path))?
+        } else {
+            row.doc.clone()
+        };
+        marrow_memdocs::parse(&text).map_err(|e| Error::Parse(e.to_string()))
     }
 
     /// Lightweight listing of all indexed memories (most recent first).
@@ -511,32 +583,177 @@ impl Store {
         Ok(index::vectors_for(&self.conn, &ids)?)
     }
 
+    /// Keyword-lane retrieval candidates for `text`, capped at `limit`: the FTS/BM25 hits, topic-tier
+    /// reranked, exactly as [`Store::search`]'s keyword lane produces them — but returned raw, before
+    /// any semantic fusion, as a primitive for the backend port.
+    pub(crate) fn keyword_candidates(
+        &self,
+        text: &str,
+        limit: usize,
+    ) -> Result<Vec<IndexRow>, Error> {
+        let now = util::now_rfc3339();
+        let candidates = index::search(&self.conn, text, &Query::default(), &now)?;
+        let mut ranked = crate::rank::rerank(candidates, text);
+        ranked.truncate(limit);
+        Ok(ranked)
+    }
+
+    /// The `top_k` active memories nearest `seed` by embedding cosine, as `(id, score)`. Empty when
+    /// the store has no embeddings. Brute-force over the stored vectors — the local counterpart to a
+    /// Postgres pgvector ANN search.
+    pub(crate) fn vector_candidates(
+        &self,
+        seed: &[f32],
+        top_k: usize,
+        filter: &Query,
+    ) -> Result<Vec<(String, f32)>, Error> {
+        // Push the structured filter INTO the search: restrict the candidate rows FIRST, then take the
+        // top-k. A Postgres backend does this as a filtered pgvector ANN; locally it is a filter over
+        // the active-vector scan. Post-filtering a global top-k would drop matching-but-lower-cosine
+        // rows and is exactly the regression this avoids.
+        let allowed = self.filter_ids(filter)?;
+        let mut scored: Vec<(String, f32)> = self
+            .vectors()?
+            .into_iter()
+            .filter(|(id, _)| allowed.as_ref().is_none_or(|set| set.contains(id)))
+            .map(|(id, v)| (id, cosine(seed, &v)))
+            .collect();
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored.truncate(top_k);
+        Ok(scored)
+    }
+
+    /// The id allow-set a structured `filter` selects, or `None` when the filter is unconstrained (no
+    /// restriction to intersect). Used to scope the vector lane without loading any embeddings.
+    fn filter_ids(
+        &self,
+        filter: &Query,
+    ) -> Result<Option<std::collections::HashSet<String>>, Error> {
+        let unconstrained = filter.kind.is_none()
+            && filter.status.is_none()
+            && filter.topic.is_none()
+            && filter.project_id.is_none()
+            && filter.min_confidence.is_none()
+            && filter.tag.is_none()
+            && !filter.exclude_expired;
+        if unconstrained {
+            return Ok(None);
+        }
+        let now = util::now_rfc3339();
+        Ok(Some(
+            index::query(&self.conn, filter, &now)?
+                .into_iter()
+                .map(|r| r.id)
+                .collect(),
+        ))
+    }
+
+    /// Assemble the bounded recall corpus: the keyword and vector candidates for the query, plus the
+    /// edge-neighbourhood reachable from them within [`MAX_HOPS`], and their vectors. This is the
+    /// whole-store `list()`+`vectors()` load's replacement — every row it pulls is a bounded index
+    /// lookup, so the work is `O(candidates + their neighbourhood)`, never `O(store)`. An
+    /// [`EdgeCorpus`] built over the result carries the same edges the full scan would for every node
+    /// activation actually reaches, so spreading over it matches the full-scan recall.
+    pub(crate) fn bounded_corpus(
+        &self,
+        seeds: &[Memory],
+        text: &str,
+        candidates: usize,
+    ) -> Result<BoundedCorpus, Error> {
+        let half = candidates.div_ceil(2);
+        // One loader per recall: the active vector set is read once, and every topic/tag star is
+        // memoised, so a dense store costs one vector load plus one query per DISTINCT topic/tag —
+        // never one per node.
+        let mut neigh = Neighborhood::new(self)?;
+        let mut selected: std::collections::BTreeMap<String, IndexRow> =
+            std::collections::BTreeMap::new();
+
+        // Base lane 1 — keyword (FTS/BM25).
+        neigh.stats.keyword_candidate_calls += 1;
+        for row in self.keyword_candidates(text, half)? {
+            selected.entry(row.id.clone()).or_insert(row);
+        }
+        // Base lane 2 — vector (top-k over the once-loaded active set; the pgvector-ANN seam).
+        if let Some(embedder) = &self.embedder {
+            if let Ok(qvec) = embedder.embed_one(text) {
+                for id in neigh.query_vector_candidates(&qvec, half) {
+                    if let std::collections::btree_map::Entry::Vacant(entry) = selected.entry(id) {
+                        if let Some(row) = index::query_one(&self.conn, entry.key())? {
+                            entry.insert(row);
+                        }
+                    }
+                }
+            }
+        }
+        // Seeds are the retrieval result proper; anchor them even if the lanes above capped them out.
+        for seed in seeds {
+            if let Some(row) = index::query_one(&self.conn, &seed.frontmatter.id)? {
+                selected.entry(seed.frontmatter.id.clone()).or_insert(row);
+            }
+        }
+        neigh.stats.base_candidates = selected.len();
+
+        // Expand the edge-neighbourhood outward. `MAX_HOPS` rings is exactly how far activation can
+        // travel, so this holds every node the spread can reach — no more.
+        let mut frontier: Vec<String> = selected.keys().cloned().collect();
+        for _ in 0..MAX_HOPS {
+            let mut next: Vec<String> = Vec::new();
+            for id in &frontier {
+                neigh.stats.neighbor_expansions += 1;
+                neigh.expand(id, &mut selected, &mut next)?;
+            }
+            if next.is_empty() {
+                break;
+            }
+            frontier = next;
+        }
+
+        neigh.stats.corpus_nodes = selected.len();
+        let vectors: HashMap<String, Vec<f32>> = neigh
+            .vectors
+            .iter()
+            .filter(|(id, _)| selected.contains_key(id))
+            .cloned()
+            .collect();
+        let rows: Vec<IndexRow> = selected.into_values().collect();
+        Ok(BoundedCorpus {
+            rows,
+            vectors,
+            hub_tags: neigh.hub_tags,
+            stats: neigh.stats,
+        })
+    }
+
     /// Semantic neighbours: for each active memory, up to `top_k` others whose embedding cosine is
     /// at least `min_sim`. Each pair appears once. Empty when the store has no real (non-hash)
     /// embeddings — meaning-based links need a semantic backend.
     pub fn related(&self, top_k: usize, min_sim: f32) -> Result<Vec<(String, String, f32)>, Error> {
-        let ids: Vec<String> = self
-            .list()?
-            .into_iter()
-            .filter(|r| r.status == "active")
-            .map(|r| r.id)
-            .collect();
-        let vecs = index::vectors_for(&self.conn, &ids)?;
+        let vecs = index::vectors_for(
+            &self.conn,
+            &self
+                .list()?
+                .into_iter()
+                .filter(|r| r.status == "active")
+                .map(|r| r.id)
+                .collect::<Vec<_>>(),
+        )?;
         let mut edges = Vec::new();
         let mut seen = std::collections::HashSet::new();
-        for (i, (_, va)) in vecs.iter().enumerate() {
-            let mut sims: Vec<(usize, f32)> = vecs
-                .iter()
-                .enumerate()
-                .filter(|(j, _)| *j != i)
-                .map(|(j, (_, vb))| (j, crate::embed::cosine(va, vb)))
-                .filter(|(_, s)| *s >= min_sim)
-                .collect();
-            sims.sort_by(|a, b| b.1.total_cmp(&a.1));
-            for (j, s) in sims.into_iter().take(top_k) {
-                let (lo, hi) = if i < j { (i, j) } else { (j, i) };
-                if seen.insert((lo, hi)) {
-                    edges.push((vecs[lo].0.clone(), vecs[hi].0.clone(), s));
+        // Each node's nearest neighbours come from the vector top-k primitive — a pgvector ANN query
+        // on a hosted backend — rather than a hand-rolled cosine against every other vector. `+1`
+        // absorbs the node's own vector (cosine 1.0); the rest are its true neighbours.
+        for (id, vector) in &vecs {
+            for (target, sim) in self.vector_candidates(vector, top_k + 1, &Query::default())? {
+                if &target == id || sim < min_sim {
+                    continue;
+                }
+                let (lo, hi) = if id < &target {
+                    (id.clone(), target)
+                } else {
+                    (target, id.clone())
+                };
+                if seen.insert((lo.clone(), hi.clone())) {
+                    edges.push((lo, hi, sim));
                 }
             }
         }
@@ -576,29 +793,28 @@ impl Store {
         self.load_budgeted(rows, q.max_tokens)
     }
 
-    /// Rank the filtered candidate set by cosine similarity to the query embedding.
+    /// The query's semantic lane: the `SEMANTIC_TOP_K` memories nearest the query embedding, honouring
+    /// the structured filter. It consumes a bounded, FILTER-AWARE vector top-k from
+    /// [`Store::vector_candidates`] — the pgvector-ANN seam — so the filter is applied BEFORE the
+    /// top-k, exactly as the old filter-then-cosine path did. (Post-filtering a global top-k would
+    /// drop matching-but-lower-cosine rows.)
     fn semantic_ranking(
         &self,
         text: &str,
         q: &Query,
         embedder: &dyn Embedder,
-        now: &str,
+        _now: &str,
     ) -> Result<Vec<String>, Error> {
-        let candidates: Vec<String> = index::query(&self.conn, q, now)?
-            .into_iter()
-            .map(|r| r.id)
-            .collect();
         let qvec = embedder
             .embed_one(text)
             .map_err(|e| Error::Db(e.to_string()))?;
-        let mut scored: Vec<(String, f32)> = index::vectors_for(&self.conn, &candidates)?
+        let ranked = self
+            .vector_candidates(&qvec, SEMANTIC_TOP_K, q)?
             .into_iter()
-            .map(|(id, v)| (id, cosine(&qvec, &v)))
-            .filter(|(_, s)| *s > 0.0)
+            .filter(|(_, score)| *score > 0.0)
+            .map(|(id, _)| id)
             .collect();
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        scored.truncate(SEMANTIC_TOP_K);
-        Ok(scored.into_iter().map(|(id, _)| id).collect())
+        Ok(ranked)
     }
 
     fn load_budgeted(
@@ -609,9 +825,7 @@ impl Store {
         let mut out = Vec::new();
         let mut used = 0usize;
         for row in rows {
-            let Some(memory) = self.read(&row.id)? else {
-                continue;
-            };
+            let memory = self.hydrate(&row)?;
             let cost = estimate_tokens(&memory.body) + estimate_tokens(&row.topic);
             if let Some(budget) = max_tokens {
                 if !out.is_empty() && used + cost > budget {
@@ -656,10 +870,16 @@ impl Store {
     /// Every code anchor across all memories that no longer matches the live repo.
     pub fn list_stale(&self, repo_root: &Path) -> Result<Vec<StaleHit>, Error> {
         let mut hits = Vec::new();
-        for row in self.list()? {
-            if let Some(memory) = self.read(&row.id)? {
-                hits.extend(check_memory(repo_root, &memory));
-            }
+        let active = index::query(
+            &self.conn,
+            &Query {
+                status: Some(marrow_memdocs::Status::Active),
+                ..Query::default()
+            },
+            &util::now_rfc3339(),
+        )?;
+        for row in active {
+            hits.extend(check_memory(repo_root, &self.hydrate(&row)?));
         }
         Ok(hits)
     }
@@ -743,6 +963,7 @@ impl Store {
             tags,
             path: rel.to_string(),
             body: memory.body.clone(),
+            doc: to_markdown(memory),
         }
     }
 }
@@ -751,6 +972,254 @@ impl Store {
 /// Upper bound on semantic candidates fed into fusion, so a `w=1` search never returns the
 /// whole store.
 const SEMANTIC_TOP_K: usize = 64;
+
+/// Default size of the bounded recall candidate set (keyword lane + vector lane, split evenly).
+/// Comfortably above `k * fan-out` for realistic `k`, so the neighbourhood the spread walks is fully
+/// captured, yet a fixed constant — the work never grows with the store.
+pub(crate) const RECALL_CANDIDATES: usize = 128;
+
+/// Cap on how many same-topic rows one node contributes to the bounded corpus. Every realistic
+/// topic cluster fits well under this, so edges are captured exactly; it exists only so a single
+/// pathological super-topic cannot, by itself, pull an unbounded crowd into the corpus.
+const NEIGHBOR_TOPIC_CAP: usize = 256;
+
+/// Instrumentation for the bounded recall corpus build: proof, in a test, that the work is
+/// `O(candidates + neighbourhood)` and independent of store size — never a full scan. Read only by
+/// the bounds test; production recall ignores it.
+#[allow(dead_code)]
+#[derive(Debug, Default, Clone)]
+pub(crate) struct BoundedStats {
+    /// Rows in the base candidate set before edge expansion.
+    pub base_candidates: usize,
+    /// Total rows in the assembled corpus (base + neighbourhood).
+    pub corpus_nodes: usize,
+    /// Nodes expanded (one `expand` call each), bounded by the spread's fan-out.
+    pub neighbor_expansions: usize,
+    /// Distinct topic stars queried (memoised — one query per topic, not per node).
+    pub topic_queries: usize,
+    /// Distinct tag stars queried (memoised — one query per tag, not per node).
+    pub tag_queries: usize,
+    /// Whole active-vector-set loads. Must stay `<= 1` per recall — the local ANN seam is read once.
+    pub full_vector_loads: usize,
+    /// `keyword_candidates` (FTS) invocations issued while assembling the corpus.
+    pub keyword_candidate_calls: usize,
+}
+
+/// The bounded recall corpus: the candidate rows, their embeddings, the global hub tags whose edges
+/// must be suppressed, and how it was built.
+pub(crate) struct BoundedCorpus {
+    pub rows: Vec<IndexRow>,
+    pub vectors: HashMap<String, Vec<f32>>,
+    /// Tags that are global hubs (more than the recall fan-out of members store-wide). Passed to
+    /// [`EdgeCorpus`] so a hub tag whose members only partially enter the bounded corpus does not
+    /// present as a small, non-hub tag and emit edges the full scan suppresses.
+    pub hub_tags: std::collections::HashSet<String>,
+    /// Build instrumentation, read only by the bounds test.
+    #[allow(dead_code)]
+    pub stats: BoundedStats,
+}
+
+/// Per-recall neighbourhood loader. It amortises the bounded corpus build across the many nodes the
+/// spread touches: the active vector set is loaded once, every topic/tag star is memoised the first
+/// time it is asked for, and global hub tags are recorded as they are discovered. A dense store
+/// therefore costs one vector load plus one index query per DISTINCT topic/tag — not one per node —
+/// while every lookup stays a bounded index read (the FTS/pgvector seam), never a whole-store scan.
+struct Neighborhood<'a> {
+    store: &'a Store,
+    now: String,
+    /// Every active memory's embedding, loaded once (empty when the store has no vectors).
+    vectors: Vec<(String, Vec<f32>)>,
+    topic_star: HashMap<String, Vec<IndexRow>>,
+    /// `None` marks a global hub tag: its star is never pulled and its edges are suppressed.
+    tag_star: HashMap<String, Option<Vec<IndexRow>>>,
+    hub_tags: std::collections::HashSet<String>,
+    stats: BoundedStats,
+}
+
+impl<'a> Neighborhood<'a> {
+    fn new(store: &'a Store) -> Result<Self, Error> {
+        let vectors = store.vectors()?; // the single whole-active-vector load per recall
+        Ok(Self {
+            store,
+            now: util::now_rfc3339(),
+            vectors,
+            topic_star: HashMap::new(),
+            tag_star: HashMap::new(),
+            hub_tags: std::collections::HashSet::new(),
+            stats: BoundedStats {
+                full_vector_loads: 1,
+                ..BoundedStats::default()
+            },
+        })
+    }
+
+    /// Top-k active ids nearest `qvec` over the once-loaded vector set — the base vector lane.
+    fn query_vector_candidates(&self, qvec: &[f32], top_k: usize) -> Vec<String> {
+        let mut scored: Vec<(&str, f32)> = self
+            .vectors
+            .iter()
+            .map(|(id, v)| (id.as_str(), cosine(qvec, v)))
+            .collect();
+        scored.sort_by(|a, b| b.1.total_cmp(&a.1));
+        scored
+            .into_iter()
+            .take(top_k)
+            .map(|(id, _)| id.to_string())
+            .collect()
+    }
+
+    /// Add `id`'s edge-neighbourhood — full topic star, non-hub tag stars, ref targets, top-k semantic
+    /// neighbours — into `selected`, pushing any newly-seen ids onto `next`. These are exactly the
+    /// rows [`EdgeCorpus::edges_from`] draws `id`'s edges from, so the assembled corpus reproduces the
+    /// full-scan edges for `id`.
+    fn expand(
+        &mut self,
+        id: &str,
+        selected: &mut std::collections::BTreeMap<String, IndexRow>,
+        next: &mut Vec<String>,
+    ) -> Result<(), Error> {
+        let Some(node) = index::query_one(&self.store.conn, id)? else {
+            return Ok(());
+        };
+        if node.status != "active" {
+            return Ok(());
+        }
+
+        if !node.topic.is_empty() {
+            self.ensure_topic(&node.topic)?;
+            if let Some(members) = self.topic_star.get(&node.topic) {
+                add_rows(members, selected, next);
+            }
+        }
+
+        for tag in crate::edge::tags_of(&node.tags) {
+            self.ensure_tag(tag)?;
+            if let Some(Some(members)) = self.tag_star.get(tag) {
+                add_rows(members, selected, next);
+            }
+        }
+
+        for value in crate::edge::wiki_refs(&node.body)
+            .into_iter()
+            .chain(crate::edge::wiki_refs(&node.topic))
+        {
+            if let Some(row) = self.resolve_ref(&value)? {
+                add_rows(std::slice::from_ref(&row), selected, next);
+            }
+        }
+
+        for target in self.semantic_neighbors(id) {
+            if let std::collections::btree_map::Entry::Vacant(entry) = selected.entry(target) {
+                if let Some(row) = index::query_one(&self.store.conn, entry.key())? {
+                    next.push(entry.key().clone());
+                    entry.insert(row);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Memoise `topic`'s full active-member star (capped so one super-topic can't pull an unbounded
+    /// crowd into the corpus).
+    fn ensure_topic(&mut self, topic: &str) -> Result<(), Error> {
+        if self.topic_star.contains_key(topic) {
+            return Ok(());
+        }
+        self.stats.topic_queries += 1;
+        let q = Query {
+            topic: Some(topic.to_string()),
+            status: Some(Status::Active),
+            limit: Some(NEIGHBOR_TOPIC_CAP),
+            ..Query::default()
+        };
+        let rows = index::query(&self.store.conn, &q, &self.now)?;
+        self.topic_star.insert(topic.to_string(), rows);
+        Ok(())
+    }
+
+    /// Memoise `tag`'s member star, or record it as a global hub (`None`) when it exceeds the recall
+    /// fan-out — the same gate `edges_from` applies, but on GLOBAL membership.
+    fn ensure_tag(&mut self, tag: &str) -> Result<(), Error> {
+        if self.tag_star.contains_key(tag) {
+            return Ok(());
+        }
+        self.stats.tag_queries += 1;
+        let q = Query {
+            tag: Some(tag.to_string()),
+            status: Some(Status::Active),
+            // One past the fan-out is enough to tell a normal tag from a hub tag.
+            limit: Some(crate::edge::RECALL_TAG_FANOUT + 1),
+            ..Query::default()
+        };
+        let members = index::query(&self.store.conn, &q, &self.now)?;
+        let entry = if members.len() > crate::edge::RECALL_TAG_FANOUT {
+            self.hub_tags.insert(tag.to_string());
+            None
+        } else {
+            Some(members)
+        };
+        self.tag_star.insert(tag.to_string(), entry);
+        Ok(())
+    }
+
+    /// Resolve a `[[…]]` reference the way [`EdgeCorpus::resolve_ref`] does: an exact id first, then
+    /// the first active memory carrying that topic.
+    fn resolve_ref(&self, value: &str) -> Result<Option<IndexRow>, Error> {
+        if let Some(row) = index::query_one(&self.store.conn, value)? {
+            return Ok(Some(row));
+        }
+        let q = Query {
+            topic: Some(value.to_string()),
+            status: Some(Status::Active),
+            limit: Some(1),
+            ..Query::default()
+        };
+        Ok(index::query(&self.store.conn, &q, &self.now)?
+            .into_iter()
+            .next())
+    }
+
+    /// `id`'s top-k semantic neighbour ids over the once-loaded vector set, selected byte-for-byte the
+    /// way [`EdgeCorpus`] does (cosine `>= SEMANTIC_MIN_SIM`, id tiebreak, `RECALL_SEMANTIC_TOP_K`), so
+    /// pulling them guarantees the corpus reconstructs `id`'s true semantic edges.
+    fn semantic_neighbors(&self, id: &str) -> Vec<String> {
+        let Some(source) = self
+            .vectors
+            .iter()
+            .find(|(vid, _)| vid == id)
+            .map(|(_, v)| v)
+        else {
+            return Vec::new();
+        };
+        let mut scored: Vec<(&str, f32)> = self
+            .vectors
+            .iter()
+            .filter(|(vid, v)| vid != id && v.len() == source.len())
+            .map(|(vid, v)| (vid.as_str(), cosine(source, v)))
+            .filter(|(_, sim)| *sim >= crate::edge::SEMANTIC_MIN_SIM)
+            .collect();
+        scored.sort_by(|(a_id, a), (b_id, b)| b.total_cmp(a).then_with(|| a_id.cmp(b_id)));
+        scored
+            .into_iter()
+            .take(crate::edge::RECALL_SEMANTIC_TOP_K)
+            .map(|(id, _)| id.to_string())
+            .collect()
+    }
+}
+
+/// Insert any not-yet-seen `rows` into `selected`, recording their ids on `next` for the next hop.
+fn add_rows(
+    rows: &[IndexRow],
+    selected: &mut std::collections::BTreeMap<String, IndexRow>,
+    next: &mut Vec<String>,
+) {
+    for row in rows {
+        if let std::collections::btree_map::Entry::Vacant(entry) = selected.entry(row.id.clone()) {
+            next.push(entry.key().clone());
+            entry.insert(row.clone());
+        }
+    }
+}
 
 /// The text embedded for a memory: its topic and body.
 fn embed_text(memory: &Memory) -> String {
@@ -806,4 +1275,103 @@ fn markdown_files(dir: &Path) -> Vec<PathBuf> {
     }
     out.sort();
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use marrow_memdocs::{Decay, Frontmatter, MemoryKind, Provenance, Scope, Status};
+
+    /// A memory exercising every frontmatter field that must round-trip through the index row.
+    fn rich_memory() -> Memory {
+        Memory {
+            frontmatter: Frontmatter {
+                id: String::new(),
+                kind: MemoryKind::Decision,
+                status: Status::Active,
+                topic: Some("auth strategy".into()),
+                area: Some("auth".into()),
+                scope: Scope {
+                    project_id: "demo".into(),
+                },
+                refs: vec![Ref {
+                    kind: RefKind::Url,
+                    value: "https://example.com/rfc".into(),
+                }],
+                code_anchors: vec![CodeAnchor {
+                    file_path: "src/auth.rs".into(),
+                    symbol: "login".into(),
+                    snippet: "fn login() {}".into(),
+                    fingerprint: "abc123".into(),
+                    norm: "fn login".into(),
+                }],
+                confidence: 0.75,
+                decay: Some(Decay {
+                    expires_at: Some("2027-01-01T00:00:00Z".into()),
+                }),
+                provenance: Provenance {
+                    written_by: "claude-code".into(),
+                    model: Some("claude-opus-4-8".into()),
+                    session_id: Some("sess-42".into()),
+                    sources: vec!["chat".into(), "rfc".into()],
+                },
+                supersedes: vec!["01OLD".into()],
+                tags: vec!["security".into(), "jwt".into()],
+                created_at: String::new(),
+                updated_at: String::new(),
+                hmac: None,
+            },
+            body: "We use JWT for sessions.\n\nRotated every 24h.\n".into(),
+        }
+    }
+
+    #[test]
+    fn read_serves_from_row_not_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::init(dir.path()).unwrap();
+        let mut m = rich_memory();
+        let id = store.write(&mut m).unwrap();
+
+        // Delete every exported markdown file, proving the read cannot touch disk.
+        fs::remove_dir_all(store.memory_dir()).unwrap();
+        assert!(markdown_files(&store.memory_dir()).is_empty());
+
+        let got = store.read(&id).unwrap().expect("row hydration");
+        assert_eq!(got, m);
+    }
+
+    #[test]
+    fn write_exports_markdown_matching_the_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::init(dir.path()).unwrap();
+        let mut m = rich_memory();
+        let id = store.write(&mut m).unwrap();
+
+        // The write-through export exists on disk...
+        let files = markdown_files(&store.memory_dir());
+        assert_eq!(files.len(), 1, "exactly one exported markdown file");
+
+        // ...and re-parsing it yields exactly the row-hydrated memory.
+        let from_disk = marrow_memdocs::parse(&fs::read_to_string(&files[0]).unwrap()).unwrap();
+        let from_row = store.read(&id).unwrap().expect("row hydration");
+        assert_eq!(from_disk, from_row);
+        assert_eq!(from_disk, m);
+    }
+
+    #[test]
+    fn signed_memory_still_verifies_after_row_hydration() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::init(dir.path()).unwrap();
+        store.config.sign = true;
+        store.set_key(b"secret-key".to_vec());
+
+        let mut m = rich_memory();
+        let id = store.write(&mut m).unwrap();
+
+        // Reads served from the row must reconstruct a Memory whose HMAC still verifies — the whole
+        // point of preserving exact fidelity so downstream signing stays valid.
+        let got = store.read(&id).unwrap().expect("row hydration");
+        assert_eq!(got, m);
+        assert_eq!(store.verify(&got), Some(true));
+    }
 }
