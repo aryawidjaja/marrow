@@ -555,10 +555,17 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
                             }
                         }
                     }
-                    Err(e) => {
+                    Err(e) if e.starts_with("marrow backbone unreachable") => {
                         writeln!(
                             out,
                             "gateway: unreachable right now — {e}. The share is still configured; check that a host is online, then retry."
+                        )
+                        .ok();
+                    }
+                    Err(e) => {
+                        writeln!(
+                            out,
+                            "gateway: reachable, but rejected the request — {e}. Check the space name and token, then run `marrow unshare` and re-share if they've changed."
                         )
                         .ok();
                     }
@@ -1088,10 +1095,17 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
                 Ok(_) => {
                     writeln!(out, "gateway: reachable.").ok();
                 }
-                Err(e) => {
+                Err(e) if e.starts_with("marrow backbone unreachable") => {
                     writeln!(
                         out,
                         "gateway: unreachable right now — {e}. The share is saved; check that a host is online, then run `marrow status` to confirm."
+                    )
+                    .ok();
+                }
+                Err(e) => {
+                    writeln!(
+                        out,
+                        "gateway: reachable, but rejected the request — {e}. Check the space name and token before pointing agents at it."
                     )
                     .ok();
                 }
