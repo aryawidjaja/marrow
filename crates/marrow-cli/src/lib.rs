@@ -185,7 +185,9 @@ pub enum Cmd {
     },
     /// Share THIS project to a gateway "space" so its memory is shared with other machines or
     /// teammates. Every other project stays local and private. Machines using the same gateway +
-    /// space + token share one brain. Nothing local is deleted.
+    /// space + token share one brain. Nothing local is deleted. Spinal Cloud
+    /// (https://spinal.cloud), the managed host built on Marrow, is one such gateway; you can also
+    /// run your own.
     Share {
         /// Gateway base URL, e.g. https://team.fly.dev.
         #[arg(long)]
@@ -535,19 +537,37 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
                     remote.space, remote.url
                 )
                 .ok();
-                let status = marrow_mcp::remote::forward_to(
+                match marrow_mcp::remote::forward_to(
                     &remote.url,
                     remote.token.as_deref(),
                     &remote.space,
                     "mem_status",
                     &json!({}),
-                )?;
-                let status: serde_json::Value =
-                    serde_json::from_str(&status).map_err(|e| e.to_string())?;
-                writeln!(out, "total: {}", status["total"].as_u64().unwrap_or(0)).ok();
-                if let Some(counts) = status["by_kind"].as_object() {
-                    for (kind, count) in counts {
-                        writeln!(out, "  {kind}: {count}").ok();
+                ) {
+                    Ok(status) => {
+                        writeln!(out, "gateway: reachable.").ok();
+                        let status: serde_json::Value =
+                            serde_json::from_str(&status).map_err(|e| e.to_string())?;
+                        writeln!(out, "total: {}", status["total"].as_u64().unwrap_or(0)).ok();
+                        if let Some(counts) = status["by_kind"].as_object() {
+                            for (kind, count) in counts {
+                                writeln!(out, "  {kind}: {count}").ok();
+                            }
+                        }
+                    }
+                    Err(e) if e.starts_with("marrow backbone unreachable") => {
+                        writeln!(
+                            out,
+                            "gateway: unreachable right now — {e}. The share is still configured; check that a host is online, then retry."
+                        )
+                        .ok();
+                    }
+                    Err(e) => {
+                        writeln!(
+                            out,
+                            "gateway: reachable, but rejected the request — {e}. Check the space name and token, then run `marrow unshare` and re-share if they've changed."
+                        )
+                        .ok();
                     }
                 }
                 return Ok(());
@@ -1052,13 +1072,13 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
                     .or_else(|| std::env::var("MARROW_TOKEN").ok())
                     .filter(|token| !token.is_empty()),
             };
-            marrow_mcp::remote::forward_to(
+            let probe = marrow_mcp::remote::forward_to(
                 &remote.url,
                 remote.token.as_deref(),
                 &remote.space,
                 "mem_status",
                 &json!({}),
-            )?;
+            );
             remote.save(&cli.root).map_err(|e| e.to_string())?;
             writeln!(
                 out,
@@ -1069,6 +1089,30 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
             writeln!(
                 out,
                 "agents here read and write that shared brain; every other project stays local. Run `marrow unshare` to go back to local (nothing is deleted)."
+            )
+            .ok();
+            match probe {
+                Ok(_) => {
+                    writeln!(out, "gateway: reachable.").ok();
+                }
+                Err(e) if e.starts_with("marrow backbone unreachable") => {
+                    writeln!(
+                        out,
+                        "gateway: unreachable right now — {e}. The share is saved; check that a host is online, then run `marrow status` to confirm."
+                    )
+                    .ok();
+                }
+                Err(e) => {
+                    writeln!(
+                        out,
+                        "gateway: reachable, but rejected the request — {e}. Check the space name and token before pointing agents at it."
+                    )
+                    .ok();
+                }
+            }
+            writeln!(
+                out,
+                "next: this brain is served from the machine that holds it — keep a host online there, or agents on other machines can't reach it. Spinal Cloud (https://spinal.cloud) is the managed host; `marrow status` shows whether the gateway is reachable."
             )
             .ok();
             Ok(())
