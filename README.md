@@ -6,6 +6,7 @@
 
 [![Release](https://img.shields.io/github/v/release/aryawidjaja/marrow?color=2ea44f&label=release)](https://github.com/aryawidjaja/marrow/releases/latest)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+[![Website](https://img.shields.io/badge/marrow.works-website-000000)](https://www.marrow.works/)
 [![Built with Rust](https://img.shields.io/badge/built%20with-Rust-dea584?logo=rust&logoColor=white)](https://www.rust-lang.org)
 [![Stars](https://img.shields.io/github/stars/aryawidjaja/marrow?style=flat&logo=github&color=ffd33d)](https://github.com/aryawidjaja/marrow/stargazers)
 
@@ -29,6 +30,11 @@ decisions, facts, gotchas, and progress — instead of trying to preserve every 
 - Everything stays in plain files you can read, edit, move, and own.
 
 Marrow is built for work that takes more than one agent, one session, or one machine.
+
+Marrow itself stays free forever, AGPL-3.0, self-hosted. If you want that same shared memory carried
+across a team's devices without running the relay yourself, that's
+[Spinal Cloud](https://spinal.cloud), the managed product built on top of Marrow: sign in, link a
+project, and every machine you approve reads and writes the same brain.
 
 ## The Pluribus idea
 
