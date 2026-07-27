@@ -32,8 +32,9 @@ decisions, facts, gotchas, and progress — instead of trying to preserve every 
 Marrow is built for work that takes more than one agent, one session, or one machine.
 
 Marrow itself stays free forever, AGPL-3.0, self-hosted. If you want that same shared memory carried
-across a team's devices without running the sharing infrastructure yourself, that's
-[Spinal Cloud](https://spinal.cloud), the managed product built on top of Marrow.
+across a team's devices without running the relay yourself, that's
+[Spinal Cloud](https://spinal.cloud), the managed product built on top of Marrow: sign in, link a
+project, and every machine you approve reads and writes the same brain.
 
 ## The Pluribus idea
 
