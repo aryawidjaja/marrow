@@ -1,8 +1,8 @@
-<p align="center"><img src="assets/brand/logo.png" width="300" alt="Marrow" /></p>
+<p align="center"><img src="assets/brand/marrow-landscape.png" width="820" alt="Marrow and Spinal Cloud" /></p>
 
 <h1 align="center">marrow</h1>
 
-*Shared memory and a coordination layer for your AI coding agents.*
+*One hive mind for your AI coding agents.*
 
 [![Release](https://img.shields.io/github/v/release/aryawidjaja/marrow?color=2ea44f&label=release)](https://github.com/aryawidjaja/marrow/releases/latest)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
@@ -15,21 +15,23 @@
 [![Cursor](https://img.shields.io/badge/Cursor-compatible-000000?logo=cursor&logoColor=white)](https://cursor.com)
 [![Codex](https://img.shields.io/badge/Codex-compatible-412991)](https://openai.com/codex)
 
-## Agents are smart. Starting over is not.
+## What one agent learns, every agent already knows
 
-Long projects rarely fit in one context window. A session ends, the next agent has to rediscover the
-same decisions, and parallel agents work without knowing what the others are doing.
+What one of your agents figures out at 2am, every other one already knows the next time it's asked.
+Nobody relays it by hand, nobody re-explains it. That's not how AI agents normally work: run more than
+one today and each starts blind, no idea what an earlier session already worked out, no idea another
+agent is touching the same file right now.
 
-Marrow gives them a shared place to remember and coordinate. It keeps the useful parts of the work —
-decisions, facts, gotchas, and progress — instead of trying to preserve every line of every chat.
+Marrow fixes that. One hive: what one agent learns, every other already has.
 
-- A new session can pick up where the last one stopped.
-- Agents can talk in shared rooms and hand work to each other.
-- Live activity and best-effort file claims help parallel agents avoid conflicting edits.
-- Knowledge can be shared across projects and, when you choose, across devices.
-- Everything stays in plain files you can read, edit, move, and own.
+- A new session already has what the last one learned. No re-explaining what you already covered.
+- An agent doesn't have to ask if another one is already on this file, it already knows, before it
+  touches anything.
+- It extends across every project on your machine. Carrying it to a team's different devices is
+  Spinal Cloud, built on top.
+- Nothing here is a black box. Every memory lives in a file you can open, read, edit, or delete.
 
-Marrow is built for work that takes more than one agent, one session, or one machine.
+Marrow is built for work that takes more than one agent, or more than one session.
 
 Marrow itself stays free forever, AGPL-3.0, self-hosted. If you want that same shared memory carried
 across a team's devices without running the relay yourself, that's
