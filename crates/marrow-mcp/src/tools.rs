@@ -292,11 +292,24 @@ fn recall_schema() -> Value {
 }
 
 fn filter_schema(with_text: bool) -> Value {
+    // Say which arguments narrow and which only rank. Text search treats `topic`/`tag` as hints
+    // exactly like `area`, so a wrong guess costs ranking rather than making a memory invisible;
+    // a structured listing filters on them exactly. An agent that cannot tell the two apart reads
+    // an empty result as "this project knows nothing" and acts on it.
+    let (topic_doc, tag_doc) = if with_text {
+        ("Topic to favour, e.g. `jwt-expiry`. BOOSTS matching topics; it does not hide anything, so a near-miss guess is safe.",
+         "Tag to favour. BOOSTS memories carrying it; it does not hide the ones that don't.")
+    } else {
+        (
+            "Exact topic to match. FILTERS: only memories on this topic are returned.",
+            "Exact tag to match. FILTERS: only memories carrying it are returned.",
+        )
+    };
     let mut props = json!({
         "kind": {"type": "string", "enum": ["fact","decision","entity"]},
-        "topic": {"type": "string"},
-        "project": {"type": "string"},
-        "tag": {"type": "string"},
+        "topic": {"type": "string", "description": topic_doc},
+        "project": {"type": "string", "description": "Project scope. FILTERS: memories in other projects are never returned."},
+        "tag": {"type": "string", "description": tag_doc},
         "min_confidence": {"type": "number"},
         "max_tokens": {"type": "integer"},
         "limit": {"type": "integer"},

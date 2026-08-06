@@ -767,12 +767,38 @@ impl Store {
 
     /// Hybrid search: keyword (FTS5/BM25) fused with semantic (vector cosine) via weighted
     /// RRF. `hybrid_weight` of 0 (or no embedder) is exactly keyword search.
+    ///
+    /// `topic` and `tag` are HINTS here, never filters, for the same reason `area` is only a
+    /// boost: a caller searching by text is guessing, and a wrong guess must cost it ranking,
+    /// never visibility. Answering "I know nothing" while holding the answer is the one failure
+    /// a memory store cannot afford — the caller acts on the silence. Scope stays hard:
+    /// `project_id`, `kind`, `status` and confidence still exclude, because those are contracts
+    /// about what may be seen rather than opinions about what is relevant. Callers who want
+    /// exact matching have [`Store::query`], where filtering is the whole point.
     pub fn search(&self, text: &str, q: &Query) -> Result<Vec<Memory>, Error> {
         let now = util::now_rfc3339();
+        // Fold the hints into the query text so they widen retrieval and feed the topic-tier
+        // reranker, then drop them from the structured filter so they cannot exclude anything.
+        let hints: Vec<&str> = [q.topic.as_deref(), q.tag.as_deref()]
+            .into_iter()
+            .flatten()
+            .filter(|h| !h.is_empty())
+            .collect();
+        let seek = if hints.is_empty() {
+            text.to_string()
+        } else {
+            format!("{text} {}", hints.join(" "))
+        };
+        let scoped = Query {
+            topic: None,
+            tag: None,
+            ..q.clone()
+        };
+
         // Keyword lane: bm25-ordered candidates, then topic-tier reranked so a strong topic
         // match outranks a merely body-dense one.
-        let candidates = index::search(&self.conn, text, q, &now)?;
-        let keyword: Vec<String> = crate::rank::rerank(candidates, text)
+        let candidates = index::search(&self.conn, &seek, &scoped, &now)?;
+        let keyword: Vec<String> = crate::rank::rerank(candidates, &seek)
             .into_iter()
             .map(|r| r.id)
             .collect();
@@ -781,7 +807,9 @@ impl Store {
             .hybrid_weight
             .unwrap_or(self.config.embedding.default_weight);
         let semantic = match (&self.embedder, w > 0.0) {
-            (Some(embedder), true) => self.semantic_ranking(text, q, embedder.as_ref(), &now)?,
+            (Some(embedder), true) => {
+                self.semantic_ranking(&seek, &scoped, embedder.as_ref(), &now)?
+            }
             _ => Vec::new(),
         };
 
