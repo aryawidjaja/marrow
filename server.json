@@ -1,0 +1,23 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.aryawidjaja/marrow",
+  "title": "Marrow",
+  "description": "Shared memory for parallel AI coding agents. One local brain across every session, with rooms and file claims so two agents never clobber the same file. Self-hosted, free, AGPL-3.0.",
+  "repository": {
+    "url": "https://github.com/aryawidjaja/marrow",
+    "source": "github"
+  },
+  "version": "0.7.0",
+  "websiteUrl": "https://www.marrow.works",
+  "packages": [
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/aryawidjaja/marrow/releases/download/v0.7.0/marrow-mcp.mcpb",
+      "version": "0.7.0",
+      "fileSha256": "5749dc8d6ee8b92033d64412e83104317880d0a2257d5943c57cc7039bed24da",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

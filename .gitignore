@@ -30,3 +30,6 @@ marrow_demo.rs
 
 # fastembed downloads its model cache into the cwd
 .fastembed_cache/
+
+# MCPB bundle build output
+/dist/

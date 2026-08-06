@@ -76,6 +76,61 @@ jobs:
             *.tar.gz.sha256
           generate_release_notes: true
 
+  # One installable bundle for clients that will not build from source. Runs
+  # after `build` so it can reuse the very binaries that were just released,
+  # rather than compiling them a second time and risking a different artifact.
+  mcpb:
+    needs: build
+    runs-on: macos-latest   # lipo, for the universal macOS binary
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Collect the released binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          gh release download "$tag" --repo "${{ github.repository }}" --pattern '*.tar.gz'
+          for target in aarch64-apple-darwin x86_64-apple-darwin x86_64-unknown-linux-gnu; do
+            tar xzf "marrow-${tag}-${target}.tar.gz"
+            mkdir -p "bins/${target}"
+            cp "marrow-${tag}-${target}/marrow-mcp" "bins/${target}/marrow-mcp"
+          done
+      - name: Build the bundle
+        run: ./scripts/build-mcpb.sh "${GITHUB_REF_NAME}" bins
+      - name: Verify it starts and lists tools
+        run: |
+          mkdir -p /tmp/verify/proj && cd /tmp/verify
+          unzip -oq "$GITHUB_WORKSPACE/dist/mcpb/marrow-mcp.mcpb"
+          chmod +x server/marrow-mcp-darwin
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' \
+            '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+            | ./server/marrow-mcp-darwin --root ./proj > out.jsonl
+          grep -q '"name":"mem_recall"' out.jsonl || { echo "bundle did not list tools"; cat out.jsonl; exit 1; }
+      - name: Attest the bundle
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/mcpb/marrow-mcp.mcpb
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/mcpb/marrow-mcp.mcpb
+            dist/mcpb/marrow-mcp.mcpb.sha256
+      - name: server.json for the MCP registry
+        run: |
+          echo "Publish with: mcp-publisher login github && mcp-publisher publish" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat server.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-json
+          path: server.json
+
   # Auto-bump the Homebrew tap formula to the new tag (no manual SHA editing).
   # Requires a repo secret HOMEBREW_TAP_TOKEN: a fine-grained PAT with Contents: Read+Write
   # on aryawidjaja/homebrew-marrow.
