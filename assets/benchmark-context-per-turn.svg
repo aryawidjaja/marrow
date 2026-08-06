@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" width="900" height="430" role="img" aria-label="Chart: context per turn stays flat for Marrow as project knowledge grows from 10 to 1000 facts, while a CLAUDE.md grows from 20,962 to 51,141 tokens per turn.">
+  <defs>
+    <linearGradient id="marrowFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7c6ae0" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#7c6ae0" stop-opacity="0"/>
+    </linearGradient>
+    <style>
+      .t { font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+      .title { font-size: 21px; font-weight: 650; fill: #f3f3ef; }
+      .sub { font-size: 13.5px; fill: #f3f3ef; fill-opacity: 0.55; }
+      .axis { font-size: 12.5px; fill: #f3f3ef; fill-opacity: 0.45; }
+      .xlab { font-size: 13.5px; fill: #f3f3ef; fill-opacity: 0.72; font-weight: 550; }
+      .val { font-size: 13px; font-weight: 650; }
+      .leg { font-size: 13.5px; fill: #f3f3ef; fill-opacity: 0.82; }
+      .gap { font-size: 15px; font-weight: 700; fill: #f3f3ef; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="900" height="430" rx="16" fill="#101214"/>
+  <rect x="0.5" y="0.5" width="899" height="429" rx="16" fill="none" stroke="#f3f3ef" stroke-opacity="0.09"/>
+
+  <text class="t title" x="40" y="50">Context per turn as a project’s knowledge grows</text>
+  <text class="t sub" x="40" y="74">Lower is better. Same task, same model, same starting code.</text>
+
+  <g transform="translate(596,38)">
+    <rect x="0" y="0" width="14" height="3" rx="1.5" fill="#e0a458"/>
+    <text class="t leg" x="22" y="7">everything in CLAUDE.md</text>
+    <rect x="0" y="20" width="14" height="3" rx="1.5" fill="#7c6ae0"/>
+    <text class="t leg" x="22" y="27">Marrow</text>
+  </g>
+
+  <g stroke="#f3f3ef" stroke-opacity="0.08">
+    <line x1="130" y1="330" x2="850" y2="330"/>
+    <line x1="130" y1="288.2" x2="850" y2="288.2"/>
+    <line x1="130" y1="246.4" x2="850" y2="246.4"/>
+    <line x1="130" y1="204.5" x2="850" y2="204.5"/>
+    <line x1="130" y1="162.7" x2="850" y2="162.7"/>
+    <line x1="130" y1="120.9" x2="850" y2="120.9"/>
+  </g>
+  <g class="t axis" text-anchor="end">
+    <text x="116" y="334">0</text>
+    <text x="116" y="292">10k</text>
+    <text x="116" y="250">20k</text>
+    <text x="116" y="208">30k</text>
+    <text x="116" y="166">40k</text>
+    <text x="116" y="125">50k</text>
+  </g>
+
+  <path d="M230 242.3 L490 214.8 L750 116.1 L750 330 L490 330 L230 330 Z" fill="#e0a458" fill-opacity="0.07"/>
+  <path d="M230 229.3 L490 230.9 L750 228.3 L750 330 L490 330 L230 330 Z" fill="url(#marrowFill)"/>
+
+  <polyline points="230,242.3 490,214.8 750,116.1" fill="none" stroke="#e0a458" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="230,229.3 490,230.9 750,228.3" fill="none" stroke="#7c6ae0" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <g fill="#101214" stroke="#e0a458" stroke-width="3">
+    <circle cx="230" cy="242.3" r="5.5"/><circle cx="490" cy="214.8" r="5.5"/><circle cx="750" cy="116.1" r="6.5"/>
+  </g>
+  <g fill="#101214" stroke="#7c6ae0" stroke-width="3">
+    <circle cx="230" cy="229.3" r="5.5"/><circle cx="490" cy="230.9" r="5.5"/><circle cx="750" cy="228.3" r="6.5"/>
+  </g>
+
+  <g class="t val" fill="#e0a458" text-anchor="middle">
+    <text x="230" y="264">20,962</text>
+    <text x="490" y="202">27,550</text>
+    <text x="750" y="103">51,141</text>
+  </g>
+  <g class="t val" fill="#7c6ae0" text-anchor="middle">
+    <text x="230" y="216">24,073</text>
+    <text x="490" y="257">23,703</text>
+    <text x="750" y="254">24,325</text>
+  </g>
+
+  <g stroke="#f3f3ef" stroke-opacity="0.4">
+    <line x1="800" y1="116.1" x2="800" y2="228.3"/>
+    <line x1="794" y1="116.1" x2="806" y2="116.1"/>
+    <line x1="794" y1="228.3" x2="806" y2="228.3"/>
+  </g>
+  <text class="t gap" x="814" y="177">2.1×</text>
+
+  <g class="t xlab" text-anchor="middle">
+    <text x="230" y="360">10 facts</text>
+    <text x="490" y="360">200 facts</text>
+    <text x="750" y="360">1,000 facts</text>
+  </g>
+  <text class="t sub" x="490" y="386" text-anchor="middle">how much the project knows</text>
+
+  <text class="t sub" x="40" y="410">75 runs · Claude Sonnet · p = 0.002 at 1,000 facts · 6 runs per cell, bootstrap CIs and a permutation test</text>
+</svg>

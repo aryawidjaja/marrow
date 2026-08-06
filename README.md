@@ -47,6 +47,30 @@ That is the feeling behind Marrow. Each agent stays its own session and keeps do
 but they share what matters and coordinate around the same work. You stay in control, and the memory
 stays in plain files on your machine.
 
+## Does it actually help? We measured it
+
+<p align="center"><img src="assets/benchmark-context-per-turn.png" width="880" alt="Context per turn stays flat for Marrow from 10 to 1,000 project facts, while a CLAUDE.md climbs from 20,962 to 51,141 tokens per turn" /></p>
+
+The usual way to tell an agent how your project works is to write it all into a `CLAUDE.md`, which it
+then reads on every single turn. That is fine for ten things. A codebase a couple of years old knows
+a thousand.
+
+We gave a coding agent the same task and the same repo three ways: nothing, everything in a
+`CLAUDE.md`, and the same facts in Marrow. 75 runs.
+
+- **A `CLAUDE.md` costs more the more your project knows.** 21k tokens per turn at 10 facts, 51k at
+  a thousand. Marrow stays flat: 24.1k, 23.7k, 24.3k. At a thousand facts that is **2.1× less
+  context** (p = 0.002) and **$0.50 a task instead of $0.90**.
+- **Below roughly a hundred facts, just write the file.** Marrow loses that one, 0.87×, and takes
+  more turns. We would rather say so than pretend it wins everywhere.
+- **An agent with no project memory broke things.** It invented a database table, reached for
+  `uuid4` where ids are meant to be sortable, and wrote a naive timestamp. Both of the arms that had
+  the knowledge got those right.
+
+Method: same fixture repo and prompt each time, graded by running the code rather than reading it,
+with bootstrap intervals and a permutation test over 6 runs per cell. There is more on the numbers at
+[marrow.works](https://www.marrow.works/).
+
 ## Get started in 3 steps
 
 **1. Install** (macOS / Linux; other options below):
