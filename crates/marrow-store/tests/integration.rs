@@ -835,3 +835,76 @@ fn changing_a_memorys_kind_leaves_no_copy_at_the_old_path() {
     assert_eq!(rows.len(), 1, "one id, one row");
     assert!(rows[0].path.starts_with("fact/"), "got {}", rows[0].path);
 }
+
+#[test]
+fn recall_treats_topic_and_tag_as_hints_not_filters() {
+    // The regression this exists for: an agent asked for "refund order partial amount" with
+    // topic="refund", got zero results because no topic is literally "refund", concluded the
+    // project knew nothing, and then broke the very convention the store was holding.
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::init(dir.path()).unwrap();
+
+    let mut flag = mem(
+        MemoryKind::Decision,
+        "partial-refunds-flag",
+        "Partial refunds are gated behind the partial_refunds feature flag.",
+    );
+    flag.frontmatter.tags = vec!["billing".into()];
+    store.write(&mut flag).unwrap();
+
+    let mut tables = mem(
+        MemoryKind::Decision,
+        "no-new-tables",
+        "Never create tables in application code; audit rows go into the events table.",
+    );
+    store.write(&mut tables).unwrap();
+
+    let hinted = Query {
+        topic: Some("refund".into()),
+        ..Query::for_project("demo")
+    };
+    let hits = store
+        .search("refund order partial amount", &hinted)
+        .unwrap();
+    assert!(
+        !hits.is_empty(),
+        "a topic hint that matches no topic exactly must not empty the result"
+    );
+    assert_eq!(
+        hits[0].frontmatter.topic.as_deref(),
+        Some("partial-refunds-flag"),
+        "the hint should still rank its closest topic first"
+    );
+
+    // A tag the store has never seen must also not hide anything.
+    let tagged = Query {
+        tag: Some("nonexistent".into()),
+        ..Query::for_project("demo")
+    };
+    assert!(
+        !store.search("refund", &tagged).unwrap().is_empty(),
+        "an unknown tag hint must not empty the result either"
+    );
+
+    // Scope is still a contract, not a hint: another project sees nothing.
+    let elsewhere = Query::for_project("other-project");
+    assert!(
+        store.search("refund", &elsewhere).unwrap().is_empty(),
+        "project scope must keep filtering"
+    );
+
+    // And the structured query keeps exact topic matching, which is its whole purpose.
+    let exact = Query {
+        topic: Some("refund".into()),
+        ..Query::for_project("demo")
+    };
+    assert!(
+        store.query(&exact).unwrap().is_empty(),
+        "structured query must still filter on the exact topic"
+    );
+    let exact_hit = Query {
+        topic: Some("no-new-tables".into()),
+        ..Query::for_project("demo")
+    };
+    assert_eq!(store.query(&exact_hit).unwrap().len(), 1);
+}
