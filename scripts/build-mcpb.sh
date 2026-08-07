@@ -8,6 +8,9 @@
 #
 #   ./scripts/build-mcpb.sh 0.7.0 [dir-with-binaries]
 #
+# The registry caps server.json's description at 100 characters — keep it short
+# here or `mcp-publisher publish` fails with a 422.
+#
 # Binaries are looked for as <dir>/<target>/marrow-mcp. With no dir, it builds
 # for the host only, which is enough to validate packaging locally but is NOT
 # what ships — releases must carry all three.
@@ -67,7 +70,7 @@ cat > "$STAGE/manifest.json" <<JSON
   "name": "marrow",
   "display_name": "Marrow",
   "version": "$VERSION",
-  "description": "Shared memory for parallel AI coding agents.",
+  "description": "Shared memory for parallel AI coding agents. Local, free, with rooms and file claims.",
   "long_description": "Marrow gives every coding agent on your machine one brain to write to. Memory survives the end of a session, recall returns linked neighbours rather than only exact matches, and live sessions coordinate through rooms and file claims so two agents never edit the same file at once. Runs locally, stores everything in plain files under .marrow/, and is free under AGPL-3.0.",
   "author": {
     "name": "Mutaqin Aryawijaya",
@@ -125,7 +128,7 @@ cat > "$ROOT/server.json" <<JSON
   "\$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.aryawidjaja/marrow",
   "title": "Marrow",
-  "description": "Shared memory for parallel AI coding agents. One local brain across every session, with rooms and file claims so two agents never clobber the same file. Self-hosted, free, AGPL-3.0.",
+  "description": "Shared memory for parallel AI coding agents. Local, free, with rooms and file claims.",
   "repository": {
     "url": "$REPO",
     "source": "github"
