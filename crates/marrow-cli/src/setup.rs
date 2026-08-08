@@ -89,13 +89,11 @@ fn codex_present() -> bool {
     home_dir().is_some_and(|h| h.join(".codex").is_dir()) || which("codex")
 }
 
-/// Is this binary on PATH? Walked directly rather than shelled out to `command -v`, which does not
-/// exist on Windows, and which spawns a shell for something the standard library already knows.
+/// Is this binary on PATH?
 fn which(bin: &str) -> bool {
     let Some(path) = std::env::var_os("PATH") else {
         return false;
     };
-    // Windows resolves a bare name against PATHEXT; everywhere else the name is the file.
     let exts: Vec<String> = if cfg!(windows) {
         std::env::var("PATHEXT")
             .unwrap_or_else(|_| ".EXE;.CMD;.BAT;.COM".into())
@@ -112,16 +110,9 @@ fn which(bin: &str) -> bool {
     })
 }
 
-/// The hook settings block, with the hook directory filled in.
-///
-/// The hooks are shell scripts. Windows will not execute a `.sh` by path, so there the command is
-/// handed to `bash`, which a machine with Git for Windows already has. That keeps one set of hook
-/// scripts for every platform instead of a parallel PowerShell copy to maintain, at the cost of
-/// requiring Git Bash on Windows, which `setup` reports when it is missing.
+/// The hook settings block. Windows cannot execute a `.sh` by path, so there it goes through bash.
 fn hook_settings(hook_dir: &str) -> String {
-    // Substitute into JSON *values*, never into the JSON text. A Windows path carries backslashes,
-    // and `C:\Users\...` spliced into a JSON string is an invalid escape, so the document stopped
-    // parsing and setup registered no hooks at all while still reporting success.
+    // Substituting into JSON text breaks on Windows: `C:\Users\...` is an invalid escape.
     let dir = hook_dir.replace('\\', "/");
     let filled = SETTINGS.replace("$CLAUDE_PROJECT_DIR/.claude/hooks", &dir);
     let Ok(mut doc) = serde_json::from_str::<serde_json::Value>(SETTINGS) else {
@@ -142,7 +133,6 @@ fn hook_settings(hook_dir: &str) -> String {
             {
                 if let Some(cmd) = hook.get("command").and_then(|c| c.as_str()) {
                     let path = cmd.replace("$CLAUDE_PROJECT_DIR/.claude/hooks", &dir);
-                    // Windows cannot execute a .sh by path, so hand it to bash.
                     let value = if cfg!(windows) {
                         format!("bash \"{path}\"")
                     } else {
@@ -644,7 +634,6 @@ const REPO_URL: &str = "https://github.com/aryawidjaja/marrow";
 
 /// Decide how marrow was installed, so `marrow upgrade` runs the right updater.
 fn detect_method(exe: &str, brew_semantic: bool, brew_keyword: bool) -> &'static str {
-    // Windows paths arrive with backslashes, which would match neither marker.
     let exe = exe.replace('\\', "/");
     if brew_semantic {
         "brew-semantic"
@@ -951,8 +940,6 @@ mod tests {
         let settings = fs::read_to_string(base.join("settings.json")).unwrap();
         assert!(!settings.contains("$CLAUDE_PROJECT_DIR"));
 
-        // Assert on the parsed command, not the file text: the serialized JSON escapes the quotes
-        // around a Windows `bash "..."` command, so searching the raw text for them cannot match.
         let doc: serde_json::Value =
             serde_json::from_str(&settings).expect("settings is valid JSON");
         let command = doc["hooks"]["SessionStart"][0]["hooks"][0]["command"]

@@ -59,7 +59,6 @@ jobs:
         run: |
           dist="marrow-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir "$dist"
-          # Windows binaries carry .exe; every other target does not.
           ext=""
           case "${{ matrix.target }}" in *windows*) ext=".exe" ;; esac
           for bin in marrow marrow-mcp marrow-serve marrow-server; do
@@ -110,7 +109,6 @@ jobs:
           tar xzf "marrow-${tag}-${win}.tar.gz"
           mkdir -p "bins/${win}"
           cp "marrow-${tag}-${win}/marrow-mcp.exe" "bins/${win}/marrow-mcp.exe"
-          # Carry any native library the Windows build links at runtime.
           cp "marrow-${tag}-${win}/"*.dll "bins/${win}/" 2>/dev/null || true
       - name: Build the bundle
         run: ./scripts/build-mcpb.sh "${GITHUB_REF_NAME}" bins
@@ -202,9 +200,6 @@ jobs:
           files: python/marrow-anthropic/dist/*
 
   mcpb-windows:
-    # Prove the bundled Windows binary actually starts on Windows. The macOS check above cannot
-    # see a missing DLL or a bad platform override, which is exactly how a bundle ends up working
-    # everywhere except the platform it was added for.
     needs: mcpb
     runs-on: windows-latest
     steps:

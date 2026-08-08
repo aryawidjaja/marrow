@@ -12,7 +12,6 @@ $binDir = if ($env:MARROW_BIN_DIR) { $env:MARROW_BIN_DIR } else { "$env:LOCALAPP
 
 $arch = (Get-CimInstance Win32_Processor).Architecture
 if ($arch -ne 9) {
-  # 9 = x64. Arm64 Windows has no prebuilt binary yet; building from source still works.
   Write-Host "No prebuilt binary for this processor architecture." -ForegroundColor Yellow
   Write-Host "Install with Rust instead:"
   Write-Host "  cargo install --git https://github.com/$repo marrow-cli marrow-mcp marrow-web marrow-server"
@@ -39,8 +38,6 @@ try {
   Write-Host "Downloading $url"
   Invoke-WebRequest -Uri $url -OutFile "$tmp\$asset" -UseBasicParsing
 
-  # Verify the checksum, the same way the shell installer does. A release without one is only
-  # installed when the caller opts in, so a tampered or truncated download cannot run silently.
   try {
     Invoke-WebRequest -Uri "$url.sha256" -OutFile "$tmp\$asset.sha256" -UseBasicParsing
     $expected = ((Get-Content "$tmp\$asset.sha256" -Raw) -split '\s+')[0].Trim().ToLower()
@@ -55,7 +52,6 @@ try {
     Write-Host "Warning: installing a legacy release without verification." -ForegroundColor Yellow
   }
 
-  # tar ships with Windows 10 1803 and later, so no extra tooling is needed.
   tar -xzf "$tmp\$asset" -C $tmp
   if ($LASTEXITCODE -ne 0) { throw "Could not extract $asset." }
 
@@ -64,7 +60,6 @@ try {
     $src = Get-ChildItem -Path $tmp -Recurse -Filter "$bin.exe" | Select-Object -First 1
     if ($src) { Copy-Item $src.FullName (Join-Path $binDir "$bin.exe") -Force }
   }
-  # The semantic build links ONNX Runtime; ship whatever native libraries came with it.
   Get-ChildItem -Path $tmp -Recurse -Filter '*.dll' | ForEach-Object {
     Copy-Item $_.FullName (Join-Path $binDir $_.Name) -Force
   }
@@ -74,7 +69,6 @@ try {
 
 Write-Host "Installed marrow, marrow-mcp, marrow-serve and marrow-server to $binDir"
 
-# Put it on PATH for future shells, and for this one, so the next line works immediately.
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 if ($userPath -notlike "*$binDir*") {
   [Environment]::SetEnvironmentVariable('Path', "$userPath;$binDir", 'User')

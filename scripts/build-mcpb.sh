@@ -50,20 +50,13 @@ if [[ -n "$BIN_DIR" ]]; then
   cp "$linux" "$STAGE/server/marrow-mcp-linux"
   PLATFORMS='["darwin", "linux"]'
 
-  # Windows is optional so a local build without it still produces a bundle. A release that
-  # quietly dropped it, though, leaves Windows users with no double-click install at all, which
-  # is the whole point of this bundle.
   win="$BIN_DIR/x86_64-pc-windows-msvc/marrow-mcp.exe"
   if [[ -f "$win" ]]; then
     cp "$win" "$STAGE/server/marrow-mcp-win32.exe"
-    # Any native library sitting beside it, such as ONNX Runtime for the semantic build, has to
-    # ride along or the bundle runs on the machine that built it and nowhere else.
     for dll in "$BIN_DIR/x86_64-pc-windows-msvc/"*.dll; do
       [[ -f "$dll" ]] && cp "$dll" "$STAGE/server/"
     done
     PLATFORMS='["darwin", "linux", "win32"]'
-    # No backslash before $: this is substituted into the heredoc after its escapes are processed,
-    # so a `\$` here would survive into the JSON and make it invalid.
     WIN_OVERRIDE=',
         "win32": {
           "command": "${__dirname}/server/marrow-mcp-win32.exe"
