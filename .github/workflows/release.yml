@@ -42,6 +42,9 @@ jobs:
             target: aarch64-apple-darwin
           - os: macos-latest
             target: x86_64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            features: embed-fastembed
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -50,13 +53,18 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       - name: Build binaries
-        run: cargo build --release --target ${{ matrix.target }} --bin marrow --bin marrow-mcp --bin marrow-serve --bin marrow-server
+        run: cargo build --release --target ${{ matrix.target }} ${{ matrix.features && format('--features {0}', matrix.features) || '' }} --bin marrow --bin marrow-mcp --bin marrow-serve --bin marrow-server
       - name: Package
         shell: bash
         run: |
           dist="marrow-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir "$dist"
-          cp target/${{ matrix.target }}/release/marrow target/${{ matrix.target }}/release/marrow-mcp target/${{ matrix.target }}/release/marrow-serve target/${{ matrix.target }}/release/marrow-server "$dist"/
+          # Windows binaries carry .exe; every other target does not.
+          ext=""
+          case "${{ matrix.target }}" in *windows*) ext=".exe" ;; esac
+          for bin in marrow marrow-mcp marrow-serve marrow-server; do
+            cp "target/${{ matrix.target }}/release/$bin$ext" "$dist"/
+          done
           cp README.md llms.txt LICENSE LICENSE-APACHE COMMERCIAL.md SECURITY.md "$dist"/
           cp -R assets "$dist"/
           tar czf "$dist.tar.gz" "$dist"
@@ -98,6 +106,12 @@ jobs:
             mkdir -p "bins/${target}"
             cp "marrow-${tag}-${target}/marrow-mcp" "bins/${target}/marrow-mcp"
           done
+          win=x86_64-pc-windows-msvc
+          tar xzf "marrow-${tag}-${win}.tar.gz"
+          mkdir -p "bins/${win}"
+          cp "marrow-${tag}-${win}/marrow-mcp.exe" "bins/${win}/marrow-mcp.exe"
+          # Carry any native library the Windows build links at runtime.
+          cp "marrow-${tag}-${win}/"*.dll "bins/${win}/" 2>/dev/null || true
       - name: Build the bundle
         run: ./scripts/build-mcpb.sh "${GITHUB_REF_NAME}" bins
       - name: Verify it starts and lists tools
@@ -111,6 +125,11 @@ jobs:
             '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
             | ./server/marrow-mcp-darwin --root ./proj > out.jsonl
           grep -q '"name":"mem_recall"' out.jsonl || { echo "bundle did not list tools"; cat out.jsonl; exit 1; }
+      - name: Upload the bundle for the Windows check
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcpb-bundle
+          path: dist/mcpb/marrow-mcp.mcpb
       - name: Attest the bundle
         uses: actions/attest-build-provenance@v2
         with:
@@ -181,3 +200,25 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: python/marrow-anthropic/dist/*
+
+  mcpb-windows:
+    # Prove the bundled Windows binary actually starts on Windows. The macOS check above cannot
+    # see a missing DLL or a bad platform override, which is exactly how a bundle ends up working
+    # everywhere except the platform it was added for.
+    needs: mcpb
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mcpb-bundle
+      - name: Start it and list tools
+        shell: bash
+        run: |
+          mkdir -p verify/proj && cd verify
+          unzip -oq ../marrow-mcp.mcpb
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' \
+            '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+            | ./server/marrow-mcp-win32.exe --root ./proj > out.jsonl
+          grep -q '"name":"mem_recall"' out.jsonl || { echo "windows bundle did not list tools"; cat out.jsonl; exit 1; }

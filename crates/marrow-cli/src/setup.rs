@@ -89,12 +89,71 @@ fn codex_present() -> bool {
     home_dir().is_some_and(|h| h.join(".codex").is_dir()) || which("codex")
 }
 
+/// Is this binary on PATH? Walked directly rather than shelled out to `command -v`, which does not
+/// exist on Windows, and which spawns a shell for something the standard library already knows.
 fn which(bin: &str) -> bool {
-    Command::new("sh")
-        .arg("-c")
-        .arg(format!("command -v {bin}"))
-        .output()
-        .is_ok_and(|o| o.status.success())
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    // Windows resolves a bare name against PATHEXT; everywhere else the name is the file.
+    let exts: Vec<String> = if cfg!(windows) {
+        std::env::var("PATHEXT")
+            .unwrap_or_else(|_| ".EXE;.CMD;.BAT;.COM".into())
+            .split(';')
+            .filter(|e| !e.is_empty())
+            .map(|e| e.to_lowercase())
+            .collect()
+    } else {
+        vec![String::new()]
+    };
+    std::env::split_paths(&path).any(|dir| {
+        exts.iter()
+            .any(|ext| dir.join(format!("{bin}{ext}")).is_file())
+    })
+}
+
+/// The hook settings block, with the hook directory filled in.
+///
+/// The hooks are shell scripts. Windows will not execute a `.sh` by path, so there the command is
+/// handed to `bash`, which a machine with Git for Windows already has. That keeps one set of hook
+/// scripts for every platform instead of a parallel PowerShell copy to maintain, at the cost of
+/// requiring Git Bash on Windows, which `setup` reports when it is missing.
+fn hook_settings(hook_dir: &str) -> String {
+    // Substitute into JSON *values*, never into the JSON text. A Windows path carries backslashes,
+    // and `C:\Users\...` spliced into a JSON string is an invalid escape, so the document stopped
+    // parsing and setup registered no hooks at all while still reporting success.
+    let dir = hook_dir.replace('\\', "/");
+    let filled = SETTINGS.replace("$CLAUDE_PROJECT_DIR/.claude/hooks", &dir);
+    let Ok(mut doc) = serde_json::from_str::<serde_json::Value>(SETTINGS) else {
+        return filled;
+    };
+    let groups = doc
+        .get_mut("hooks")
+        .and_then(|h| h.as_object_mut())
+        .map(|o| o.values_mut().collect::<Vec<_>>())
+        .unwrap_or_default();
+    for group in groups {
+        for entry in group.as_array_mut().into_iter().flatten() {
+            for hook in entry
+                .get_mut("hooks")
+                .and_then(|h| h.as_array_mut())
+                .into_iter()
+                .flatten()
+            {
+                if let Some(cmd) = hook.get("command").and_then(|c| c.as_str()) {
+                    let path = cmd.replace("$CLAUDE_PROJECT_DIR/.claude/hooks", &dir);
+                    // Windows cannot execute a .sh by path, so hand it to bash.
+                    let value = if cfg!(windows) {
+                        format!("bash \"{path}\"")
+                    } else {
+                        path
+                    };
+                    hook["command"] = serde_json::Value::String(value);
+                }
+            }
+        }
+    }
+    serde_json::to_string_pretty(&doc).unwrap_or(filled)
 }
 
 /// The `marrow-mcp` server, as a Codex `config.toml` table.
@@ -333,7 +392,14 @@ pub fn run(root: &Path, global: bool, out: &mut impl Write) -> Result<(), String
     {
         writeln!(
             out,
-            "\n  Hooks need jq, but it is not on PATH. Memory tools still work; automatic\n  collision checks and activity capture will stay off until you install jq\n  (`brew install jq` or `apt install jq`) and restart Claude Code."
+            "\n  Hooks need jq, but it is not on PATH. Memory tools still work; automatic\n  collision checks and activity capture will stay off until you install jq\n  (`brew install jq`, `apt install jq`, or `winget install jqlang.jq`) and restart Claude Code."
+        )
+        .ok();
+    }
+    if cfg!(windows) && !which("bash") {
+        writeln!(
+            out,
+            "\n  The hooks are shell scripts and there is no bash on PATH. Memory tools still\n  work; warm starts, collision checks and activity capture stay off until you\n  install Git for Windows (`winget install Git.Git`) and restart Claude Code."
         )
         .ok();
     }
@@ -407,7 +473,7 @@ fn install(
     // 3) Register the hooks in settings.json, merging into an existing file rather than clobbering
     //    it (so the hooks actually activate on a machine that already has Claude Code settings).
     //    The hook path is project-relative for project setup, absolute for --global.
-    let settings_src = SETTINGS.replace("$CLAUDE_PROJECT_DIR/.claude/hooks", settings_hook_dir);
+    let settings_src = hook_settings(settings_hook_dir);
     let settings = base.join("settings.json");
     match fs::read_to_string(&settings) {
         Ok(existing) => match merge_hooks_into(&existing, &settings_src) {
@@ -877,14 +943,41 @@ mod tests {
             .contains("marrow:begin"));
 
         let settings = fs::read_to_string(base.join("settings.json")).unwrap();
-        assert!(settings.contains(&format!("{hook_dir}/marrow-bootstrap.sh")));
         assert!(!settings.contains("$CLAUDE_PROJECT_DIR"));
+
+        // Assert on the parsed command, not the file text: the serialized JSON escapes the quotes
+        // around a Windows `bash "..."` command, so searching the raw text for them cannot match.
+        let doc: serde_json::Value =
+            serde_json::from_str(&settings).expect("settings is valid JSON");
+        let command = doc["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+            .as_str()
+            .expect("SessionStart hook has a command")
+            .to_string();
+        let bootstrap = format!("{hook_dir}/marrow-bootstrap.sh").replace('\\', "/");
+        assert!(
+            command.contains(&bootstrap),
+            "command {command} did not point at {bootstrap}"
+        );
+        if cfg!(windows) {
+            assert_eq!(
+                command,
+                format!("bash \"{bootstrap}\""),
+                "windows must invoke the hook through bash"
+            );
+        } else {
+            assert_eq!(command, bootstrap);
+        }
     }
 
     #[test]
     fn integration_commands_have_a_hard_deadline() {
-        let mut quick = Command::new("sh");
-        quick.args(["-c", "exit 0"]);
+        let (shell, flag) = if cfg!(windows) {
+            ("cmd", "/C")
+        } else {
+            ("sh", "-c")
+        };
+        let mut quick = Command::new(shell);
+        quick.args([flag, "exit 0"]);
         assert!(
             command_status_with_timeout(&mut quick, Duration::from_secs(1))
                 .unwrap()
@@ -892,8 +985,15 @@ mod tests {
                 .success()
         );
 
-        let mut stuck = Command::new("sh");
-        stuck.args(["-c", "sleep 2"]);
+        let mut stuck = Command::new(shell);
+        stuck.args([
+            flag,
+            if cfg!(windows) {
+                "timeout 2"
+            } else {
+                "sleep 2"
+            },
+        ]);
         assert!(
             command_status_with_timeout(&mut stuck, Duration::from_millis(30))
                 .unwrap()
