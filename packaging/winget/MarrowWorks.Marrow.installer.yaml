@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+PackageIdentifier: MarrowWorks.Marrow
+PackageVersion: 0.7.3
+InstallerType: zip
+NestedInstallerType: portable
+NestedInstallerFiles:
+  - RelativeFilePath: marrow-v0.7.3-x86_64-pc-windows-msvc\marrow.exe
+    PortableCommandAlias: marrow
+  - RelativeFilePath: marrow-v0.7.3-x86_64-pc-windows-msvc\marrow-mcp.exe
+    PortableCommandAlias: marrow-mcp
+  - RelativeFilePath: marrow-v0.7.3-x86_64-pc-windows-msvc\marrow-serve.exe
+    PortableCommandAlias: marrow-serve
+  - RelativeFilePath: marrow-v0.7.3-x86_64-pc-windows-msvc\marrow-server.exe
+    PortableCommandAlias: marrow-server
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/aryawidjaja/marrow/releases/download/v0.7.3/marrow-v0.7.3-x86_64-pc-windows-msvc.zip
+    InstallerSha256: 072040EACD8D871AA76DF9486BA1DF36A70751811D4BC5593DC4C92DC870BC7B
+ReleaseDate: 2026-08-08
+ManifestType: installer
+ManifestVersion: 1.6.0

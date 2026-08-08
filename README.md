@@ -195,7 +195,11 @@ This puts `marrow`, `marrow-mcp`, `marrow-serve`, and the cross-device `marrow-s
 
 ### Windows
 
-With [Scoop](https://scoop.sh):
+```powershell
+winget install MarrowWorks.Marrow
+```
+
+With [Scoop](https://scoop.sh) instead:
 ```powershell
 scoop install https://github.com/aryawidjaja/marrow/releases/latest/download/marrow.json
 ```

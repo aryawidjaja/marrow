@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+PackageIdentifier: MarrowWorks.Marrow
+PackageVersion: 0.7.3
+PackageLocale: en-US
+Publisher: Marrow Works
+PublisherUrl: https://www.marrow.works
+PublisherSupportUrl: https://github.com/aryawidjaja/marrow/issues
+Author: Mutaqin Aryawijaya
+PackageName: Marrow
+PackageUrl: https://github.com/aryawidjaja/marrow
+License: AGPL-3.0-only
+LicenseUrl: https://github.com/aryawidjaja/marrow/blob/main/LICENSE
+Copyright: Copyright (c) Marrow Works
+ShortDescription: Shared memory for parallel AI coding agents.
+Description: Marrow gives every AI coding agent on your machine one brain to write to. Memory survives the end of a session, recall returns linked neighbours rather than only exact matches, and live sessions coordinate through rooms and file claims so two agents never edit the same file at once. It runs locally, stores everything in plain files, and speaks the Model Context Protocol so it works under Claude Code, Codex and Cursor.
+Moniker: marrow
+Tags:
+  - agents
+  - ai
+  - claude
+  - cli
+  - context
+  - developer-tools
+  - mcp
+  - memory
+ReleaseNotesUrl: https://github.com/aryawidjaja/marrow/releases/tag/v0.7.3
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0
