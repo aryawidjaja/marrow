@@ -193,6 +193,21 @@ cargo install --git https://github.com/aryawidjaja/marrow marrow-cli marrow-mcp 
 ```
 This puts `marrow`, `marrow-mcp`, `marrow-serve`, and the cross-device `marrow-server` on your PATH.
 
+**Windows.** Grab `marrow-<version>-x86_64-pc-windows-msvc.tar.gz` from
+[Releases](https://github.com/aryawidjaja/marrow/releases/latest), or build it with the `cargo
+install` line above. The memory, the CLI, the MCP server and the dashboard all work.
+
+The hooks are shell scripts, so `marrow setup` points them at `bash` and they need
+[Git for Windows](https://git-scm.com/download/win) plus [jq](https://jqlang.github.io/jq/):
+
+```powershell
+winget install Git.Git jqlang.jq
+```
+
+Without those two, Marrow still stores and recalls memory, but warm starts, collision checks and
+activity capture stay off, and `marrow setup` tells you so. If you would rather not install them,
+run Marrow inside WSL2 and everything behaves as it does on Linux.
+
 ## Bringing in an existing project
 
 A fresh brain starts empty. To seed it from docs you already have, the first warm start nudges your
