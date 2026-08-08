@@ -196,17 +196,12 @@ This puts `marrow`, `marrow-mcp`, `marrow-serve`, and the cross-device `marrow-s
 ### Windows
 
 ```powershell
-winget install MarrowWorks.Marrow
+irm https://raw.githubusercontent.com/aryawidjaja/marrow/main/install.ps1 | iex
 ```
 
-With [Scoop](https://scoop.sh) instead:
+Or with [Scoop](https://scoop.sh):
 ```powershell
 scoop install https://github.com/aryawidjaja/marrow/releases/latest/download/marrow.json
-```
-
-Or without a package manager:
-```powershell
-irm https://raw.githubusercontent.com/aryawidjaja/marrow/main/install.ps1 | iex
 ```
 
 Either way you get `marrow`, `marrow-mcp`, `marrow-serve` and `marrow-server`, no admin rights, no
