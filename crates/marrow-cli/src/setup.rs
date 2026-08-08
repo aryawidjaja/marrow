@@ -119,11 +119,12 @@ fn which(bin: &str) -> bool {
 /// scripts for every platform instead of a parallel PowerShell copy to maintain, at the cost of
 /// requiring Git Bash on Windows, which `setup` reports when it is missing.
 fn hook_settings(hook_dir: &str) -> String {
-    let filled = SETTINGS.replace("$CLAUDE_PROJECT_DIR/.claude/hooks", hook_dir);
-    if !cfg!(windows) {
-        return filled;
-    }
-    let Ok(mut doc) = serde_json::from_str::<serde_json::Value>(&filled) else {
+    // Substitute into JSON *values*, never into the JSON text. A Windows path carries backslashes,
+    // and `C:\Users\...` spliced into a JSON string is an invalid escape, so the document stopped
+    // parsing and setup registered no hooks at all while still reporting success.
+    let dir = hook_dir.replace('\\', "/");
+    let filled = SETTINGS.replace("$CLAUDE_PROJECT_DIR/.claude/hooks", &dir);
+    let Ok(mut doc) = serde_json::from_str::<serde_json::Value>(SETTINGS) else {
         return filled;
     };
     let groups = doc
@@ -140,8 +141,14 @@ fn hook_settings(hook_dir: &str) -> String {
                 .flatten()
             {
                 if let Some(cmd) = hook.get("command").and_then(|c| c.as_str()) {
-                    let wrapped = format!("bash \"{}\"", cmd.replace('\\', "/"));
-                    hook["command"] = serde_json::Value::String(wrapped);
+                    let path = cmd.replace("$CLAUDE_PROJECT_DIR/.claude/hooks", &dir);
+                    // Windows cannot execute a .sh by path, so hand it to bash.
+                    let value = if cfg!(windows) {
+                        format!("bash \"{path}\"")
+                    } else {
+                        path
+                    };
+                    hook["command"] = serde_json::Value::String(value);
                 }
             }
         }
