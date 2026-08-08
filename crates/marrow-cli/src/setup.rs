@@ -943,19 +943,30 @@ mod tests {
             .contains("marrow:begin"));
 
         let settings = fs::read_to_string(base.join("settings.json")).unwrap();
-        // Windows hands the script to bash, so the command is wrapped and the path is slashed.
+        assert!(!settings.contains("$CLAUDE_PROJECT_DIR"));
+
+        // Assert on the parsed command, not the file text: the serialized JSON escapes the quotes
+        // around a Windows `bash "..."` command, so searching the raw text for them cannot match.
+        let doc: serde_json::Value =
+            serde_json::from_str(&settings).expect("settings is valid JSON");
+        let command = doc["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+            .as_str()
+            .expect("SessionStart hook has a command")
+            .to_string();
         let bootstrap = format!("{hook_dir}/marrow-bootstrap.sh").replace('\\', "/");
         assert!(
-            settings.contains(&bootstrap),
-            "settings did not mention {bootstrap}"
+            command.contains(&bootstrap),
+            "command {command} did not point at {bootstrap}"
         );
         if cfg!(windows) {
-            assert!(
-                settings.contains("bash \""),
+            assert_eq!(
+                command,
+                format!("bash \"{bootstrap}\""),
                 "windows must invoke the hook through bash"
             );
+        } else {
+            assert_eq!(command, bootstrap);
         }
-        assert!(!settings.contains("$CLAUDE_PROJECT_DIR"));
     }
 
     #[test]
