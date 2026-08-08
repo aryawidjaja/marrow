@@ -73,10 +73,15 @@ with bootstrap intervals and a permutation test over 6 runs per cell. There is m
 
 ## Get started in 3 steps
 
-**1. Install** (macOS / Linux; other options below):
+**1. Install.** macOS and Linux:
 ```bash
 brew install aryawidjaja/marrow/marrow
 ```
+Windows, from PowerShell:
+```powershell
+irm marrow.works/install.ps1 | iex
+```
+More ways to install, including the no-terminal Claude Desktop bundle, are [further down](#more-install-options).
 
 **2. Set it up** from your project's root:
 ```bash
