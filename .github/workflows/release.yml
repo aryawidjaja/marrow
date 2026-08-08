@@ -44,6 +44,7 @@ jobs:
             target: x86_64-apple-darwin
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            features: embed-fastembed
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -52,7 +53,7 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       - name: Build binaries
-        run: cargo build --release --target ${{ matrix.target }} --bin marrow --bin marrow-mcp --bin marrow-serve --bin marrow-server
+        run: cargo build --release --target ${{ matrix.target }} ${{ matrix.features && format('--features {0}', matrix.features) || '' }} --bin marrow --bin marrow-mcp --bin marrow-serve --bin marrow-server
       - name: Package
         shell: bash
         run: |

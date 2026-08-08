@@ -38,6 +38,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --workspace --bins
       - run: cargo test --workspace
+      # The Windows release ships the semantic build, so prove it compiles here rather than
+      # discovering it during a release. ONNX Runtime arrives through fastembed.
+      - run: cargo build -p marrow-cli -p marrow-mcp --features embed-fastembed
 
   dependency-audit:
     runs-on: ubuntu-latest
