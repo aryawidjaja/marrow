@@ -644,6 +644,8 @@ const REPO_URL: &str = "https://github.com/aryawidjaja/marrow";
 
 /// Decide how marrow was installed, so `marrow upgrade` runs the right updater.
 fn detect_method(exe: &str, brew_semantic: bool, brew_keyword: bool) -> &'static str {
+    // Windows paths arrive with backslashes, which would match neither marker.
+    let exe = exe.replace('\\', "/");
     if brew_semantic {
         "brew-semantic"
     } else if brew_keyword {
@@ -893,6 +895,10 @@ mod tests {
             detect_method("/opt/homebrew/bin/marrow", false, true),
             "brew-keyword"
         );
+        assert_eq!(
+            detect_method("C:\\Users\\x\\.cargo\\bin\\marrow.exe", false, false),
+            "cargo"
+        );
         // brew takes precedence over a path hint.
         assert_eq!(
             detect_method("/Users/x/.cargo/bin/marrow", true, false),
@@ -985,15 +991,16 @@ mod tests {
                 .success()
         );
 
-        let mut stuck = Command::new(shell);
-        stuck.args([
-            flag,
-            if cfg!(windows) {
-                "timeout 2"
-            } else {
-                "sleep 2"
-            },
-        ]);
+        // `timeout` exits immediately when stdin is redirected, so it proves nothing here.
+        let mut stuck = if cfg!(windows) {
+            let mut c = Command::new("ping");
+            c.args(["-n", "3", "127.0.0.1"]);
+            c
+        } else {
+            let mut c = Command::new("sh");
+            c.args(["-c", "sleep 2"]);
+            c
+        };
         assert!(
             command_status_with_timeout(&mut stuck, Duration::from_millis(30))
                 .unwrap()
