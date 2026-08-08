@@ -195,16 +195,22 @@ This puts `marrow`, `marrow-mcp`, `marrow-serve`, and the cross-device `marrow-s
 
 ### Windows
 
-**No terminal at all:** download `marrow-mcp.mcpb` from
-[Releases](https://github.com/aryawidjaja/marrow/releases/latest) and double-click it. Claude Desktop
-installs it, asks which project to remember, and you are done. Same bundle Mac and Linux use.
+With [Scoop](https://scoop.sh):
+```powershell
+scoop install https://github.com/aryawidjaja/marrow/releases/latest/download/marrow.json
+```
 
-**If you want the CLI and the dashboard too**, from PowerShell:
+Or without a package manager:
 ```powershell
 irm https://raw.githubusercontent.com/aryawidjaja/marrow/main/install.ps1 | iex
 ```
-No admin rights, no Rust. It lands in `%LOCALAPPDATA%\Programs\marrow`, goes on your PATH, and comes
-with semantic search already built in.
+
+Either way you get `marrow`, `marrow-mcp`, `marrow-serve` and `marrow-server`, no admin rights, no
+Rust, semantic search already built in.
+
+**Just want it in Claude Desktop?** Download `marrow-mcp.mcpb` from
+[Releases](https://github.com/aryawidjaja/marrow/releases/latest) and double-click. No terminal at
+all: it asks which project to remember and that is the whole setup.
 
 The hooks that warm-start sessions and stop two agents editing the same file are shell scripts, so
 they need [Git for Windows](https://git-scm.com/download/win) and [jq](https://jqlang.github.io/jq/).

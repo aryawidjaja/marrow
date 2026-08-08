@@ -21,6 +21,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
       - run: ./e2e/smoke.sh
+      - run: ./scripts/build-mcpb.sh 0.0.0-ci && git checkout server.json
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

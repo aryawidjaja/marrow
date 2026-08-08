@@ -72,6 +72,10 @@ jobs:
           else
             shasum -a 256 "$dist.tar.gz" > "$dist.tar.gz.sha256"
           fi
+          if [ -n "$ext" ]; then
+            7z a -tzip "$dist.zip" "$dist" > /dev/null
+            sha256sum "$dist.zip" > "$dist.zip.sha256"
+          fi
       - name: Attest release archive
         uses: actions/attest-build-provenance@v2
         with:
@@ -81,6 +85,8 @@ jobs:
           files: |
             *.tar.gz
             *.tar.gz.sha256
+            *.zip
+            *.zip.sha256
           generate_release_notes: true
 
   # One installable bundle for clients that will not build from source. Runs
@@ -151,6 +157,46 @@ jobs:
   # Auto-bump the Homebrew tap formula to the new tag (no manual SHA editing).
   # Requires a repo secret HOMEBREW_TAP_TOKEN: a fine-grained PAT with Contents: Read+Write
   # on aryawidjaja/homebrew-marrow.
+  scoop:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          asset="marrow-${tag}-x86_64-pc-windows-msvc.zip"
+          gh release download "$tag" --repo "${{ github.repository }}" --pattern "$asset"
+          hash="$(sha256sum "$asset" | cut -d' ' -f1)"
+          cat > marrow.json <<JSON
+          {
+            "version": "$version",
+            "description": "Shared memory for parallel AI coding agents. Local, free, with rooms and file claims.",
+            "homepage": "https://www.marrow.works",
+            "license": "AGPL-3.0-only",
+            "architecture": {
+              "64bit": {
+                "url": "https://github.com/${{ github.repository }}/releases/download/$tag/$asset",
+                "hash": "$hash"
+              }
+            },
+            "extract_dir": "marrow-$tag-x86_64-pc-windows-msvc",
+            "bin": ["marrow.exe", "marrow-mcp.exe", "marrow-serve.exe", "marrow-server.exe"],
+            "checkver": "github",
+            "autoupdate": {
+              "architecture": {
+                "64bit": {
+                  "url": "https://github.com/${{ github.repository }}/releases/download/v\$version/marrow-v\$version-x86_64-pc-windows-msvc.zip"
+                }
+              },
+              "extract_dir": "marrow-v\$version-x86_64-pc-windows-msvc"
+            }
+          }
+          JSON
+          python3 -c "import json;json.load(open('marrow.json'))"
+          gh release upload "$tag" marrow.json --repo "${{ github.repository }}" --clobber
+
   homebrew:
     needs: build
     runs-on: ubuntu-latest
