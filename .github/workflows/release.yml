@@ -77,7 +77,7 @@ jobs:
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: "*.tar.gz"
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: |
             *.tar.gz
@@ -134,7 +134,7 @@ jobs:
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: dist/mcpb/marrow-mcp.mcpb
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: |
             dist/mcpb/marrow-mcp.mcpb
@@ -197,7 +197,7 @@ jobs:
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: "python/marrow-anthropic/dist/*"
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: python/marrow-anthropic/dist/*
 
