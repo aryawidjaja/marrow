@@ -62,9 +62,11 @@ if [[ -n "$BIN_DIR" ]]; then
       [[ -f "$dll" ]] && cp "$dll" "$STAGE/server/"
     done
     PLATFORMS='["darwin", "linux", "win32"]'
+    # No backslash before $: this is substituted into the heredoc after its escapes are processed,
+    # so a `\$` here would survive into the JSON and make it invalid.
     WIN_OVERRIDE=',
         "win32": {
-          "command": "\${__dirname}/server/marrow-mcp-win32.exe"
+          "command": "${__dirname}/server/marrow-mcp-win32.exe"
         }'
     say "included the Windows binary"
   else
