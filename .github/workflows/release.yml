@@ -106,6 +106,12 @@ jobs:
             mkdir -p "bins/${target}"
             cp "marrow-${tag}-${target}/marrow-mcp" "bins/${target}/marrow-mcp"
           done
+          win=x86_64-pc-windows-msvc
+          tar xzf "marrow-${tag}-${win}.tar.gz"
+          mkdir -p "bins/${win}"
+          cp "marrow-${tag}-${win}/marrow-mcp.exe" "bins/${win}/marrow-mcp.exe"
+          # Carry any native library the Windows build links at runtime.
+          cp "marrow-${tag}-${win}/"*.dll "bins/${win}/" 2>/dev/null || true
       - name: Build the bundle
         run: ./scripts/build-mcpb.sh "${GITHUB_REF_NAME}" bins
       - name: Verify it starts and lists tools
@@ -119,6 +125,11 @@ jobs:
             '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
             | ./server/marrow-mcp-darwin --root ./proj > out.jsonl
           grep -q '"name":"mem_recall"' out.jsonl || { echo "bundle did not list tools"; cat out.jsonl; exit 1; }
+      - name: Upload the bundle for the Windows check
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcpb-bundle
+          path: dist/mcpb/marrow-mcp.mcpb
       - name: Attest the bundle
         uses: actions/attest-build-provenance@v2
         with:
@@ -189,3 +200,25 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: python/marrow-anthropic/dist/*
+
+  mcpb-windows:
+    # Prove the bundled Windows binary actually starts on Windows. The macOS check above cannot
+    # see a missing DLL or a bad platform override, which is exactly how a bundle ends up working
+    # everywhere except the platform it was added for.
+    needs: mcpb
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mcpb-bundle
+      - name: Start it and list tools
+        shell: bash
+        run: |
+          mkdir -p verify/proj && cd verify
+          unzip -oq ../marrow-mcp.mcpb
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' \
+            '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+            | ./server/marrow-mcp-win32.exe --root ./proj > out.jsonl
+          grep -q '"name":"mem_recall"' out.jsonl || { echo "windows bundle did not list tools"; cat out.jsonl; exit 1; }

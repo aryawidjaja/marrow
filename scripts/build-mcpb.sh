@@ -28,6 +28,7 @@ BUNDLE="$OUT/marrow-mcp.mcpb"
 
 rm -rf "$OUT"
 mkdir -p "$STAGE/server"
+WIN_OVERRIDE=""
 
 say() { printf '\033[1m›\033[0m %s\n' "$*"; }
 
@@ -48,6 +49,27 @@ if [[ -n "$BIN_DIR" ]]; then
   lipo -create "$arm" "$intel" -output "$STAGE/server/marrow-mcp-darwin"
   cp "$linux" "$STAGE/server/marrow-mcp-linux"
   PLATFORMS='["darwin", "linux"]'
+
+  # Windows is optional so a local build without it still produces a bundle. A release that
+  # quietly dropped it, though, leaves Windows users with no double-click install at all, which
+  # is the whole point of this bundle.
+  win="$BIN_DIR/x86_64-pc-windows-msvc/marrow-mcp.exe"
+  if [[ -f "$win" ]]; then
+    cp "$win" "$STAGE/server/marrow-mcp-win32.exe"
+    # Any native library sitting beside it, such as ONNX Runtime for the semantic build, has to
+    # ride along or the bundle runs on the machine that built it and nowhere else.
+    for dll in "$BIN_DIR/x86_64-pc-windows-msvc/"*.dll; do
+      [[ -f "$dll" ]] && cp "$dll" "$STAGE/server/"
+    done
+    PLATFORMS='["darwin", "linux", "win32"]'
+    WIN_OVERRIDE=',
+        "win32": {
+          "command": "\${__dirname}/server/marrow-mcp-win32.exe"
+        }'
+    say "included the Windows binary"
+  else
+    say "no Windows binary at $win — this bundle will not offer win32"
+  fi
 else
   say "no binary dir given — building for the host only (local validation)"
   cargo build --release --bin marrow-mcp --manifest-path "$ROOT/Cargo.toml"
@@ -95,7 +117,7 @@ cat > "$STAGE/manifest.json" <<JSON
       "platform_overrides": {
         "darwin": {
           "command": "\${__dirname}/server/marrow-mcp-darwin"
-        }
+        }$WIN_OVERRIDE
       }
     }
   },

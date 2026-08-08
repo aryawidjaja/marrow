@@ -193,21 +193,27 @@ cargo install --git https://github.com/aryawidjaja/marrow marrow-cli marrow-mcp 
 ```
 This puts `marrow`, `marrow-mcp`, `marrow-serve`, and the cross-device `marrow-server` on your PATH.
 
-**Windows**, in one line from PowerShell:
+### Windows
+
+**No terminal at all:** download `marrow-mcp.mcpb` from
+[Releases](https://github.com/aryawidjaja/marrow/releases/latest) and double-click it. Claude Desktop
+installs it, asks which project to remember, and you are done. Same bundle Mac and Linux use.
+
+**If you want the CLI and the dashboard too**, from PowerShell:
 ```powershell
 irm https://raw.githubusercontent.com/aryawidjaja/marrow/main/install.ps1 | iex
 ```
-No admin rights, no Rust. It installs into `%LOCALAPPDATA%\Programs\marrow`, puts that on your PATH,
-and ships with semantic search already built in.
+No admin rights, no Rust. It lands in `%LOCALAPPDATA%\Programs\marrow`, goes on your PATH, and comes
+with semantic search already built in.
 
-The hooks are shell scripts, so they need [Git for Windows](https://git-scm.com/download/win) and
-[jq](https://jqlang.github.io/jq/). The installer tells you if either is missing:
+The hooks that warm-start sessions and stop two agents editing the same file are shell scripts, so
+they need [Git for Windows](https://git-scm.com/download/win) and [jq](https://jqlang.github.io/jq/).
+The installer says so if either is missing:
 ```powershell
 winget install Git.Git jqlang.jq
 ```
-Without them Marrow still stores and recalls memory, but warm starts, collision checks and activity
-capture stay off. Prefer WSL2? Install the Linux way inside it and everything behaves as it does on
-Linux.
+Without them memory still works; the automatic coordination stays off. Prefer WSL2? Install the Linux
+way inside it and everything behaves exactly as it does on Linux.
 
 ## Bringing in an existing project
 
