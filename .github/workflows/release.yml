@@ -42,6 +42,8 @@ jobs:
             target: aarch64-apple-darwin
           - os: macos-latest
             target: x86_64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -56,7 +58,12 @@ jobs:
         run: |
           dist="marrow-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir "$dist"
-          cp target/${{ matrix.target }}/release/marrow target/${{ matrix.target }}/release/marrow-mcp target/${{ matrix.target }}/release/marrow-serve target/${{ matrix.target }}/release/marrow-server "$dist"/
+          # Windows binaries carry .exe; every other target does not.
+          ext=""
+          case "${{ matrix.target }}" in *windows*) ext=".exe" ;; esac
+          for bin in marrow marrow-mcp marrow-serve marrow-server; do
+            cp "target/${{ matrix.target }}/release/$bin$ext" "$dist"/
+          done
           cp README.md llms.txt LICENSE LICENSE-APACHE COMMERCIAL.md SECURITY.md "$dist"/
           cp -R assets "$dist"/
           tar czf "$dist.tar.gz" "$dist"
