@@ -1,7 +1,7 @@
 #!/bin/sh
 # Install Marrow's prebuilt binaries — no Rust toolchain required.
 #
-#   curl -fsSL https://raw.githubusercontent.com/aryawidjaja/marrow/main/install.sh | sh
+#   curl -fsSL marrow.works/install.sh | sh
 #
 # Installs `marrow`, `marrow-mcp`, `marrow-serve`, and `marrow-server` into ~/.local/bin
 # (override the destination with MARROW_BIN_DIR, or the version with MARROW_VERSION).

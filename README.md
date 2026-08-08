@@ -185,7 +185,7 @@ source tree, so they remain local-only.
 
 Prebuilt binaries, no Rust:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/aryawidjaja/marrow/main/install.sh | sh
+curl -fsSL marrow.works/install.sh | sh
 ```
 From source:
 ```bash
@@ -196,7 +196,7 @@ This puts `marrow`, `marrow-mcp`, `marrow-serve`, and the cross-device `marrow-s
 ### Windows
 
 ```powershell
-irm https://raw.githubusercontent.com/aryawidjaja/marrow/main/install.ps1 | iex
+irm marrow.works/install.ps1 | iex
 ```
 
 Or with [Scoop](https://scoop.sh):

@@ -1,6 +1,6 @@
 # Install Marrow's prebuilt binaries on Windows — no Rust toolchain required.
 #
-#   irm https://raw.githubusercontent.com/aryawidjaja/marrow/main/install.ps1 | iex
+#   irm marrow.works/install.ps1 | iex
 #
 # Installs marrow, marrow-mcp, marrow-serve and marrow-server into
 # %LOCALAPPDATA%\Programs\marrow and puts that on your PATH. No admin rights needed.
