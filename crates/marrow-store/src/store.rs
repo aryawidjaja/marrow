@@ -231,6 +231,14 @@ impl Store {
             .map_err(|e| Error::Io(e.to_string()))
     }
 
+    /// The newest `limit` events, oldest first, without reading the whole ledger.
+    pub fn tail(&self, limit: usize) -> Result<Vec<Event>, Error> {
+        self.episodic
+            .borrow()
+            .tail(limit)
+            .map_err(|e| Error::Io(e.to_string()))
+    }
+
     /// Verify the audit chain. `Ok(())` if intact, else the `seq` of the first broken entry.
     pub fn verify_log(&self) -> Result<(), u64> {
         self.episodic.borrow().verify()

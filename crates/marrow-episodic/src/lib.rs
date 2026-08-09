@@ -112,9 +112,8 @@ impl EpisodicLog {
     pub fn append(&mut self, ev: NewEvent) -> Result<Event, Error> {
         let lock = self.lock(true)?;
 
-        // Re-read the true tip under the lock — another process may have appended since we opened.
-        let (last_seq, last_hash) = match read_events_raw(&self.path)?.last() {
-            Some(e) => (e.seq, e.content_hash.clone()),
+        let (last_seq, last_hash) = match read_tip(&self.path)? {
+            Some(e) => (e.seq, e.content_hash),
             None => (0, String::new()),
         };
         let seq = last_seq + 1;
@@ -180,6 +179,18 @@ impl EpisodicLog {
             .collect())
     }
 
+    /// The newest `limit` events, oldest first. Reads backward from EOF instead of parsing the
+    /// whole ledger.
+    pub fn tail(&self, limit: usize) -> Result<Vec<Event>, Error> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let lock = self.lock(false)?;
+        let out = read_tail(&self.path, limit);
+        FileExt::unlock(&lock).ok();
+        out
+    }
+
     /// Verify the chain. `Ok(())` if intact, else the `seq` of the first broken entry.
     pub fn verify(&self) -> Result<(), u64> {
         let events = self.read_all().map_err(|_| 0u64)?;
@@ -231,6 +242,73 @@ fn content_hash(seq: u64, ts: &str, ev: &NewEvent) -> String {
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
     hex::encode(hasher.finalize())
+}
+
+/// Size of each backward read when scanning from EOF.
+const TAIL_CHUNK: usize = 64 * 1024;
+
+/// Collect complete lines from the end of `path`, newest first, until `want` are found or the file
+/// is exhausted. Returns them in file order.
+fn read_lines_from_end(path: &Path, want: usize) -> Result<Vec<String>, Error> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let mut file = match File::open(path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e.into()),
+    };
+    let mut pos = file.seek(SeekFrom::End(0))?;
+    let mut pending: Vec<u8> = Vec::new();
+    let mut lines: Vec<String> = Vec::new();
+
+    while pos > 0 && lines.len() < want {
+        let step = TAIL_CHUNK.min(pos as usize);
+        pos -= step as u64;
+        file.seek(SeekFrom::Start(pos))?;
+        let mut buf = vec![0u8; step];
+        file.read_exact(&mut buf)?;
+        buf.extend_from_slice(&pending);
+
+        let mut cut = buf.len();
+        while lines.len() < want {
+            match buf[..cut].iter().rposition(|&b| b == b'\n') {
+                Some(nl) => {
+                    let line = String::from_utf8_lossy(&buf[nl + 1..cut]).into_owned();
+                    if !line.trim().is_empty() {
+                        lines.push(line);
+                    }
+                    cut = nl;
+                }
+                None => break,
+            }
+        }
+        pending = buf[..cut].to_vec();
+    }
+    if pos == 0 && lines.len() < want {
+        let line = String::from_utf8_lossy(&pending).into_owned();
+        if !line.trim().is_empty() {
+            lines.push(line);
+        }
+    }
+    lines.reverse();
+    Ok(lines)
+}
+
+/// The last recorded event, or `None` for an empty ledger.
+fn read_tip(path: &Path) -> Result<Option<Event>, Error> {
+    let Some(line) = read_lines_from_end(path, 1)?.pop() else {
+        return Ok(None);
+    };
+    serde_json::from_str(&line)
+        .map(Some)
+        .map_err(|e| Error::Parse(e.to_string()))
+}
+
+fn read_tail(path: &Path, limit: usize) -> Result<Vec<Event>, Error> {
+    read_lines_from_end(path, limit)?
+        .iter()
+        .map(|l| serde_json::from_str(l).map_err(|e| Error::Parse(e.to_string())))
+        .collect()
 }
 
 fn read_events_raw(path: &Path) -> Result<Vec<Event>, Error> {
@@ -364,6 +442,46 @@ mod tests {
         assert_eq!(seqs, (1..=(writers * per) as u64).collect::<Vec<_>>());
 
         // And the hash chain is intact.
+        assert_eq!(log.verify(), Ok(()));
+    }
+
+    #[test]
+    fn tail_matches_the_end_of_read_all() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut log = EpisodicLog::open(dir.path()).unwrap();
+        assert!(log.tail(5).unwrap().is_empty(), "empty ledger");
+
+        for i in 0..250 {
+            let mut ev = NewEvent::new("progress", "agent", &format!("event {i}"));
+            ev.data = serde_json::json!({ "pad": "x".repeat(600) });
+            log.append(ev).unwrap();
+        }
+        let all = log.read_all().unwrap();
+
+        for n in [1usize, 3, 40, 250, 400] {
+            let want: Vec<u64> = all.iter().rev().take(n).rev().map(|e| e.seq).collect();
+            let got: Vec<u64> = log.tail(n).unwrap().iter().map(|e| e.seq).collect();
+            assert_eq!(got, want, "tail({n}) must match the end of read_all");
+        }
+        assert!(log.tail(0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn append_does_not_read_the_whole_ledger() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut log = EpisodicLog::open(dir.path()).unwrap();
+        let mut ev = NewEvent::new("write", "agent", "seed");
+        ev.data = serde_json::json!({ "pad": "y".repeat(2000) });
+        for _ in 0..400 {
+            log.append(ev.clone()).unwrap();
+        }
+        // A ledger far larger than one backward chunk still chains correctly from a tip read.
+        let path = dir.path().join(".marrow/episodic/log.jsonl");
+        assert!(fs::metadata(&path).unwrap().len() > TAIL_CHUNK as u64);
+        let next = log
+            .append(NewEvent::new("write", "agent", "after"))
+            .unwrap();
+        assert_eq!(next.seq, 401);
         assert_eq!(log.verify(), Ok(()));
     }
 

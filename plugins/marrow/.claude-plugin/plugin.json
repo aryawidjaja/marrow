@@ -1,0 +1,13 @@
+{
+  "name": "marrow",
+  "description": "Shared memory and collision-avoidance for parallel Claude Code sessions. Warm-starts each session with what earlier ones learned, records what every agent does, and blocks two sessions editing the same file.",
+  "version": "0.8.0",
+  "author": {
+    "name": "Marrow Works",
+    "url": "https://www.marrow.works"
+  },
+  "homepage": "https://www.marrow.works",
+  "repository": "https://github.com/aryawidjaja/marrow",
+  "license": "AGPL-3.0-only",
+  "keywords": ["memory", "multi-agent", "coordination", "context", "mcp"]
+}

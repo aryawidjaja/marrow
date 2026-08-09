@@ -34,7 +34,7 @@ pub use associative::{ConnectedRecall, Neighbor};
 pub use backend::{BackendError, Ctx, MemoryBackend};
 pub use backend_local::LocalBackend;
 pub use channel::Message;
-pub use config::{Config, ResponseMode};
+pub use config::{default_provider, Config, ResponseMode};
 pub use consolidate::{
     Cluster, ClusterAction, ConsolidationOutcome, ConsolidationReport, Distiller,
     HeuristicDistiller, Verdict,

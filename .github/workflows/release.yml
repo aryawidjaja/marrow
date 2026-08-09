@@ -143,12 +143,32 @@ jobs:
           files: |
             dist/mcpb/marrow-mcp.mcpb
             dist/mcpb/marrow-mcp.mcpb.sha256
-      - name: server.json for the MCP registry
+      - name: Publish to the MCP registry
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Publish with: mcp-publisher login github && mcp-publisher publish" >> "$GITHUB_STEP_SUMMARY"
-          echo '```json' >> "$GITHUB_STEP_SUMMARY"
-          cat server.json >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_amd64.tar.gz" \
+            | tar xz mcp-publisher
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
+          {
+            echo "### Published to the MCP registry"
+            echo '```json'
+            cat server.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep server.json on main in step with the release
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git stash push -- server.json
+          git switch --detach origin/main
+          git checkout stash@{0} -- server.json
+          if ! git diff --quiet -- server.json; then
+            git commit -m "release: server.json for ${GITHUB_REF_NAME}" -- server.json
+            git push HEAD:main
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: server-json

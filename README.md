@@ -2,7 +2,7 @@
 
 <h1 align="center">marrow</h1>
 
-*One hive mind for your AI coding agents.*
+*Memory that keeps working after Claude's runs out — shared across your projects, machines and tools.*
 
 [![Release](https://img.shields.io/github/v/release/aryawidjaja/marrow?color=2ea44f&label=release)](https://github.com/aryawidjaja/marrow/releases/latest)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
@@ -15,37 +15,31 @@
 [![Cursor](https://img.shields.io/badge/Cursor-compatible-000000?logo=cursor&logoColor=white)](https://cursor.com)
 [![Codex](https://img.shields.io/badge/Codex-compatible-412991)](https://openai.com/codex)
 
-## What one agent learns, every agent already knows
+## Claude's memory stops at 25KB. This one doesn't.
 
-What one of your agents figures out at 2am, every other one already knows the next time it's asked.
-Nobody relays it by hand, nobody re-explains it. That's not how AI agents normally work: run more than
-one today and each starts blind, no idea what an earlier session already worked out, no idea another
-agent is touching the same file right now.
+Claude Code's built-in memory loads the first 200 lines of one file into every session. That is fine
+for a young project. A codebase two years old knows more than fits in 200 lines, and everything past
+the cut is simply dropped.
 
-Marrow fixes that. One hive: what one agent learns, every other already has.
+Marrow retrieves instead of loading. Ask a question and it returns the twenty memories that answer it,
+plus the ones linked to those, out of however many thousand you have.
 
-- A new session already has what the last one learned. No re-explaining what you already covered.
-- An agent doesn't have to ask if another one is already on this file, it already knows, before it
-  touches anything.
-- It extends across every project on your machine. Carrying it to a team's different devices is
-  Spinal Cloud, built on top.
-- Nothing here is a black box. Every memory lives in a file you can open, read, edit, or delete.
+**At 1,000 project facts that is 2.1× less context per turn (p = 0.002) and $0.50 a task instead of
+$0.90.** [Numbers and method below.](#does-it-actually-help-we-measured-it)
 
-Marrow is built for work that takes more than one agent, or more than one session.
+It also does three things the built-in memory does not:
 
-Marrow itself stays free forever, AGPL-3.0, self-hosted. If you want that same shared memory carried
-across a team's devices without running the relay yourself, that's
-[Spinal Cloud](https://spinal.cloud), the managed product built on top of Marrow: sign in, link a
-project, and every machine you approve reads and writes the same brain.
+- **One brain across projects.** Built-in memory is per repository. Marrow's hive lets an agent in
+  `api` recall what `webapp` knows.
+- **One brain across machines and teammates.** Built-in memory is explicitly machine-local. Marrow
+  syncs through a relay you run, or [Spinal Cloud](https://spinal.cloud) if you would rather not.
+- **One brain across tools.** Claude Code, Cursor and Codex read and write the same memory over MCP.
 
-## The Pluribus idea
+And because several agents share it, it also keeps them from colliding: a file another live session
+is editing is claimed, and every agent's actions land in one append-only, hash-chained record you can
+read.
 
-In *Pluribus*, Carol stays herself while Zosia connects her to a collective that can organize around
-what she needs. She does not disappear into the hive; the hive works for her.
-
-That is the feeling behind Marrow. Each agent stays its own session and keeps doing what it does best,
-but they share what matters and coordinate around the same work. You stay in control, and the memory
-stays in plain files on your machine.
+Free forever, AGPL-3.0, runs on your machine. Every memory is a markdown file you can open and delete.
 
 ## Does it actually help? We measured it
 
@@ -71,28 +65,53 @@ Method: same fixture repo and prompt each time, graded by running the code rathe
 with bootstrap intervals and a permutation test over 6 runs per cell. There is more on the numbers at
 [marrow.works](https://www.marrow.works/).
 
-## Get started in 3 steps
+## What about Claude Code's built-in memory?
 
-**1. Install.** macOS and Linux:
+Fair question, and the honest answer is that for a small project you may not need this.
+
+Claude Code ships auto memory: Claude writes notes to `~/.claude/projects/<project>/memory/`, and a
+`MEMORY.md` index is loaded into every session. It is on by default and it costs nothing. Use it and
+be happy until one of these starts to bite:
+
+|  | Built-in auto memory | Marrow |
+|---|---|---|
+| How memories reach the model | First 200 lines / 25KB of one index file, every session | Ranked retrieval: the matches, plus what they link to |
+| What happens when it outgrows that | Claude is told to delete entries | Nothing; retrieval just searches more |
+| Scope | One repository | Every project on the machine |
+| Across your machines | No — "files are not shared across machines" | Yes, via a relay you run or Spinal Cloud |
+| Across tools | Claude Code only | Claude Code, Cursor, Codex, any MCP client |
+| Shared with teammates | No | Yes |
+| Record of what agents did | No | Append-only, hash-chained, auditable |
+| Flags memory that code has outgrown | No | Yes, for anchored Rust symbols |
+
+The rule of thumb: **under a hundred facts, one repo, one machine, one tool — use the built-in.**
+Marrow starts paying for itself past that, and our own benchmark says so out loud
+([we lose at 10 facts](#does-it-actually-help-we-measured-it)).
+
+The two are not exclusive. Auto memory is Claude's private scratchpad; Marrow is the shared record.
+
+## Get started
+
+**Claude Code**, one command:
+```
+/plugin marketplace add aryawidjaja/marrow
+/plugin install marrow@marrow
+```
+Then install the binaries it drives (`brew install aryawidjaja/marrow/marrow`, or
+`irm marrow.works/install.ps1 | iex` on Windows) and restart.
+
+**Everything else** — Cursor, Codex, Claude Desktop, or if you would rather not use a plugin:
 ```bash
-brew install aryawidjaja/marrow/marrow
+brew install aryawidjaja/marrow/marrow    # macOS/Linux; Windows: irm marrow.works/install.ps1 | iex
+marrow setup                              # add --global to wire every repo at once
 ```
-Windows, from PowerShell:
-```powershell
-irm marrow.works/install.ps1 | iex
-```
-More ways to install, including the no-terminal Claude Desktop bundle, are [further down](#more-install-options).
+`marrow setup` seeds your brain with what it can work out about the repo on its own, so the first
+session is not empty, and reports anything still missing. Restart your agent afterwards. The hooks
+need `jq` and never block your work when Marrow is unavailable. Already mid-session? Run
+**`/marrow-save`** to keep what is worth carrying forward.
 
-**2. Set it up** from your project's root:
-```bash
-marrow setup          # add --global to wire every repo at once
-```
-
-**3. Check setup, then restart your agent.** `marrow setup` reports anything still missing. Claude
-Code sessions then start with relevant project memory, share activity, and use best-effort file claims
-to avoid local edit conflicts. The hooks need `jq` (`brew install jq` or `apt install jq`) and never
-block your work when Marrow is unavailable. Already mid-session? Run **`/marrow-save`** once to keep
-the decisions and discoveries worth carrying forward.
+Changed your mind? `marrow uninstall` puts everything back and keeps your memories. More ways to
+install, including the no-terminal Claude Desktop bundle, are [further down](#more-install-options).
 
 The memory lives in `.marrow/` in your project.
 
@@ -242,15 +261,15 @@ claude mcp add marrow -s user -- marrow-mcp --root .
 For one project, add the same server to `.mcp.json` (Claude Code), `.cursor/mcp.json` (Cursor), or your
 Codex TOML.
 
-## Smarter (semantic) search
+## Semantic search
 
-Search is keyword-based by default, instant and offline. For **meaning-based** recall (finding a note
-about "JWT" when you search "login security"), install a semantic build:
+Builds that ship with the local embedding model (the `marrow-semantic` formula, and the Windows and
+`install.sh` builds) use **meaning-based** recall by default, so a note about "JWT" is found by
+searching "login security". The plain `marrow` formula is keyword-only and smaller:
 ```bash
 brew install aryawidjaja/marrow/marrow-semantic   # multilingual, downloads a small model on first use
-marrow embed fastembed
 ```
-`marrow status` shows the mode; `marrow embed none` switches back. Semantic search also powers the
+`marrow status` shows the mode; `marrow embed none` switches back, `marrow embed fastembed` switches on. Semantic search also powers the
 "related meaning" links in the dashboard graph.
 
 ## CLI

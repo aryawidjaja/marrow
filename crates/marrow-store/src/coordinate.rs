@@ -332,10 +332,9 @@ impl Store {
 
     /// The most recent activity-stream events (newest first), capped at `limit`.
     pub fn activity(&self, limit: usize) -> Result<Vec<Event>, Error> {
-        let mut all = self.history()?;
-        all.reverse();
-        all.truncate(limit);
-        Ok(all)
+        let mut recent = self.tail(limit)?;
+        recent.reverse();
+        Ok(recent)
     }
 
     /// Warm-start a new session: announce it, then return what others are doing plus the
