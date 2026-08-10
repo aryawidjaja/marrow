@@ -158,6 +158,19 @@ pub enum Cmd {
         #[arg(long)]
         global: bool,
     },
+    /// Undo `marrow setup`: remove the hooks, settings entries, slash command, guidance blocks and
+    /// MCP registrations. Your memories in `.marrow/` are kept unless you pass --purge.
+    Uninstall {
+        /// Undo a `--global` setup (~/.claude) instead of this project's.
+        #[arg(long)]
+        global: bool,
+        /// Also delete `.marrow/` — every memory in this project. There is no undo.
+        #[arg(long)]
+        purge: bool,
+        /// Skip the confirmation prompt for --purge (for scripts and CI).
+        #[arg(long)]
+        yes: bool,
+    },
     /// List the project's existing knowledge docs and tell the agent how to seed memory from
     /// them — a one-time onboarding step for an existing repo.
     Ingest,
@@ -590,9 +603,14 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
                     store.embedding_provider()
                 )
                 .ok(),
+                _ if marrow_store::semantic_supported() => writeln!(
+                    out,
+                    "search: keyword — turn on semantic recall with `marrow embed fastembed`."
+                )
+                .ok(),
                 _ => writeln!(
                     out,
-                    "search: keyword — enable smarter semantic recall with `marrow embed fastembed` (see README)."
+                    "search: keyword — this build has no semantic support; install the marrow-semantic formula for meaning-based recall."
                 )
                 .ok(),
             };
@@ -977,6 +995,15 @@ pub fn run(cli: Cli, out: &mut impl Write) -> Result<(), String> {
             Ok(())
         }
         Cmd::Setup { global } => setup::run(&cli.root, global, out),
+        Cmd::Uninstall { global, purge, yes } => {
+            if purge && !yes {
+                return Err(
+                    "--purge deletes every memory in .marrow/ and cannot be undone; re-run with --yes to confirm"
+                        .into(),
+                );
+            }
+            setup::uninstall(&cli.root, global, purge, out)
+        }
         Cmd::Upgrade => setup::upgrade(out),
         Cmd::Ingest => {
             let docs = knowledge_docs(&cli.root);

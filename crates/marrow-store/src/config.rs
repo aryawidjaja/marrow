@@ -17,10 +17,21 @@ pub struct EmbeddingConfig {
     pub default_weight: f64,
 }
 
+/// The backend a fresh store starts on: the real semantic model when this build has it compiled
+/// in, otherwise keyword. Defaulting to `fastembed` in a binary without the feature would advertise
+/// semantic search that silently never runs.
+pub fn default_provider() -> &'static str {
+    if cfg!(feature = "embed-fastembed") {
+        "fastembed"
+    } else {
+        "none"
+    }
+}
+
 impl Default for EmbeddingConfig {
     fn default() -> Self {
         EmbeddingConfig {
-            provider: "none".to_string(),
+            provider: default_provider().to_string(),
             model: "bge-m3".to_string(),
             url: "http://localhost:8080/v1/embeddings".to_string(),
             dim: 256,

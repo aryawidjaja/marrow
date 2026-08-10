@@ -437,6 +437,7 @@ fn install(
     // 1) Make sure a project store exists (global setup has no single project; stores auto-create).
     if let Some(root) = init_root {
         let _ = marrow_store::Store::init(root);
+        seed_store(root, out);
     }
 
     // 2) Install the auto-capture hooks (with the binary location baked into their lookup).
@@ -530,6 +531,396 @@ fn install(
     let _ = fs::write(base.join(".marrow-version"), env!("CARGO_PKG_VERSION"));
 
     Ok(())
+}
+
+/// A fact Marrow can establish about a repo without an LLM.
+struct Seed {
+    topic: &'static str,
+    area: &'static str,
+    body: String,
+}
+
+/// Read what the repo states about itself: its stack, its commands, its own summary. This is
+/// deliberately not "distillation" — every fact here is copied from a manifest or a heading, so it
+/// cannot be wrong in the way a summary can.
+fn repo_seeds(root: &Path) -> Vec<Seed> {
+    let mut seeds = Vec::new();
+    let read = |name: &str| fs::read_to_string(root.join(name)).ok();
+
+    if let Some(readme) = read("README.md") {
+        let summary: String = readme
+            .lines()
+            .map(str::trim)
+            .filter(|l| {
+                !l.is_empty() && !l.starts_with('#') && !l.starts_with(['!', '[', '<', '|'])
+            })
+            .take(3)
+            .collect::<Vec<_>>()
+            .join(" ");
+        if summary.chars().count() > 40 {
+            seeds.push(Seed {
+                topic: "what-this-project-is",
+                area: "overview",
+                body: format!(
+                    "{}\n\nSeeded from README.md by `marrow setup`.",
+                    summary.chars().take(600).collect::<String>()
+                ),
+            });
+        }
+    }
+
+    let mut stack: Vec<&str> = Vec::new();
+    let mut commands: Vec<String> = Vec::new();
+    for (file, name) in [
+        ("Cargo.toml", "Rust (cargo)"),
+        ("package.json", "Node (npm/pnpm)"),
+        ("go.mod", "Go"),
+        ("pyproject.toml", "Python"),
+        ("Gemfile", "Ruby"),
+        ("pom.xml", "Java (maven)"),
+        ("build.gradle", "Java (gradle)"),
+    ] {
+        if root.join(file).exists() {
+            stack.push(name);
+        }
+    }
+    if root.join("Cargo.toml").exists() {
+        commands.push("cargo test".into());
+        commands.push("cargo clippy --all-targets".into());
+    }
+    if let Some(pkg) = read("package.json") {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&pkg) {
+            if let Some(scripts) = v.get("scripts").and_then(|s| s.as_object()) {
+                for key in ["test", "build", "lint", "dev"] {
+                    if scripts.contains_key(key) {
+                        commands.push(format!("npm run {key}"));
+                    }
+                }
+            }
+        }
+    }
+    if !stack.is_empty() {
+        seeds.push(Seed {
+            topic: "project-stack",
+            area: "overview",
+            body: format!(
+                "Detected from manifest files in the repo root: {}.\n\nSeeded by `marrow setup`.",
+                stack.join(", ")
+            ),
+        });
+    }
+    if !commands.is_empty() {
+        seeds.push(Seed {
+            topic: "build-and-test-commands",
+            area: "overview",
+            body: format!(
+                "{}\n\nSeeded by `marrow setup` from the repo's manifests; correct these if the project uses different ones.",
+                commands.iter().map(|c| format!("- `{c}`")).collect::<Vec<_>>().join("\n")
+            ),
+        });
+    }
+
+    let docs = marrow_store::knowledge_docs(root);
+    if docs.len() > 1 {
+        let listed = docs
+            .iter()
+            .take(12)
+            .map(|(p, _)| format!("- {p}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        seeds.push(Seed {
+            topic: "where-the-docs-are",
+            area: "overview",
+            body: format!(
+                "This repo's knowledge docs:\n{listed}\n\nRun `marrow ingest` (or ask an agent to seed marrow from these) to distill them into memory."
+            ),
+        });
+    }
+    seeds
+}
+
+/// Write the seed facts into a fresh store so the first session opens with something. Skips a store
+/// that already holds memories, so re-running setup never duplicates.
+fn seed_store(root: &Path, out: &mut impl Write) {
+    let Ok(store) = marrow_store::Store::open(root) else {
+        return;
+    };
+    if !store.list().map(|r| r.is_empty()).unwrap_or(false) {
+        return;
+    }
+    let seeds = repo_seeds(root);
+    if seeds.is_empty() {
+        return;
+    }
+    let mut written = 0;
+    for seed in &seeds {
+        let mut memory = marrow_memdocs::Memory {
+            frontmatter: marrow_memdocs::Frontmatter {
+                id: String::new(),
+                kind: marrow_memdocs::MemoryKind::Fact,
+                status: marrow_memdocs::Status::Active,
+                topic: Some(seed.topic.to_string()),
+                area: Some(seed.area.to_string()),
+                scope: marrow_memdocs::Scope {
+                    project_id: String::new(),
+                },
+                refs: vec![],
+                code_anchors: vec![],
+                confidence: 0.8,
+                decay: None,
+                provenance: marrow_memdocs::Provenance {
+                    written_by: "marrow-setup".into(),
+                    model: None,
+                    session_id: None,
+                    sources: vec!["repo manifests".into()],
+                },
+                supersedes: vec![],
+                tags: vec!["seed".into()],
+                created_at: String::new(),
+                updated_at: String::new(),
+                hmac: None,
+            },
+            body: seed.body.clone(),
+        };
+        if store.write(&mut memory).is_ok() {
+            written += 1;
+        }
+    }
+    if written > 0 {
+        writeln!(
+            out,
+            "  seeded      -> {written} starter memories from this repo (stack, commands, docs)"
+        )
+        .ok();
+    }
+}
+
+/// Reverse `install` + `register_mcp`. Idempotent. Keeps `.marrow/` unless `purge`.
+pub fn uninstall(
+    root: &Path,
+    global: bool,
+    purge: bool,
+    out: &mut impl Write,
+) -> Result<(), String> {
+    let (base, claude_md, label) = if global {
+        let base = home_dir()
+            .ok_or("could not determine home directory for --global")?
+            .join(".claude");
+        let claude_md = base.join("CLAUDE.md");
+        (base, claude_md, "~/.claude".to_string())
+    } else {
+        (
+            root.join(".claude"),
+            root.join("CLAUDE.md"),
+            ".claude".to_string(),
+        )
+    };
+
+    let hooks_dir = base.join("hooks");
+    let mut removed_hooks = 0;
+    for name in [
+        "marrow-bootstrap.sh",
+        "marrow-guard.sh",
+        "marrow-progress.sh",
+        "marrow-watch.sh",
+        "marrow-distill.sh",
+        "marrow-release.sh",
+    ] {
+        if fs::remove_file(hooks_dir.join(name)).is_ok() {
+            removed_hooks += 1;
+        }
+    }
+    let _ = fs::remove_dir(&hooks_dir);
+    report(out, "hooks", removed_hooks > 0, &format!("{label}/hooks/"));
+
+    let settings = base.join("settings.json");
+    let stripped = fs::read_to_string(&settings)
+        .ok()
+        .and_then(|existing| strip_hooks_from(&existing));
+    match stripped {
+        Some(updated) if updated.trim() == "{}" => {
+            let _ = fs::remove_file(&settings);
+            report(
+                out,
+                "settings",
+                true,
+                &format!("{label}/settings.json (file was ours)"),
+            );
+        }
+        Some(updated) => {
+            fs::write(&settings, updated).map_err(|e| e.to_string())?;
+            report(
+                out,
+                "settings",
+                true,
+                &format!("Marrow hooks out of {label}/settings.json"),
+            );
+        }
+        None => report(
+            out,
+            "settings",
+            false,
+            &format!("Marrow hooks in {label}/settings.json"),
+        ),
+    }
+    let _ = fs::remove_file(base.join("settings.marrow.json"));
+
+    let command_gone = fs::remove_file(base.join("commands/marrow-save.md")).is_ok();
+    let _ = fs::remove_dir(base.join("commands"));
+    report(out, "command", command_gone, "/marrow-save");
+    let _ = fs::remove_file(base.join(".marrow-version"));
+
+    for (path, name) in [
+        (claude_md, "CLAUDE.md"),
+        (root.join("AGENTS.md"), "AGENTS.md"),
+    ] {
+        let cleared = fs::read_to_string(&path)
+            .ok()
+            .and_then(|existing| strip_block(&existing));
+        match cleared {
+            Some(updated) if updated.trim().is_empty() => {
+                let _ = fs::remove_file(&path);
+                report(out, "guidance", true, &format!("{name} (file was ours)"));
+            }
+            Some(updated) => {
+                fs::write(&path, updated).map_err(|e| e.to_string())?;
+                report(out, "guidance", true, name);
+            }
+            None => report(out, "guidance", false, name),
+        }
+    }
+
+    let mut mcp_removed = false;
+    for scope in ["local", "project", "user"] {
+        let mut command = Command::new("claude");
+        command.args(["mcp", "remove", "marrow", "-s", scope]);
+        if let Ok(Some(status)) =
+            command_status_with_timeout(&mut command, Duration::from_millis(1200))
+        {
+            mcp_removed |= status.success();
+        }
+    }
+    report(out, "mcp", mcp_removed, "claude mcp remove marrow");
+
+    let codex_dir = if global {
+        home_dir().map(|h| h.join(".codex"))
+    } else {
+        Some(root.join(".codex"))
+    };
+    let mut codex_removed = false;
+    if let Some(dir) = codex_dir {
+        let config = dir.join("config.toml");
+        if let Ok(existing) = fs::read_to_string(&config) {
+            if let Some(updated) = remove_toml_table(&existing, "mcp_servers.marrow") {
+                if updated.trim().is_empty() {
+                    let _ = fs::remove_file(&config);
+                } else {
+                    fs::write(&config, updated).map_err(|e| e.to_string())?;
+                }
+                codex_removed = true;
+            }
+        }
+    }
+    report(out, "codex mcp", codex_removed, "[mcp_servers.marrow]");
+
+    for dir in [
+        base.join("commands"),
+        base.join("hooks"),
+        base,
+        root.join(".codex"),
+    ] {
+        let _ = fs::remove_dir(dir);
+    }
+
+    let store = root.join(".marrow");
+    if purge {
+        let gone = fs::remove_dir_all(&store).is_ok();
+        report(out, "memories", gone, ".marrow/ (deleted)");
+    } else if store.is_dir() {
+        writeln!(
+            out,
+            "\n  Your memories are untouched in .marrow/. Delete them with `marrow uninstall --purge`,\n  \
+             or just remove the directory yourself."
+        )
+        .ok();
+    }
+
+    writeln!(
+        out,
+        "\nMarrow is unwired. Restart Claude Code to drop the hooks and tools."
+    )
+    .ok();
+    Ok(())
+}
+
+fn report(out: &mut impl Write, what: &str, removed: bool, detail: &str) {
+    let mark = if removed { "removed" } else { "not found" };
+    writeln!(out, "  {what:<11} -> {mark}: {detail}").ok();
+}
+
+/// `None` when unparseable or no Marrow hooks present.
+fn strip_hooks_from(existing: &str) -> Option<String> {
+    use serde_json::Value;
+
+    let mut root: Value = serde_json::from_str(existing).ok()?;
+    let hooks = root.get_mut("hooks")?.as_object_mut()?;
+    let mut changed = false;
+    for groups in hooks.values_mut() {
+        if let Some(arr) = groups.as_array_mut() {
+            let before = arr.len();
+            arr.retain(|g| !is_marrow_group(g));
+            changed |= arr.len() != before;
+        }
+    }
+    hooks.retain(|_, groups| !groups.as_array().is_some_and(|a| a.is_empty()));
+    if !changed {
+        return None;
+    }
+    if let Some(obj) = root.as_object_mut() {
+        if obj
+            .get("hooks")
+            .and_then(|h| h.as_object())
+            .is_some_and(|h| h.is_empty())
+        {
+            obj.remove("hooks");
+        }
+    }
+    serde_json::to_string_pretty(&root).ok()
+}
+
+/// `None` when there is no block.
+fn strip_block(content: &str) -> Option<String> {
+    let start = content.find("<!-- marrow:begin")?;
+    let end_marker = "<!-- marrow:end -->";
+    let end = content[start..].find(end_marker)? + start + end_marker.len();
+    let mut out = String::with_capacity(content.len());
+    out.push_str(content[..start].trim_end());
+    out.push_str(content[end..].trim_end());
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    Some(out)
+}
+
+/// `None` when the table isn't there.
+fn remove_toml_table(content: &str, table: &str) -> Option<String> {
+    let header = format!("[{table}]");
+    let lines: Vec<&str> = content.lines().collect();
+    let start = lines.iter().position(|l| l.trim() == header)?;
+    let end = lines[start + 1..]
+        .iter()
+        .position(|l| l.trim_start().starts_with('['))
+        .map(|i| start + 1 + i)
+        .unwrap_or(lines.len());
+    let mut kept: Vec<&str> = lines[..start].to_vec();
+    kept.extend_from_slice(&lines[end..]);
+    let joined = kept.join("\n");
+    let trimmed = joined.trim();
+    Some(if trimmed.is_empty() {
+        String::new()
+    } else {
+        format!("{trimmed}\n")
+    })
 }
 
 /// If `content` already has a Marrow guidance block, return it with that block replaced by the
@@ -710,6 +1101,155 @@ pub fn upgrade(out: &mut impl Write) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn setup_seeds_a_fresh_store_so_session_one_is_not_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("README.md"),
+            "# Acme API\n\nAn Express service for orders. Talks to Postgres and Stripe, deployed on Fly.\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"acme","scripts":{"test":"vitest","build":"tsc"}}"#,
+        )
+        .unwrap();
+
+        let mut out = Vec::new();
+        install(
+            &root.join(".claude"),
+            &root.join("CLAUDE.md"),
+            Some(root),
+            "",
+            ".claude",
+            "$CLAUDE_PROJECT_DIR/.claude/hooks",
+            &mut out,
+        )
+        .unwrap();
+
+        let store = marrow_store::Store::open(root).unwrap();
+        let topics: Vec<String> = store.list().unwrap().into_iter().map(|r| r.topic).collect();
+        assert!(
+            topics.contains(&"what-this-project-is".to_string()),
+            "{topics:?}"
+        );
+        assert!(topics.contains(&"project-stack".to_string()), "{topics:?}");
+        assert!(
+            topics.contains(&"build-and-test-commands".to_string()),
+            "{topics:?}"
+        );
+
+        let brief = store
+            .bootstrap("add refunds", "default", "test", 1500)
+            .unwrap();
+        assert!(
+            !brief.relevant.is_empty(),
+            "the first session must not open on an empty brain"
+        );
+
+        let before = store.list().unwrap().len();
+        let mut out = Vec::new();
+        install(
+            &root.join(".claude"),
+            &root.join("CLAUDE.md"),
+            Some(root),
+            "",
+            ".claude",
+            "$CLAUDE_PROJECT_DIR/.claude/hooks",
+            &mut out,
+        )
+        .unwrap();
+        assert_eq!(
+            marrow_store::Store::open(root)
+                .unwrap()
+                .list()
+                .unwrap()
+                .len(),
+            before,
+            "re-running setup must not duplicate the seeds"
+        );
+    }
+
+    #[test]
+    fn uninstall_removes_marrow_and_keeps_everything_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let base = root.join(".claude");
+
+        fs::create_dir_all(&base).unwrap();
+        fs::write(
+            base.join("settings.json"),
+            r#"{"model":"opus","hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"my-own-linter"}]}]}}"#,
+        )
+        .unwrap();
+        fs::write(root.join("CLAUDE.md"), "# My Project\n\nMy own notes.\n").unwrap();
+
+        let mut out = Vec::new();
+        install(
+            &base,
+            &root.join("CLAUDE.md"),
+            Some(root),
+            "",
+            ".claude",
+            "$CLAUDE_PROJECT_DIR/.claude/hooks",
+            &mut out,
+        )
+        .unwrap();
+        assert!(base.join("hooks/marrow-guard.sh").exists());
+        assert!(root.join(".marrow").is_dir());
+
+        let mut out = Vec::new();
+        uninstall(root, false, false, &mut out).unwrap();
+
+        assert!(!base.join("hooks/marrow-guard.sh").exists());
+        assert!(!base.join("commands/marrow-save.md").exists());
+        let claude_md = fs::read_to_string(root.join("CLAUDE.md")).unwrap();
+        assert!(!claude_md.contains("marrow:begin"), "{claude_md}");
+
+        assert!(claude_md.contains("My own notes."), "{claude_md}");
+        let settings: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(base.join("settings.json")).unwrap()).unwrap();
+        assert_eq!(settings["model"], "opus", "unrelated settings must survive");
+        assert_eq!(
+            settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"], "my-own-linter",
+            "the user's own hook must survive"
+        );
+
+        assert!(
+            root.join(".marrow").is_dir(),
+            "uninstall must not delete memories"
+        );
+
+        let mut out = Vec::new();
+        uninstall(root, false, false, &mut out).unwrap();
+        assert!(String::from_utf8_lossy(&out).contains("not found"));
+
+        let mut out = Vec::new();
+        uninstall(root, false, true, &mut out).unwrap();
+        assert!(!root.join(".marrow").exists());
+    }
+
+    #[test]
+    fn strip_helpers_only_remove_marrows_own_content() {
+        let only_ours = "<!-- marrow:begin -->\nstuff\n<!-- marrow:end -->\n";
+        assert_eq!(strip_block(only_ours).unwrap().trim(), "");
+        let mixed = "before\n\n<!-- marrow:begin -->\nstuff\n<!-- marrow:end -->\n\nafter\n";
+        let stripped = strip_block(mixed).unwrap();
+        assert!(stripped.contains("before") && stripped.contains("after"));
+        assert!(!stripped.contains("marrow:begin"));
+        assert!(strip_block("just my notes\n").is_none());
+
+        let toml = "[mcp_servers.other]\ncommand = \"x\"\n\n[mcp_servers.marrow]\ncommand = \"marrow-mcp\"\n\n[ui]\ntheme = \"dark\"\n";
+        let out = remove_toml_table(toml, "mcp_servers.marrow").unwrap();
+        assert!(!out.contains("marrow"), "{out}");
+        assert!(
+            out.contains("mcp_servers.other") && out.contains("[ui]"),
+            "{out}"
+        );
+        assert!(remove_toml_table("[ui]\ntheme = \"dark\"\n", "mcp_servers.marrow").is_none());
+    }
 
     #[test]
     fn install_writes_hooks_settings_command_and_guidance() {
