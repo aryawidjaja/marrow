@@ -740,13 +740,28 @@ pub fn uninstall(
     match stripped {
         Some(updated) if updated.trim() == "{}" => {
             let _ = fs::remove_file(&settings);
-            report(out, "settings", true, &format!("{label}/settings.json (file was ours)"));
+            report(
+                out,
+                "settings",
+                true,
+                &format!("{label}/settings.json (file was ours)"),
+            );
         }
         Some(updated) => {
             fs::write(&settings, updated).map_err(|e| e.to_string())?;
-            report(out, "settings", true, &format!("Marrow hooks out of {label}/settings.json"));
+            report(
+                out,
+                "settings",
+                true,
+                &format!("Marrow hooks out of {label}/settings.json"),
+            );
         }
-        None => report(out, "settings", false, &format!("Marrow hooks in {label}/settings.json")),
+        None => report(
+            out,
+            "settings",
+            false,
+            &format!("Marrow hooks in {label}/settings.json"),
+        ),
     }
     let _ = fs::remove_file(base.join("settings.marrow.json"));
 
@@ -808,7 +823,12 @@ pub fn uninstall(
     }
     report(out, "codex mcp", codex_removed, "[mcp_servers.marrow]");
 
-    for dir in [base.join("commands"), base.join("hooks"), base, root.join(".codex")] {
+    for dir in [
+        base.join("commands"),
+        base.join("hooks"),
+        base,
+        root.join(".codex"),
+    ] {
         let _ = fs::remove_dir(dir);
     }
 
